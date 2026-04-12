@@ -1,0 +1,128 @@
+.viewer-placeholder {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--viewer-bg, #040609);
+}
+
+/* Subtle grid */
+.viewer-placeholder::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+  background-size: 52px 52px;
+  opacity: 0.45;
+}
+
+/* Vignette */
+.viewer-placeholder::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, transparent 40%, rgba(4, 6, 9, 0.62) 100%);
+}
+
+/* ── HUD ── */
+.viewer-placeholder__hud {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ── Chips ── */
+.viewer-placeholder__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.viewer-placeholder__chip {
+  padding: 5px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(8, 11, 18, 0.78);
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  backdrop-filter: blur(16px);
+}
+
+.viewer-placeholder__chip--accent {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--text-h);
+}
+
+/* ── Center guidance card ── */
+.viewer-placeholder__overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 1;
+}
+
+.viewer-placeholder__overlay-card {
+  max-width: 300px;
+  padding: 20px 22px;
+  border-radius: 18px;
+  border: 1px solid var(--border-strong);
+  background: rgba(8, 11, 18, 0.80);
+  backdrop-filter: blur(20px);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+
+.viewer-placeholder__overlay-loader {
+  display: grid;
+  place-items: center;
+  margin-bottom: 12px;
+}
+
+.viewer-placeholder__overlay-spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 2px solid rgba(103, 221, 255, 0.18);
+  border-top-color: rgba(103, 221, 255, 0.95);
+  box-shadow: 0 0 0 6px rgba(103, 221, 255, 0.06);
+  animation: viewer-placeholder-spin 700ms linear infinite;
+}
+
+.viewer-placeholder__overlay-kicker {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+
+.viewer-placeholder__overlay-text {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.55;
+}
+
+@keyframes viewer-placeholder-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 900px) {
+  .viewer-placeholder__hud {
+    max-width: calc(100% - 96px);
+  }
+}

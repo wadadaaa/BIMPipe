@@ -1,0 +1,140 @@
+.topbar {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 24px;
+  padding: 0 20px;
+  height: var(--topbar-height);
+  border-bottom: 1px solid var(--border);
+  background: rgba(6, 8, 14, 0.97);
+  backdrop-filter: blur(20px);
+  position: relative;
+  z-index: 10;
+}
+
+/* ── Brand ── */
+.topbar__brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  user-select: none;
+}
+
+.topbar__mark {
+  width: 20px;
+  height: 20px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.topbar__wordmark {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-h);
+}
+
+/* ── Step progress ── */
+.topbar__steps {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+}
+
+.topbar__step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  position: relative;
+}
+
+.topbar__step + .topbar__step::before {
+  content: '';
+  display: block;
+  position: absolute;
+  left: -1px;
+  top: 50%;
+  width: 1px;
+  height: 12px;
+  transform: translateY(-50%);
+  background: var(--border-strong);
+}
+
+.topbar__step-num {
+  font-size: 9px;
+  font-weight: 700;
+  font-family: var(--mono);
+  letter-spacing: 0.06em;
+  color: var(--text-soft);
+  transition: color 150ms;
+}
+
+.topbar__step-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-soft);
+  white-space: nowrap;
+  transition: color 150ms;
+}
+
+/* Done */
+.topbar__step--done .topbar__step-num,
+.topbar__step--done .topbar__step-label {
+  color: var(--text);
+}
+
+.topbar__step--done .topbar__step-num::after {
+  content: ' ✓';
+  font-size: 7px;
+}
+
+/* Active */
+.topbar__step--active {
+  background: rgba(103, 221, 255, 0.07);
+}
+
+.topbar__step--active .topbar__step-num {
+  color: var(--accent);
+}
+
+.topbar__step--active .topbar__step-label {
+  color: var(--text-h);
+  font-weight: 600;
+}
+
+/* ── End slot ── */
+.topbar__end {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.topbar__file {
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+  display: block;
+}
+
+@media (max-width: 900px) {
+  .topbar__steps {
+    display: none;
+  }
+
+  .topbar {
+    grid-template-columns: auto 1fr;
+  }
+}

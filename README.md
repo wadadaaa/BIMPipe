@@ -15,9 +15,22 @@ Current focus:
 * 2D floor viewer
 * fixture detection, especially WC
 * riser suggestion and editing
-* draft route generation
-* validation issues
-* session export
+* IFC export with riser markers
+
+## Current V0 Slice
+
+The first shippable slice in this repo is:
+
+1. upload an IFC file
+2. parse available storeys / floors
+3. select one representative floor
+4. open that floor in a 2D/top-down viewer
+5. detect toilets and kitchen spaces
+6. suggest risers
+7. add, move, or delete risers manually
+8. export an updated IFC with BIMPipe riser proxies
+
+Routes, validation, and manual fixture correction are the next slices after this one.
 
 ## Why single floor first?
 
@@ -38,13 +51,16 @@ In the full product, the same validated workflow should later be applicable to *
 3. Select one floor
 4. Open that floor in a 2D/top-down viewer
 5. Detect fixtures, especially WC
-6. Review and correct fixtures manually if needed
-7. Suggest risers
-8. Add, move, or delete risers manually
-9. Generate draft routes from fixtures to risers
-10. Validate the result
-11. Review issues on the map and in the sidebar
-12. Export the session as JSON
+6. Suggest risers
+7. Add, move, or delete risers manually
+8. Export the updated IFC with riser proxies
+
+Planned next:
+
+* manual fixture correction
+* draft route generation
+* validation issues list and map highlighting
+* session JSON import/export if needed as a separate interchange format
 
 ## Tech stack
 
@@ -127,9 +143,7 @@ docs/plans/bimpipe-mvp-plan.md
 3. single-floor top-down viewer
 4. fixture detection
 5. riser suggestion and editing
-6. draft routing
-7. validation
-8. export
+6. export
 
 ## Testing strategy
 
@@ -174,7 +188,7 @@ For geometry-heavy workflows:
 
 * one-floor workflow
 * representative typical floor
-* exportable session result
+* exportable IFC with placed risers
 
 ### Post-MVP
 
@@ -182,6 +196,6 @@ For geometry-heavy workflows:
 * identify exception floors
 * improve fixture coverage beyond WC
 * stronger routing and validation logic
+* session JSON interchange if needed
 * Revit integration
-
 
