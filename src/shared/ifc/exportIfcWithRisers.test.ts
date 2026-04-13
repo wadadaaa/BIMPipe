@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { exportIfcWithRisers } from './exportIfcWithRisers'
 import type { Riser } from '@/domain/types'
-import type { IfcAPI } from 'web-ifc'
+import type { IfcAPI, RawLineData } from 'web-ifc'
 
 vi.mock('web-ifc', () => ({
   IFCAXIS2PLACEMENT3D: 1,
@@ -10,6 +10,8 @@ vi.mock('web-ifc', () => ({
   IFCIDENTIFIER: 4,
   IFCLABEL: 5,
   IFCLOCALPLACEMENT: 6,
+  IFCPROJECT: 8,
+  IFCRELAGGREGATES: 9,
   IFCRELCONTAINEDINSPATIALSTRUCTURE: 7,
 }))
 
@@ -21,23 +23,76 @@ function makeIdVector(values: number[]) {
 }
 
 describe('exportIfcWithRisers', () => {
-  it('preserves stable stack labels instead of renumbering risers per storey', async () => {
-    const containmentById = new Map([
-      [201, { expressID: 201, type: 7, RelatedElements: [], RelatingStructure: { type: 5, value: 2 } }],
-      [202, { expressID: 202, type: 7, RelatedElements: [], RelatingStructure: { type: 5, value: 3 } }],
+  it('creates a new plumbing-only IFC seeded from the source spatial context and preserves stack labels', async () => {
+    const sourceModelId = 77
+    const plumbingModelId = 88
+    const rawLines = new Map<number, RawLineData>([
+      [1, {
+        ID: 1,
+        type: 8,
+        arguments: [
+          { type: 1, value: 'guid-project' },
+          null,
+          { type: 1, value: 'Source Project' },
+          null,
+          null,
+          null,
+          [{ type: 5, value: 501 }],
+          { type: 5, value: 601 },
+        ],
+      }],
+      [2, {
+        ID: 2,
+        type: 100,
+        arguments: [
+          { type: 1, value: 'guid-storey-2' },
+          { type: 5, value: 99 },
+          { type: 1, value: 'Level 2' },
+          null,
+          null,
+          { type: 5, value: 701 },
+        ],
+      }],
+      [3, {
+        ID: 3,
+        type: 100,
+        arguments: [
+          { type: 1, value: 'guid-storey-3' },
+          { type: 5, value: 99 },
+          { type: 1, value: 'Level 3' },
+          null,
+          null,
+          { type: 5, value: 702 },
+        ],
+      }],
+      [9, {
+        ID: 9,
+        type: 9,
+        arguments: [
+          { type: 1, value: 'guid-rel' },
+          null,
+          { type: 1, value: 'Project decomposition' },
+          null,
+          { type: 5, value: 1 },
+          [{ type: 5, value: 2 }, { type: 5, value: 3 }],
+        ],
+      }],
+      [99, { ID: 99, type: 200, arguments: [] }],
+      [501, { ID: 501, type: 201, arguments: [] }],
+      [601, { ID: 601, type: 202, arguments: [] }],
+      [701, { ID: 701, type: 203, arguments: [] }],
+      [702, { ID: 702, type: 203, arguments: [] }],
     ])
 
     const api = {
-      OpenModel: vi.fn(() => 77),
+      OpenModel: vi.fn(() => sourceModelId),
+      CreateModel: vi.fn(() => plumbingModelId),
       CloseModel: vi.fn(),
       GetModelSchema: vi.fn(() => 'IFC4'),
+      GetRawLineData: vi.fn((_modelId: number, expressId: number) => rawLines.get(expressId)!),
+      WriteRawLineData: vi.fn(),
       SaveModel: vi.fn(() => new Uint8Array([9, 8, 7])),
-      CreateIFCGloballyUniqueId: vi
-        .fn()
-        .mockReturnValueOnce('guid-1')
-        .mockReturnValueOnce('guid-2')
-        .mockReturnValueOnce('guid-3')
-        .mockReturnValueOnce('guid-4'),
+      CreateIFCGloballyUniqueId: vi.fn(() => 'guid-new'),
       CreateIfcType: vi.fn((modelId: number, type: number, value: string) => ({
         modelId,
         type,
@@ -49,13 +104,23 @@ describe('exportIfcWithRisers', () => {
         args,
       })),
       WriteLine: vi.fn(),
-      GetLineIDsWithType: vi.fn((_modelId: number, type: number) => {
-        if (type === 7) return makeIdVector([201, 202])
+      GetLineIDsWithType: vi.fn((modelId: number, type: number) => {
+        if (modelId === sourceModelId && type === 9) return makeIdVector([9])
+        if (modelId === sourceModelId && type === 8) return makeIdVector([1])
+        if (modelId === plumbingModelId && type === 7) return makeIdVector([])
         return makeIdVector([])
       }),
-      GetLine: vi.fn((_modelId: number, expressId: number) => {
-        if (expressId === 2) return { OwnerHistory: { type: 5, value: 99 } }
-        return containmentById.get(expressId) ?? null
+      GetLine: vi.fn((modelId: number, expressId: number) => {
+        if (modelId === sourceModelId && expressId === 9) {
+          return {
+            RelatingObject: { type: 5, value: 1 },
+            RelatedObjects: [{ type: 5, value: 2 }, { type: 5, value: 3 }],
+          }
+        }
+        if (modelId === plumbingModelId && (expressId === 2 || expressId === 3)) {
+          return { OwnerHistory: { type: 5, value: 99 } }
+        }
+        return null
       }),
     } as unknown as IfcAPI
 
@@ -69,13 +134,26 @@ describe('exportIfcWithRisers', () => {
     const result = await exportIfcWithRisers(api, new Uint8Array([1, 2, 3]), 2, risers)
 
     expect(result).toEqual(new Uint8Array([9, 8, 7]))
+    expect(api.CreateModel).toHaveBeenCalledWith({
+      schema: 'IFC4',
+      name: 'BIMPipe Plumbing',
+      description: ['Plumbing-only IFC generated from BIMPipe riser layout'],
+      authors: ['BIMPipe'],
+      organizations: ['BIMPipe'],
+      authorization: 'Generated by BIMPipe',
+    })
+
+    const copiedLineIds = (api.WriteRawLineData as ReturnType<typeof vi.fn>).mock.calls
+      .map((call) => call[1].ID)
+      .sort((left, right) => left - right)
+    expect(copiedLineIds).toEqual([1, 2, 3, 9, 99, 501, 601, 701, 702])
 
     const identifierValues = (api.CreateIfcType as ReturnType<typeof vi.fn>).mock.calls
       .filter((call) => call[1] === 4)
       .map((call) => call[2])
 
     expect(identifierValues).toEqual(['R12', 'R7', 'R12', 'R7'])
-    expect(identifierValues).not.toContain('R1')
-    expect(identifierValues).not.toContain('R2')
+    expect(api.CloseModel).toHaveBeenCalledWith(plumbingModelId)
+    expect(api.CloseModel).toHaveBeenCalledWith(sourceModelId)
   })
 })

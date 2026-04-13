@@ -19,9 +19,10 @@ interface SidebarProps {
   onToggleAddRiser?: () => void
   onSuggestRisers?: () => void
   onRemoveRiser?: (id: RiserId) => void
-  isDownloadingIfc?: boolean
+  downloadMode?: 'plumbing' | 'full' | null
   downloadError?: string | null
-  onDownloadIfc?: () => void
+  onDownloadPlumbingIfc?: () => void
+  onDownloadFullIfc?: () => void
 }
 
 const TABS: { id: SidebarTab; label: string; focus: string; hint: string }[] = [
@@ -35,7 +36,7 @@ const TABS: { id: SidebarTab; label: string; focus: string; hint: string }[] = [
     id: 'risers',
     label: 'Risers',
     focus: 'Riser layout',
-    hint: 'Blue pins are suggested risers. One is proposed per toilet and one in an outer kitchen corner. Drag pins on the plan before downloading the IFC.',
+    hint: 'Blue pins are suggested risers. One is proposed per toilet and one in an outer kitchen corner. Drag pins on the plan before downloading either the plumbing-only or full IFC.',
   },
 ]
 
@@ -53,9 +54,10 @@ export function Sidebar({
   onToggleAddRiser = () => {},
   onSuggestRisers = () => {},
   onRemoveRiser = () => {},
-  isDownloadingIfc = false,
+  downloadMode = null,
   downloadError = null,
-  onDownloadIfc = () => {},
+  onDownloadPlumbingIfc = () => {},
+  onDownloadFullIfc = () => {},
 }: SidebarProps) {
   const activeTabMeta = TABS.find((tab) => tab.id === activeTab)!
   const riserPanelKey = risers.map((riser) => riser.id).join(':') || 'empty'
@@ -145,9 +147,10 @@ export function Sidebar({
                 onToggleAddMode={onToggleAddRiser}
                 onSuggestRisers={onSuggestRisers}
                 onRemove={onRemoveRiser}
-                isDownloadingIfc={isDownloadingIfc}
+                downloadMode={downloadMode}
                 downloadError={downloadError}
-                onDownloadIfc={onDownloadIfc}
+                onDownloadPlumbingIfc={onDownloadPlumbingIfc}
+                onDownloadFullIfc={onDownloadFullIfc}
               />
             )}
           </section>

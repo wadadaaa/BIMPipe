@@ -29,6 +29,7 @@ interface FloorViewerProps {
   onFixtureAdd?: (pos: { x: number; y: number; z: number }) => void
   onRiserAdd?: (pos: { x: number; y: number; z: number }) => void
   onRiserMove?: (id: RiserId, pos: { x: number; y: number; z: number }) => void
+  onSwitch3D?: () => void
 }
 
 export function FloorViewer({
@@ -51,6 +52,7 @@ export function FloorViewer({
   onFixtureAdd = () => {},
   onRiserAdd = () => {},
   onRiserMove = () => {},
+  onSwitch3D,
 }: FloorViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
@@ -676,16 +678,27 @@ export function FloorViewer({
         </div>
       )}
 
-      {floorMeshes && (
+      {(floorMeshes || onSwitch3D) && (
         <div className="floor-viewer__toolbar">
-          <button
-            className="floor-viewer__btn"
-            title="Reset view"
-            aria-label="Reset view"
-            onClick={handleResetView}
-          >
-            Fit
-          </button>
+          {floorMeshes && (
+            <button
+              className="floor-viewer__btn"
+              title="Reset view"
+              aria-label="Reset view"
+              onClick={handleResetView}
+            >
+              Fit
+            </button>
+          )}
+          {onSwitch3D && (
+            <button
+              className="floor-viewer__btn"
+              title="Show all floors with risers"
+              onClick={onSwitch3D}
+            >
+              3D
+            </button>
+          )}
         </div>
       )}
     </div>

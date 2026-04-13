@@ -72,7 +72,13 @@
   line-height: 1.55;
 }
 
-/* ── Download IFC — primary CTA ── */
+/* ── Download actions ── */
+.risers-panel__download-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .risers-panel__download-btn {
   width: 100%;
   padding: 13px 16px;
@@ -94,6 +100,17 @@
 .risers-panel__download-btn:hover:not(:disabled) {
   background: rgba(92, 224, 196, 0.18);
   border-color: rgba(92, 224, 196, 0.48);
+}
+
+.risers-panel__download-btn--secondary {
+  border-color: var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-h);
+}
+
+.risers-panel__download-btn--secondary:hover:not(:disabled) {
+  background: var(--hover-bg);
+  border-color: var(--accent-border);
 }
 
 .risers-panel__download-btn:disabled {

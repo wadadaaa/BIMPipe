@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   detectFixtures: vi.fn(),
   detectKitchens: vi.fn(),
   exportIfcWithRisers: vi.fn(),
+  exportFullIfcWithRisers: vi.fn(),
 }))
 
 vi.mock('@/shared/ifc/ifcApi', () => ({
@@ -34,6 +35,10 @@ vi.mock('@/shared/ifc/detectKitchens', () => ({
 
 vi.mock('@/shared/ifc/exportIfcWithRisers', () => ({
   exportIfcWithRisers: mocks.exportIfcWithRisers,
+}))
+
+vi.mock('@/shared/ifc/exportFullIfcWithRisers', () => ({
+  exportFullIfcWithRisers: mocks.exportFullIfcWithRisers,
 }))
 
 vi.mock('@/viewer/FloorViewer', () => ({
@@ -81,8 +86,9 @@ describe('WorkspacePage', () => {
 
     mocks.getIfcApi.mockResolvedValue(api)
     mocks.parseStoreys.mockResolvedValue([
-      { id: 2, name: 'Level 2', elevation: 612, modelId: 'model-1' },
-      { id: 3, name: 'Level 3', elevation: 918, modelId: 'model-1' },
+      { id: 102, name: 'מרתף 2', elevation: -600, modelId: 'model-1' },
+      { id: 2, name: 'קומה 2', elevation: 612, modelId: 'model-1' },
+      { id: 3, name: 'קומה 3', elevation: 918, modelId: 'model-1' },
     ])
     mocks.extractFloorMeshes.mockResolvedValue({
       group: null,
@@ -112,6 +118,7 @@ describe('WorkspacePage', () => {
       },
     ])
     mocks.exportIfcWithRisers.mockResolvedValue(new Uint8Array([5, 4, 3]))
+    mocks.exportFullIfcWithRisers.mockResolvedValue(new Uint8Array([8, 7, 6]))
   })
 
   afterEach(() => {
@@ -126,9 +133,10 @@ describe('WorkspacePage', () => {
     mocks.detectFixtures.mockReset()
     mocks.detectKitchens.mockReset()
     mocks.exportIfcWithRisers.mockReset()
+    mocks.exportFullIfcWithRisers.mockReset()
   })
 
-  it('supports upload, floor open, riser deletion, and IFC export in the first V0 slice', async () => {
+  it('auto-opens קומה 2 instead of מרתף 2 after upload and supports riser deletion and IFC export', async () => {
     const user = userEvent.setup()
     render(<WorkspacePage />)
 
@@ -136,8 +144,11 @@ describe('WorkspacePage', () => {
     expect(input).not.toBeNull()
     await user.upload(input!, new File([new ArrayBuffer(128)], 'tower.ifc'))
 
-    const levelTwoButton = await screen.findByRole('button', { name: /level 2/i })
-    await user.click(levelTwoButton)
+    const levelTwoButton = await screen.findByRole('button', { name: /קומה 2/i })
+    await waitFor(() => {
+      expect(levelTwoButton).toHaveClass('storey-list__item--selected')
+    })
+    expect(mocks.extractFloorMeshes).toHaveBeenCalledWith(expect.anything(), 101, 2)
 
     await screen.findByLabelText('Remove riser R1')
     await screen.findByLabelText('Remove riser R2')
@@ -155,7 +166,7 @@ describe('WorkspacePage', () => {
     expect(screen.getByLabelText('Remove riser R1')).toBeInTheDocument()
     expect(screen.getByLabelText('Remove riser R3')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: /download ifc/i }))
+    await user.click(screen.getByRole('button', { name: /download plumbing ifc/i }))
 
     await waitFor(() => {
       expect(mocks.exportIfcWithRisers).toHaveBeenCalledTimes(1)
@@ -165,10 +176,50 @@ describe('WorkspacePage', () => {
     expect(api).toMatchObject({ OpenModel: expect.any(Function), CloseModel: expect.any(Function) })
     expect(sourceBytes).toBeInstanceOf(Uint8Array)
     expect(primaryStoreyId).toBe(2)
-    expect(risers).toHaveLength(4)
+    expect(risers).toHaveLength(6)
     expect(new Set(risers.map((riser: { stackLabel: string }) => riser.stackLabel))).toEqual(
       new Set(['R1', 'R3']),
     )
     expect(anchorClick).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a separate full IFC download option', async () => {
+    const user = userEvent.setup()
+    render(<WorkspacePage />)
+
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]')
+    expect(input).not.toBeNull()
+    await user.upload(input!, new File([new ArrayBuffer(128)], 'tower.ifc'))
+
+    await screen.findByLabelText('Remove riser R1')
+
+    await user.click(screen.getByRole('button', { name: /download full ifc/i }))
+
+    await waitFor(() => {
+      expect(mocks.exportFullIfcWithRisers).toHaveBeenCalledTimes(1)
+    })
+    expect(mocks.exportIfcWithRisers).not.toHaveBeenCalled()
+  })
+
+  it('does not auto-open negative floor labels like קומה -2 when there is no above-ground floor 2', async () => {
+    mocks.parseStoreys.mockResolvedValueOnce([
+      { id: 102, name: 'קומה -2', elevation: -600, modelId: 'model-1' },
+      { id: 3, name: 'קומה 3', elevation: 918, modelId: 'model-1' },
+    ])
+
+    const user = userEvent.setup()
+    render(<WorkspacePage />)
+
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]')
+    expect(input).not.toBeNull()
+    await user.upload(input!, new File([new ArrayBuffer(128)], 'tower.ifc'))
+
+    await screen.findByRole('button', { name: /קומה -2/i })
+    await screen.findByRole('button', { name: /קומה 3/i })
+
+    await waitFor(() => {
+      expect(mocks.extractFloorMeshes).not.toHaveBeenCalled()
+    })
+    expect(screen.getByText(/no active floor/i)).toBeInTheDocument()
   })
 })

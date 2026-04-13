@@ -14,6 +14,7 @@ import { buildRiserStack, removeRiserStack } from '@/shared/routes/buildRiserSta
 import { suggestRiserPositions } from '@/shared/routes/suggestRisers'
 
 let floorViewerModulePromise: Promise<typeof import('@/viewer/FloorViewer')> | null = null
+let model3DViewerModulePromise: Promise<typeof import('@/viewer/Model3DViewer')> | null = null
 let floorSelectionModulesPromise: Promise<
   [
     typeof import('@/shared/ifc/extractFloorMeshes'),
@@ -25,6 +26,11 @@ let floorSelectionModulesPromise: Promise<
 function loadFloorViewerModule() {
   floorViewerModulePromise ??= import('@/viewer/FloorViewer')
   return floorViewerModulePromise
+}
+
+function loadModel3DViewerModule() {
+  model3DViewerModulePromise ??= import('@/viewer/Model3DViewer')
+  return model3DViewerModulePromise
 }
 
 function loadFloorSelectionModules() {
@@ -54,9 +60,16 @@ const FloorViewer = lazy(async () => {
   return { default: mod.FloorViewer }
 })
 
+const Model3DViewer = lazy(async () => {
+  const mod = await loadModel3DViewerModule()
+  return { default: mod.Model3DViewer }
+})
+
+
 export function WorkspacePage() {
   // --- file / model ---
   const webIfcModelIdRef = useRef<number | null>(null)
+  const [webIfcModelId, setWebIfcModelId] = useState<number | null>(null)
   const sourceIfcBytesRef = useRef<Uint8Array | null>(null)
   const nextRiserLabelRef = useRef(1)
   const [modelFileName, setModelFileName] = useState<string | null>(null)
@@ -84,11 +97,14 @@ export function WorkspacePage() {
   // --- risers ---
   const [risers, setRisers] = useState<Riser[]>([])
   const [isAddingRiser, setIsAddingRiser] = useState(false)
-  const [isDownloadingIfc, setIsDownloadingIfc] = useState(false)
+  const [downloadMode, setDownloadMode] = useState<'plumbing' | 'full' | null>(null)
   const [downloadError, setDownloadError] = useState<string | null>(null)
 
   // --- sidebar ---
   const [activeTab, setActiveTab] = useState<SidebarTab>('risers')
+
+  // --- view mode ---
+  const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d')
 
   // ---------------------------------------------------------------------------
 
@@ -121,6 +137,8 @@ export function WorkspacePage() {
       setIsAddingRiser(false)
       setActiveTab('risers')
       setDownloadError(null)
+      setViewMode('2d')
+      setWebIfcModelId(null)
     })
 
     try {
@@ -136,15 +154,20 @@ export function WorkspacePage() {
 
       const data = new Uint8Array(buffer)
       sourceIfcBytesRef.current = data.slice()
-      const webIfcModelId = api.OpenModel(data)
-      webIfcModelIdRef.current = webIfcModelId
+      const newModelId = api.OpenModel(data)
+      webIfcModelIdRef.current = newModelId
+      setWebIfcModelId(newModelId)
 
       const domainModelId = crypto.randomUUID()
-      const parsed = await parseStoreys(api, webIfcModelId, domainModelId)
+      const parsed = await parseStoreys(api, newModelId, domainModelId)
       startTransition(() => {
         setStoreys(parsed)
       })
       preloadFloorInspectionModules()
+      const defaultStoreyId = findDefaultStoreyId(parsed)
+      if (defaultStoreyId !== null) {
+        void openStorey(defaultStoreyId, parsed)
+      }
     } catch (err) {
       setUploadError(
         err instanceof Error ? err.message : 'Failed to parse IFC file.',
@@ -154,9 +177,9 @@ export function WorkspacePage() {
     }
   }
 
-  async function handleStoreySelect(id: StoreyId) {
-    const webIfcModelId = webIfcModelIdRef.current
-    if (webIfcModelId === null) return
+  async function openStorey(id: StoreyId, availableStoreys: Storey[] = storeys) {
+    const modelId = webIfcModelIdRef.current
+    if (modelId === null) return
 
     // Keep the "opening floor" feedback urgent so the loader paints before IFC work begins.
     setSelectedStoreyId(id)
@@ -181,7 +204,7 @@ export function WorkspacePage() {
         getIfcApi(),
       ])
 
-      const meshes = await extractFloorMeshes(api, webIfcModelId, id)
+      const meshes = await extractFloorMeshes(api, modelId, id)
       startTransition(() => {
         setFloorMeshes(meshes)
         setIsExtractingGeometry(false)
@@ -189,8 +212,8 @@ export function WorkspacePage() {
 
       try {
         const [detectedFixtures, detectedKitchens] = await Promise.allSettled([
-          detectFixtures(api, webIfcModelId, id),
-          detectKitchens(api, webIfcModelId, id),
+          detectFixtures(api, modelId, id),
+          detectKitchens(api, modelId, id),
         ])
 
         const fixturesResult =
@@ -207,7 +230,7 @@ export function WorkspacePage() {
             if (prev.length > 0) return prev
             nextRiserLabelRef.current = 1
             return buildSuggestedRisers(
-              storeys,
+              availableStoreys,
               id,
               toiletFixtures,
               kitchensResult,
@@ -231,6 +254,10 @@ export function WorkspacePage() {
         setIsDetectingFixtures(false)
       })
     }
+  }
+
+  async function handleStoreySelect(id: StoreyId) {
+    await openStorey(id)
   }
 
   // --- riser handlers ---
@@ -288,7 +315,7 @@ export function WorkspacePage() {
     })
   }
 
-  async function handleDownloadIfc() {
+  async function handleDownloadIfc(mode: 'plumbing' | 'full') {
     if (
       sourceIfcBytesRef.current === null ||
       selectedStoreyId === null ||
@@ -298,29 +325,39 @@ export function WorkspacePage() {
       return
     }
 
-    setIsDownloadingIfc(true)
+    setDownloadMode(mode)
     setDownloadError(null)
 
     try {
       const api = await getIfcApi()
-      const { exportIfcWithRisers } = await import('@/shared/ifc/exportIfcWithRisers')
-      const exportedBytes = await exportIfcWithRisers(
-        api,
-        sourceIfcBytesRef.current,
-        selectedStoreyId,
-        risers,
-      )
+      const exportedBytes = mode === 'plumbing'
+        ? await (await import('@/shared/ifc/exportIfcWithRisers')).exportIfcWithRisers(
+            api,
+            sourceIfcBytesRef.current,
+            selectedStoreyId,
+            risers,
+          )
+        : await (await import('@/shared/ifc/exportFullIfcWithRisers')).exportFullIfcWithRisers(
+            api,
+            sourceIfcBytesRef.current,
+            selectedStoreyId,
+            risers,
+          )
 
       downloadBinary(
         exportedBytes,
-        buildExportFileName(modelFileName, selectedStorey?.name ?? null),
+        buildExportFileName(modelFileName, selectedStorey?.name ?? null, mode),
       )
     } catch (err) {
       setDownloadError(
-        err instanceof Error ? err.message : 'Failed to generate the IFC download.',
+        err instanceof Error
+          ? err.message
+          : mode === 'plumbing'
+            ? 'Failed to generate the plumbing-only IFC.'
+            : 'Failed to generate the full IFC.',
       )
     } finally {
-      setIsDownloadingIfc(false)
+      setDownloadMode(null)
     }
   }
 
@@ -376,39 +413,52 @@ export function WorkspacePage() {
     </>
   )
 
-  const centerPanel = (
-    shouldLoadViewer ? (
-      <Suspense
-        fallback={
-          <ViewTransition exit="slide-down" default="none">
-            {viewerFallback}
-          </ViewTransition>
-        }
-      >
-        <ViewTransition enter="slide-up" default="none">
-          <FloorViewer
-            floorMeshes={floorMeshes}
-            isLoading={isExtractingGeometry}
-            error={geometryError}
-            onObjectHover={setHoveredExpressId}
-            onObjectSelect={setSelectedExpressId}
-            modelFileName={modelFileName}
-            selectedStoreyElevation={selectedStorey?.elevation ?? null}
-            storeyCount={storeys.length}
-            hoveredExpressId={hoveredExpressId}
-            selectedExpressId={selectedExpressId}
-            fixtures={viewerFixtures}
-            kitchens={viewerKitchens}
-            risers={viewerRisers}
-            isAddingRiser={isAddingRiser}
-            onRiserAdd={handleAddRiser}
-            onRiserMove={handleMoveRiser}
-          />
+  function handleSwitch3D() {
+    void loadModel3DViewerModule()
+    setViewMode('3d')
+  }
+
+  const centerPanel = viewMode === '3d' && webIfcModelId !== null ? (
+    <Suspense fallback={viewerFallback}>
+      <Model3DViewer
+        webIfcModelId={webIfcModelId}
+        storeys={storeys}
+        risers={risers}
+        onSwitch2D={() => setViewMode('2d')}
+      />
+    </Suspense>
+  ) : shouldLoadViewer ? (
+    <Suspense
+      fallback={
+        <ViewTransition exit="slide-down" default="none">
+          {viewerFallback}
         </ViewTransition>
-      </Suspense>
-    ) : (
-      viewerFallback
-    )
+      }
+    >
+      <ViewTransition enter="slide-up" default="none">
+        <FloorViewer
+          floorMeshes={floorMeshes}
+          isLoading={isExtractingGeometry}
+          error={geometryError}
+          onObjectHover={setHoveredExpressId}
+          onObjectSelect={setSelectedExpressId}
+          modelFileName={modelFileName}
+          selectedStoreyElevation={selectedStorey?.elevation ?? null}
+          storeyCount={storeys.length}
+          hoveredExpressId={hoveredExpressId}
+          selectedExpressId={selectedExpressId}
+          fixtures={viewerFixtures}
+          kitchens={viewerKitchens}
+          risers={viewerRisers}
+          isAddingRiser={isAddingRiser}
+          onRiserAdd={handleAddRiser}
+          onRiserMove={handleMoveRiser}
+          onSwitch3D={storeys.length > 0 ? handleSwitch3D : undefined}
+        />
+      </ViewTransition>
+    </Suspense>
+  ) : (
+    viewerFallback
   )
 
   const rightPanel = (
@@ -426,9 +476,10 @@ export function WorkspacePage() {
       onToggleAddRiser={handleToggleAddRiser}
       onSuggestRisers={handleSuggestRisers}
       onRemoveRiser={handleRemoveRiser}
-      isDownloadingIfc={isDownloadingIfc}
+      downloadMode={downloadMode}
       downloadError={downloadError}
-      onDownloadIfc={handleDownloadIfc}
+      onDownloadPlumbingIfc={() => void handleDownloadIfc('plumbing')}
+      onDownloadFullIfc={() => void handleDownloadIfc('full')}
     />
   )
 
@@ -528,13 +579,19 @@ function ensureRiserStackLabels(
   return changed ? normalized : risers
 }
 
-function buildExportFileName(fileName: string, storeyName: string | null): string {
+function buildExportFileName(
+  fileName: string,
+  storeyName: string | null,
+  mode: 'plumbing' | 'full',
+): string {
   const baseName = fileName.replace(/\.ifc$/i, '')
   const storeySegment = storeyName
     ? `-${storeyName.trim().replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase()}`
     : ''
 
-  return `${baseName}${storeySegment}-risers.ifc`
+  return mode === 'plumbing'
+    ? `${baseName}${storeySegment}-plumbing.ifc`
+    : `${baseName}${storeySegment}-full.ifc`
 }
 
 function downloadBinary(bytes: Uint8Array, fileName: string) {
@@ -547,4 +604,48 @@ function downloadBinary(bytes: Uint8Array, fileName: string) {
   link.download = fileName
   link.click()
   URL.revokeObjectURL(url)
+}
+
+function findDefaultStoreyId(storeys: Storey[]): StoreyId | null {
+  const preferredStorey = storeys
+    .map((storey) => ({
+      storey,
+      score: getSecondFloorMatchScore(storey),
+    }))
+    .filter((candidate): candidate is { storey: Storey; score: number } => candidate.score !== null)
+    .sort((left, right) => {
+      if (left.score !== right.score) return right.score - left.score
+      return left.storey.elevation - right.storey.elevation
+    })[0]?.storey
+
+  return preferredStorey?.id ?? null
+}
+
+function getSecondFloorMatchScore(storey: Storey): number | null {
+  const normalizedName = storey.name.trim().toLowerCase()
+  const numericTokens = extractSignedNumericTokens(normalizedName)
+  const hasTwoToken = numericTokens.some((token) => token === 2)
+
+  if (!hasTwoToken) return null
+  if (isBasementStoreyName(normalizedName)) return null
+
+  let score = storey.elevation >= 0 ? 1 : 0
+  if (hasAboveGroundFloorKeyword(normalizedName)) score += 3
+  else score += 2
+
+  return score
+}
+
+function isBasementStoreyName(name: string): boolean {
+  return /מרתף|basement|cellar|\bb\s*0*\d+\b|[-−]\s*0*\d+\b/i.test(name)
+}
+
+function hasAboveGroundFloorKeyword(name: string): boolean {
+  return /קומה|מפלס|level|floor|storey|story/i.test(name)
+}
+
+function extractSignedNumericTokens(name: string): number[] {
+  return (name.match(/[-−]?\s*\d+/g) ?? [])
+    .map((token) => Number(token.replace(/\s+/g, '').replace('−', '-')))
+    .filter((value) => Number.isFinite(value))
 }

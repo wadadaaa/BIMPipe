@@ -9,9 +9,10 @@ interface RisersPanelProps {
   onToggleAddMode: () => void
   onSuggestRisers: () => void
   onRemove: (id: RiserId) => void
-  isDownloadingIfc?: boolean
+  downloadMode?: 'plumbing' | 'full' | null
   downloadError?: string | null
-  onDownloadIfc?: () => void
+  onDownloadPlumbingIfc?: () => void
+  onDownloadFullIfc?: () => void
 }
 
 export function RisersPanel({
@@ -22,14 +23,17 @@ export function RisersPanel({
   onToggleAddMode,
   onSuggestRisers,
   onRemove,
-  isDownloadingIfc = false,
+  downloadMode = null,
   downloadError = null,
-  onDownloadIfc = () => {},
+  onDownloadPlumbingIfc = () => {},
+  onDownloadFullIfc = () => {},
 }: RisersPanelProps) {
   const canSuggest =
     fixtures.some((fixture) => fixture.position !== null) ||
     kitchens.some((kitchen) => kitchen.position !== null)
   const canDownload = risers.length > 0
+  const isDownloadingPlumbingIfc = downloadMode === 'plumbing'
+  const isDownloadingFullIfc = downloadMode === 'full'
 
   return (
     <div className="risers-panel">
@@ -63,13 +67,22 @@ export function RisersPanel({
         <p className="risers-panel__hint">Click on the floor plan to place a riser, then drag it to the exact corner if needed.</p>
       )}
 
-      <button
-        className="risers-panel__download-btn"
-        onClick={onDownloadIfc}
-        disabled={!canDownload || isDownloadingIfc}
-      >
-        {isDownloadingIfc ? 'Preparing IFC...' : 'Download IFC'}
-      </button>
+      <div className="risers-panel__download-actions">
+        <button
+          className="risers-panel__download-btn"
+          onClick={onDownloadPlumbingIfc}
+          disabled={!canDownload || downloadMode !== null}
+        >
+          {isDownloadingPlumbingIfc ? 'Preparing Plumbing IFC...' : 'Download Plumbing IFC'}
+        </button>
+        <button
+          className="risers-panel__download-btn risers-panel__download-btn--secondary"
+          onClick={onDownloadFullIfc}
+          disabled={!canDownload || downloadMode !== null}
+        >
+          {isDownloadingFullIfc ? 'Preparing Full IFC...' : 'Download Full IFC'}
+        </button>
+      </div>
 
       {downloadError && (
         <p className="risers-panel__error" role="alert">
