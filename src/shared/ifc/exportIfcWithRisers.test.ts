@@ -13,6 +13,8 @@ vi.mock('web-ifc', () => ({
   IFCPROJECT: 8,
   IFCRELAGGREGATES: 9,
   IFCRELCONTAINEDINSPATIALSTRUCTURE: 7,
+  IFCLENGTHMEASURE: 10,
+  IFCTEXT: 11,
 }))
 
 function makeIdVector(values: number[]) {
@@ -90,7 +92,11 @@ describe('exportIfcWithRisers', () => {
       CloseModel: vi.fn(),
       GetModelSchema: vi.fn(() => 'IFC4'),
       GetRawLineData: vi.fn((_modelId: number, expressId: number) => rawLines.get(expressId)!),
-      WriteRawLineData: vi.fn(),
+      WriteRawLineData: vi.fn((_modelId: number, rawLine: RawLineData) => {
+        if (rawLine.ID === 701) {
+          throw new Error('Unserializable raw line')
+        }
+      }),
       SaveModel: vi.fn(() => new Uint8Array([9, 8, 7])),
       CreateIFCGloballyUniqueId: vi.fn(() => 'guid-new'),
       CreateIfcType: vi.fn((modelId: number, type: number, value: string) => ({
@@ -117,7 +123,7 @@ describe('exportIfcWithRisers', () => {
             RelatedObjects: [{ type: 5, value: 2 }, { type: 5, value: 3 }],
           }
         }
-        if (modelId === plumbingModelId && (expressId === 2 || expressId === 3)) {
+        if (modelId === sourceModelId && (expressId === 2 || expressId === 3)) {
           return { OwnerHistory: { type: 5, value: 99 } }
         }
         return null
@@ -153,6 +159,35 @@ describe('exportIfcWithRisers', () => {
       .map((call) => call[2])
 
     expect(identifierValues).toEqual(['R12', 'R7', 'R12', 'R7'])
+    const localPlacementCalls = (api.CreateIfcEntity as ReturnType<typeof vi.fn>).mock.calls
+      .filter((call) => call[1] === 6)
+    expect(localPlacementCalls).toHaveLength(4)
+    expect(localPlacementCalls[0][3]).toMatchObject({ type: 1 })
+
+    const riserEntityCalls = (api.CreateIfcEntity as ReturnType<typeof vi.fn>).mock.calls
+      .filter((call) => call[1] === 2)
+    expect(riserEntityCalls).toHaveLength(4)
+    expect(riserEntityCalls[0][7]).toMatchObject({ type: 6 })
+
+    const lengthMeasureValues = (api.CreateIfcType as ReturnType<typeof vi.fn>).mock.calls
+      .filter((call) => call[1] === 10)
+      .map((call) => call[2])
+    expect(lengthMeasureValues).toEqual([
+      10, 612, 20,
+      30, 612, 40,
+      10, 918, 20,
+      30, 918, 40,
+    ])
+
+    const textValues = (api.CreateIfcType as ReturnType<typeof vi.fn>).mock.calls
+      .filter((call) => call[1] === 11)
+      .map((call) => call[2])
+    expect(textValues).toEqual([
+      'Vertical riser marker placed by BIMPipe at (10.000, 20.000)',
+      'Vertical riser marker placed by BIMPipe at (30.000, 40.000)',
+      'Vertical riser marker placed by BIMPipe at (10.000, 20.000)',
+      'Vertical riser marker placed by BIMPipe at (30.000, 40.000)',
+    ])
     expect(api.CloseModel).toHaveBeenCalledWith(plumbingModelId)
     expect(api.CloseModel).toHaveBeenCalledWith(sourceModelId)
   })

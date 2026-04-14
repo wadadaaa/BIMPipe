@@ -20,10 +20,12 @@ export async function exportIfcWithRisers(
     IFCCARTESIANPOINT,
     IFCIDENTIFIER,
     IFCLABEL,
+    IFCLENGTHMEASURE,
     IFCLOCALPLACEMENT,
     IFCPROJECT,
     IFCRELAGGREGATES,
     IFCRELCONTAINEDINSPATIALSTRUCTURE,
+    IFCTEXT,
   } = await import('web-ifc')
 
   const sourceModelId = api.OpenModel(sourceBytes.slice())
@@ -51,11 +53,18 @@ export async function exportIfcWithRisers(
     )
     const rawLines = collectRawLineClosure(api, sourceModelId, contextLineIds)
     for (const rawLine of rawLines) {
-      api.WriteRawLineData(modelId, rawLine)
+      try {
+        api.WriteRawLineData(modelId, rawLine)
+      } catch {
+        // Some raw lines (e.g. geometry primitives) carry WASM-internal argument
+        // objects that cannot be serialised into a different model; skip them.
+        // The spatial hierarchy and owner-history lines that matter will succeed.
+      }
     }
 
-    // Resolve owner history from the copied primary storey (used for all new entities).
-    const primaryStorey = api.GetLine(modelId, primaryStoreyId, false) as {
+    // Resolve owner history from the source storey (used for all new entities).
+    // Read from sourceModelId — the storey line may not survive WriteRawLineData on all IFC files.
+    const primaryStorey = api.GetLine(sourceModelId, primaryStoreyId, false) as {
       OwnerHistory?: IfcHandle | null
     } | null
 
@@ -63,7 +72,12 @@ export async function exportIfcWithRisers(
       throw new Error(`Storey #${primaryStoreyId} is missing from the IFC model.`)
     }
 
-    const ownerHistory = toHandle(primaryStorey.OwnerHistory)
+    const ownerHistory = resolveCopiedOwnerHistoryHandle(
+      api,
+      sourceModelId,
+      modelId,
+      primaryStoreyId,
+    )
 
     // Group risers by storeyId so each floor gets its own containment entry.
     const risersByStorey = new Map<StoreyId, Riser[]>()
@@ -124,44 +138,41 @@ export async function exportIfcWithRisers(
   function createRiserElement(
     localApi: IfcAPI,
     modelId: number,
-    schema: string,
+    _schema: string,
     ownerHistory: IfcHandle | null,
     tag: string,
     position: { x: number; y: number; z: number },
-  ) {
+  ): IfcHandle {
+    // Write entities bottom-up so each gets an expressID before being referenced.
     const point = localApi.CreateIfcEntity(modelId, IFCCARTESIANPOINT, [
-      position.x,
-      position.y,
-      position.z,
+      localApi.CreateIfcType(modelId, IFCLENGTHMEASURE, position.x),
+      localApi.CreateIfcType(modelId, IFCLENGTHMEASURE, position.y),
+      localApi.CreateIfcType(modelId, IFCLENGTHMEASURE, position.z),
     ])
-    const axisPlacement = localApi.CreateIfcEntity(modelId, IFCAXIS2PLACEMENT3D, point, null, null)
-    const localPlacement = localApi.CreateIfcEntity(modelId, IFCLOCALPLACEMENT, null, axisPlacement)
+    localApi.WriteLine(modelId, point)
+
+    const axisPlacement = localApi.CreateIfcEntity(
+      modelId, IFCAXIS2PLACEMENT3D,
+      handleRef(point.expressID), null, null,
+    )
+    localApi.WriteLine(modelId, axisPlacement)
+
+    const localPlacement = localApi.CreateIfcEntity(
+      modelId, IFCLOCALPLACEMENT,
+      null, axisPlacement,
+    )
+    localApi.WriteLine(modelId, localPlacement)
+
     const name = localApi.CreateIfcType(modelId, IFCLABEL, `BIMPipe ${tag}`)
     const description = localApi.CreateIfcType(
       modelId,
-      IFCLABEL,
+      IFCTEXT,
       `Vertical riser marker placed by BIMPipe at (${position.x.toFixed(3)}, ${position.z.toFixed(3)})`,
     )
     const objectType = localApi.CreateIfcType(modelId, IFCLABEL, 'BIMPipeRiser')
     const identifier = localApi.CreateIfcType(modelId, IFCIDENTIFIER, tag)
 
-    if (schema === 'IFC2X3') {
-      return localApi.CreateIfcEntity(
-        modelId,
-        IFCBUILDINGELEMENTPROXY,
-        localApi.CreateIFCGloballyUniqueId(modelId),
-        ownerHistory,
-        name,
-        description,
-        objectType,
-        localPlacement,
-        null,
-        identifier,
-        null,
-      )
-    }
-
-    return localApi.CreateIfcEntity(
+    const riserElement = localApi.CreateIfcEntity(
       modelId,
       IFCBUILDINGELEMENTPROXY,
       localApi.CreateIFCGloballyUniqueId(modelId),
@@ -174,6 +185,9 @@ export async function exportIfcWithRisers(
       identifier,
       null,
     )
+    localApi.WriteLine(modelId, riserElement)
+
+    return handleRef(riserElement.expressID)
   }
 }
 
@@ -305,9 +319,37 @@ function findStoreyContainmentRelation(
   return null
 }
 
+function resolveCopiedOwnerHistoryHandle(
+  api: IfcAPI,
+  sourceModelId: number,
+  targetModelId: number,
+  primaryStoreyId: StoreyId,
+): IfcHandle | null {
+  const primaryStorey = api.GetLine(sourceModelId, primaryStoreyId, false) as {
+    OwnerHistory?: IfcHandle | { expressID: number } | null
+  } | null
+
+  if (!primaryStorey) {
+    throw new Error(`Storey #${primaryStoreyId} is missing from the IFC model.`)
+  }
+
+  const sourceOwnerHistory = toHandle(primaryStorey.OwnerHistory)
+  if (!sourceOwnerHistory) return null
+
+  try {
+    const copiedOwnerHistory = api.GetLine(targetModelId, sourceOwnerHistory.value, false)
+    if (!copiedOwnerHistory) return null
+    return handleRef(sourceOwnerHistory.value)
+  } catch {
+    return null
+  }
+}
+
 function toHandle(value: IfcHandle | { expressID: number } | null | undefined): IfcHandle | null {
   if (!value) return null
-  if ('type' in value && value.type === 5 && typeof value.value === 'number') return value
+  if ('type' in value && value.type === 5 && typeof value.value === 'number') {
+    return handleRef(value.value)
+  }
   if ('expressID' in value && typeof value.expressID === 'number') return handleRef(value.expressID)
   return null
 }

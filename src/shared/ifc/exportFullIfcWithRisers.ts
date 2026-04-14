@@ -19,8 +19,10 @@ export async function exportFullIfcWithRisers(
     IFCCARTESIANPOINT,
     IFCIDENTIFIER,
     IFCLABEL,
+    IFCLENGTHMEASURE,
     IFCLOCALPLACEMENT,
     IFCRELCONTAINEDINSPATIALSTRUCTURE,
+    IFCTEXT,
   } = await import('web-ifc')
 
   const modelId = api.OpenModel(sourceBytes.slice())
@@ -92,44 +94,41 @@ export async function exportFullIfcWithRisers(
   function createRiserElement(
     localApi: IfcAPI,
     currentModelId: number,
-    currentSchema: string,
+    _currentSchema: string,
     currentOwnerHistory: IfcHandle | null,
     tag: string,
     position: { x: number; y: number; z: number },
-  ) {
+  ): IfcHandle {
+    // Write entities bottom-up so each gets an expressID before being referenced.
     const point = localApi.CreateIfcEntity(currentModelId, IFCCARTESIANPOINT, [
-      position.x,
-      position.y,
-      position.z,
+      localApi.CreateIfcType(currentModelId, IFCLENGTHMEASURE, position.x),
+      localApi.CreateIfcType(currentModelId, IFCLENGTHMEASURE, position.y),
+      localApi.CreateIfcType(currentModelId, IFCLENGTHMEASURE, position.z),
     ])
-    const axisPlacement = localApi.CreateIfcEntity(currentModelId, IFCAXIS2PLACEMENT3D, point, null, null)
-    const localPlacement = localApi.CreateIfcEntity(currentModelId, IFCLOCALPLACEMENT, null, axisPlacement)
+    localApi.WriteLine(currentModelId, point)
+
+    const axisPlacement = localApi.CreateIfcEntity(
+      currentModelId, IFCAXIS2PLACEMENT3D,
+      handleRef(point.expressID), null, null,
+    )
+    localApi.WriteLine(currentModelId, axisPlacement)
+
+    const localPlacement = localApi.CreateIfcEntity(
+      currentModelId, IFCLOCALPLACEMENT,
+      null, axisPlacement,
+    )
+    localApi.WriteLine(currentModelId, localPlacement)
+
     const name = localApi.CreateIfcType(currentModelId, IFCLABEL, `BIMPipe ${tag}`)
     const description = localApi.CreateIfcType(
       currentModelId,
-      IFCLABEL,
+      IFCTEXT,
       `Vertical riser marker placed by BIMPipe at (${position.x.toFixed(3)}, ${position.z.toFixed(3)})`,
     )
     const objectType = localApi.CreateIfcType(currentModelId, IFCLABEL, 'BIMPipeRiser')
     const identifier = localApi.CreateIfcType(currentModelId, IFCIDENTIFIER, tag)
 
-    if (currentSchema === 'IFC2X3') {
-      return localApi.CreateIfcEntity(
-        currentModelId,
-        IFCBUILDINGELEMENTPROXY,
-        localApi.CreateIFCGloballyUniqueId(currentModelId),
-        currentOwnerHistory,
-        name,
-        description,
-        objectType,
-        localPlacement,
-        null,
-        identifier,
-        null,
-      )
-    }
-
-    return localApi.CreateIfcEntity(
+    const riserElement = localApi.CreateIfcEntity(
       currentModelId,
       IFCBUILDINGELEMENTPROXY,
       localApi.CreateIFCGloballyUniqueId(currentModelId),
@@ -142,6 +141,9 @@ export async function exportFullIfcWithRisers(
       identifier,
       null,
     )
+    localApi.WriteLine(currentModelId, riserElement)
+
+    return handleRef(riserElement.expressID)
   }
 }
 
@@ -177,7 +179,9 @@ function findStoreyContainmentRelation(
 
 function toHandle(value: IfcHandle | { expressID: number } | null | undefined): IfcHandle | null {
   if (!value) return null
-  if ('type' in value && value.type === 5 && typeof value.value === 'number') return value
+  if ('type' in value && value.type === 5 && typeof value.value === 'number') {
+    return handleRef(value.value)
+  }
   if ('expressID' in value && typeof value.expressID === 'number') return handleRef(value.expressID)
   return null
 }

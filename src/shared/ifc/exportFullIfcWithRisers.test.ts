@@ -11,6 +11,8 @@ vi.mock('web-ifc', () => ({
   IFCLABEL: 5,
   IFCLOCALPLACEMENT: 6,
   IFCRELCONTAINEDINSPATIALSTRUCTURE: 7,
+  IFCLENGTHMEASURE: 8,
+  IFCTEXT: 9,
 }))
 
 function makeIdVector(values: number[]) {
@@ -77,5 +79,35 @@ describe('exportFullIfcWithRisers', () => {
     expect(identifierValues).toEqual(['R12', 'R7', 'R12', 'R7'])
     expect(identifierValues).not.toContain('R1')
     expect(identifierValues).not.toContain('R2')
+
+    const localPlacementCalls = (api.CreateIfcEntity as ReturnType<typeof vi.fn>).mock.calls
+      .filter((call) => call[1] === 6)
+    expect(localPlacementCalls).toHaveLength(4)
+    expect(localPlacementCalls[0][3]).toMatchObject({ type: 1 })
+
+    const riserEntityCalls = (api.CreateIfcEntity as ReturnType<typeof vi.fn>).mock.calls
+      .filter((call) => call[1] === 2)
+    expect(riserEntityCalls).toHaveLength(4)
+    expect(riserEntityCalls[0][7]).toMatchObject({ type: 6 })
+
+    const lengthMeasureValues = (api.CreateIfcType as ReturnType<typeof vi.fn>).mock.calls
+      .filter((call) => call[1] === 8)
+      .map((call) => call[2])
+    expect(lengthMeasureValues).toEqual([
+      10, 612, 20,
+      30, 612, 40,
+      10, 918, 20,
+      30, 918, 40,
+    ])
+
+    const textValues = (api.CreateIfcType as ReturnType<typeof vi.fn>).mock.calls
+      .filter((call) => call[1] === 9)
+      .map((call) => call[2])
+    expect(textValues).toEqual([
+      'Vertical riser marker placed by BIMPipe at (10.000, 20.000)',
+      'Vertical riser marker placed by BIMPipe at (30.000, 40.000)',
+      'Vertical riser marker placed by BIMPipe at (10.000, 20.000)',
+      'Vertical riser marker placed by BIMPipe at (30.000, 40.000)',
+    ])
   })
 })
