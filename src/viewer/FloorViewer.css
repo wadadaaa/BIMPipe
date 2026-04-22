@@ -1,9 +1,89 @@
 .floor-viewer {
+  --riser-bronze: #8f6b32;
+  --riser-bronze-bright: #b88a3c;
+  --riser-bronze-shadow: rgba(92, 60, 16, 0.48);
+  --riser-slate: #1e2f46;
+  --riser-slate-deep: #152235;
+  --riser-cyan: #4fc5ff;
+  --riser-cyan-bright: #89e0ff;
+  --fixture-chip-border: rgba(255, 184, 92, 0.32);
+  --fixture-chip-bg: linear-gradient(180deg, rgba(28, 22, 12, 0.96), rgba(16, 12, 6, 0.94));
+  --fixture-chip-text: #fff4de;
+  --fixture-chip-ring-1: rgba(255, 184, 92, 0.09);
+  --fixture-chip-ring-2: rgba(255, 184, 92, 0.16);
+  --fixture-chip-shadow: rgba(0, 0, 0, 0.5);
+  --fixture-chip-shadow-strong: rgba(0, 0, 0, 0.56);
+  --fixture-chip-selected-border: rgba(255, 131, 146, 0.9);
+  --fixture-chip-selected-bg: linear-gradient(180deg, rgba(56, 20, 30, 0.97), rgba(34, 10, 20, 0.95));
+  --fixture-chip-selected-ring: rgba(255, 118, 138, 0.14);
+  --fixture-core-border: rgba(255, 197, 115, 0.65);
+  --fixture-core-bg: radial-gradient(circle at 50% 42%, rgba(255, 228, 170, 0.98), rgba(255, 185, 88, 0.88) 38%, rgba(52, 28, 8, 0.93) 39%, rgba(52, 28, 8, 0.95) 100%);
+  --fixture-core-text: #fff2d8;
+  --fixture-label-text: #ffd89e;
+  --fixture-label-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
+  --kitchen-chip-border: rgba(92, 224, 196, 0.30);
+  --kitchen-chip-bg: linear-gradient(180deg, rgba(8, 36, 32, 0.96), rgba(5, 22, 20, 0.94));
+  --kitchen-chip-text: #e0fff8;
+  --kitchen-chip-ring: rgba(92, 224, 196, 0.09);
+  --kitchen-core-border: rgba(146, 255, 234, 0.50);
+  --kitchen-core-bg: radial-gradient(circle at 50% 42%, rgba(175, 255, 240, 0.96), rgba(84, 210, 185, 0.88) 44%, rgba(11, 44, 38, 0.96) 45%, rgba(11, 44, 38, 0.96) 100%);
+  --kitchen-core-text: #04201a;
+  --kitchen-label-text: #aaffe8;
+  --kitchen-label-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
+  --riser-btn-border: rgba(103, 221, 255, 0.72);
+  --riser-btn-bg: rgba(10, 28, 56, 0.93);
+  --riser-btn-text: #90d8ff;
+  --riser-btn-ring-1: rgba(103, 221, 255, 0.12);
+  --riser-btn-ring-2: rgba(103, 221, 255, 0.04);
+  --riser-btn-shadow: rgba(0, 0, 0, 0.65);
+  --riser-btn-hover-border: rgba(103, 221, 255, 0.95);
+  --riser-btn-hover-bg: rgba(16, 44, 88, 0.96);
+  --riser-btn-hover-ring-1: rgba(103, 221, 255, 0.18);
+  --riser-btn-hover-ring-2: rgba(103, 221, 255, 0.06);
+  --riser-btn-hover-shadow: rgba(0, 0, 0, 0.78);
   position: relative;
   width: 100%;
   height: 100%;
   overflow: hidden;
   background: var(--viewer-bg, #040609);
+}
+
+[data-theme='light'] .floor-viewer {
+  --fixture-chip-border: rgba(173, 123, 39, 0.34);
+  --fixture-chip-bg: linear-gradient(180deg, rgba(255, 252, 245, 0.98), rgba(247, 239, 223, 0.96));
+  --fixture-chip-text: #5f4720;
+  --fixture-chip-ring-1: rgba(132, 92, 28, 0.10);
+  --fixture-chip-ring-2: rgba(185, 132, 41, 0.12);
+  --fixture-chip-shadow: rgba(76, 96, 122, 0.14);
+  --fixture-chip-shadow-strong: rgba(76, 96, 122, 0.16);
+  --fixture-chip-selected-border: rgba(14, 135, 187, 0.44);
+  --fixture-chip-selected-bg: linear-gradient(180deg, rgba(249, 253, 255, 0.99), rgba(231, 244, 252, 0.97));
+  --fixture-chip-selected-ring: rgba(14, 135, 187, 0.12);
+  --fixture-core-border: rgba(191, 138, 46, 0.72);
+  --fixture-core-bg: radial-gradient(circle at 50% 42%, rgba(255, 247, 224, 1), rgba(245, 197, 106, 0.95) 38%, rgba(150, 106, 35, 0.94) 39%, rgba(94, 64, 20, 0.96) 100%);
+  --fixture-core-text: #fff8ea;
+  --fixture-label-text: #7b5b22;
+  --fixture-label-shadow: none;
+  --kitchen-chip-border: rgba(50, 145, 121, 0.28);
+  --kitchen-chip-bg: linear-gradient(180deg, rgba(247, 254, 251, 0.98), rgba(227, 246, 239, 0.97));
+  --kitchen-chip-text: #155947;
+  --kitchen-chip-ring: rgba(50, 145, 121, 0.08);
+  --kitchen-core-border: rgba(64, 169, 139, 0.48);
+  --kitchen-core-bg: radial-gradient(circle at 50% 42%, rgba(242, 255, 250, 0.98), rgba(147, 235, 209, 0.94) 44%, rgba(56, 146, 120, 0.94) 45%, rgba(31, 99, 80, 0.96) 100%);
+  --kitchen-core-text: #f6fffc;
+  --kitchen-label-text: #1f6a57;
+  --kitchen-label-shadow: none;
+  --riser-btn-border: rgba(74, 164, 220, 0.62);
+  --riser-btn-bg: linear-gradient(180deg, rgba(245, 251, 255, 0.99), rgba(223, 238, 249, 0.98));
+  --riser-btn-text: #1974a4;
+  --riser-btn-ring-1: rgba(74, 164, 220, 0.10);
+  --riser-btn-ring-2: rgba(74, 164, 220, 0.04);
+  --riser-btn-shadow: rgba(76, 96, 122, 0.16);
+  --riser-btn-hover-border: rgba(46, 147, 211, 0.82);
+  --riser-btn-hover-bg: linear-gradient(180deg, rgba(252, 254, 255, 1), rgba(232, 243, 251, 0.99));
+  --riser-btn-hover-ring-1: rgba(74, 164, 220, 0.14);
+  --riser-btn-hover-ring-2: rgba(74, 164, 220, 0.05);
+  --riser-btn-hover-shadow: rgba(76, 96, 122, 0.18);
 }
 
 /* Subtle grid lines */
@@ -12,8 +92,8 @@
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+    linear-gradient(var(--viewer-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--viewer-grid) 1px, transparent 1px);
   background-size: 52px 52px;
   opacity: 0.5;
   pointer-events: none;
@@ -25,7 +105,7 @@
   content: '';
   position: absolute;
   inset: 0;
-  background: radial-gradient(circle at center, transparent 44%, rgba(4, 6, 9, 0.55) 100%);
+  background: radial-gradient(circle at center, transparent 44%, var(--viewer-vignette) 100%);
   pointer-events: none;
   z-index: 1;
 }
@@ -66,7 +146,7 @@
   padding: 5px 9px;
   border-radius: 999px;
   border: 1px solid var(--border);
-  background: rgba(8, 11, 18, 0.78);
+  background: var(--overlay-bg);
   color: var(--text);
   font-size: 10px;
   font-weight: 600;
@@ -172,9 +252,9 @@
   height: 28px;
   padding: 3px 8px 3px 3px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 184, 92, 0.32);
-  background: linear-gradient(180deg, rgba(28, 22, 12, 0.96), rgba(16, 12, 6, 0.94));
-  color: #fff4de;
+  border: 1px solid var(--fixture-chip-border);
+  background: var(--fixture-chip-bg);
+  color: var(--fixture-chip-text);
   font-size: 8px;
   font-weight: 800;
   letter-spacing: 0.10em;
@@ -184,8 +264,8 @@
   gap: 5px;
   cursor: pointer;
   box-shadow:
-    0 0 0 3px rgba(255, 184, 92, 0.09),
-    0 4px 12px rgba(0, 0, 0, 0.5);
+    0 0 0 3px var(--fixture-chip-ring-1),
+    0 4px 12px var(--fixture-chip-shadow);
   transition:
     transform 120ms ease,
     border-color 120ms ease,
@@ -199,28 +279,27 @@
 .floor-viewer__fixture-btn:hover,
 .floor-viewer__fixture-btn--hovered {
   transform: scale(1.06);
-  border-color: rgba(255, 208, 128, 0.9);
+  border-color: color-mix(in srgb, var(--fixture-chip-border) 70%, white);
   box-shadow:
-    0 0 0 4px rgba(255, 184, 92, 0.16),
-    0 6px 16px rgba(0, 0, 0, 0.56);
+    0 0 0 4px var(--fixture-chip-ring-2),
+    0 6px 16px var(--fixture-chip-shadow-strong);
 }
 
 .floor-viewer__fixture-btn--selected {
   transform: scale(1.10);
-  border-color: rgba(255, 131, 146, 0.9);
-  background: linear-gradient(180deg, rgba(56, 20, 30, 0.97), rgba(34, 10, 20, 0.95));
+  border-color: var(--fixture-chip-selected-border);
+  background: var(--fixture-chip-selected-bg);
   box-shadow:
-    0 0 0 4px rgba(255, 118, 138, 0.14),
-    0 6px 16px rgba(0, 0, 0, 0.62);
+    0 0 0 4px var(--fixture-chip-selected-ring),
+    0 6px 16px var(--fixture-chip-shadow-strong);
 }
 
 .floor-viewer__fixture-core {
   width: 22px;
   height: 22px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 197, 115, 0.65);
-  background:
-    radial-gradient(circle at 50% 42%, rgba(255, 228, 170, 0.98), rgba(255, 185, 88, 0.88) 38%, rgba(52, 28, 8, 0.93) 39%, rgba(52, 28, 8, 0.95) 100%);
+  border: 1px solid var(--fixture-core-border);
+  background: var(--fixture-core-bg);
   display: grid;
   place-items: center;
   box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.10);
@@ -232,7 +311,7 @@
   font-size: 7px;
   font-weight: 900;
   letter-spacing: 0.08em;
-  color: #fff2d8;
+  color: var(--fixture-core-text);
 }
 
 .floor-viewer__fixture-label {
@@ -242,8 +321,8 @@
   font-weight: 800;
   letter-spacing: 0.10em;
   text-transform: uppercase;
-  color: #ffd89e;
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
+  color: var(--fixture-label-text);
+  text-shadow: var(--fixture-label-shadow);
 }
 
 /* ── Kitchen overlay ── */
@@ -270,15 +349,15 @@
   height: 26px;
   padding: 3px 8px 3px 3px;
   border-radius: 999px;
-  border: 1px solid rgba(92, 224, 196, 0.30);
-  background: linear-gradient(180deg, rgba(8, 36, 32, 0.96), rgba(5, 22, 20, 0.94));
-  color: #e0fff8;
+  border: 1px solid var(--kitchen-chip-border);
+  background: var(--kitchen-chip-bg);
+  color: var(--kitchen-chip-text);
   display: inline-flex;
   align-items: center;
   gap: 5px;
   box-shadow:
-    0 0 0 3px rgba(92, 224, 196, 0.09),
-    0 4px 12px rgba(0, 0, 0, 0.5);
+    0 0 0 3px var(--kitchen-chip-ring),
+    0 4px 12px var(--fixture-chip-shadow);
 }
 
 .floor-viewer__kitchen-core {
@@ -287,13 +366,12 @@
   border-radius: 999px;
   display: grid;
   place-items: center;
-  border: 1px solid rgba(146, 255, 234, 0.50);
-  background:
-    radial-gradient(circle at 50% 42%, rgba(175, 255, 240, 0.96), rgba(84, 210, 185, 0.88) 44%, rgba(11, 44, 38, 0.96) 45%, rgba(11, 44, 38, 0.96) 100%);
+  border: 1px solid var(--kitchen-core-border);
+  background: var(--kitchen-core-bg);
   font-size: 7px;
   font-weight: 900;
   letter-spacing: 0.06em;
-  color: #04201a;
+  color: var(--kitchen-core-text);
   flex-shrink: 0;
 }
 
@@ -303,8 +381,8 @@
   font-weight: 800;
   letter-spacing: 0.10em;
   text-transform: uppercase;
-  color: #aaffe8;
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
+  color: var(--kitchen-label-text);
+  text-shadow: var(--kitchen-label-shadow);
 }
 
 /* ── Riser overlay ── */
@@ -330,10 +408,10 @@
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  border: 2px solid rgba(103, 221, 255, 0.72);
-  background: rgba(10, 28, 56, 0.93);
+  border: 2px solid var(--riser-btn-border);
+  background: var(--riser-btn-bg);
   backdrop-filter: blur(8px);
-  color: #90d8ff;
+  color: var(--riser-btn-text);
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -341,24 +419,26 @@
   display: grid;
   place-items: center;
   box-shadow:
-    0 0 0 4px rgba(103, 221, 255, 0.12),
-    0 0 0 8px rgba(103, 221, 255, 0.04),
-    0 4px 12px rgba(0, 0, 0, 0.65);
+    0 0 0 4px var(--riser-btn-ring-1),
+    0 0 0 8px var(--riser-btn-ring-2),
+    0 4px 12px var(--riser-btn-shadow);
   animation: riser-pulse 2.8s ease-in-out infinite;
   transition:
     border-color 120ms,
     background 120ms,
-    box-shadow 120ms;
+    box-shadow 120ms,
+    transform 120ms ease;
 }
 
 .floor-viewer__riser-btn:hover {
-  border-color: rgba(103, 221, 255, 0.95);
-  background: rgba(16, 44, 88, 0.96);
+  border-color: var(--riser-btn-hover-border);
+  background: var(--riser-btn-hover-bg);
   box-shadow:
-    0 0 0 6px rgba(103, 221, 255, 0.18),
-    0 0 0 12px rgba(103, 221, 255, 0.06),
-    0 4px 16px rgba(0, 0, 0, 0.78);
+    0 0 0 6px var(--riser-btn-hover-ring-1),
+    0 0 0 12px var(--riser-btn-hover-ring-2),
+    0 4px 16px var(--riser-btn-hover-shadow);
   animation: none;
+  transform: translateY(-1px);
 }
 
 .floor-viewer__riser-btn--muted {
@@ -372,15 +452,15 @@
 @keyframes riser-pulse {
   0%, 100% {
     box-shadow:
-      0 0 0 4px rgba(103, 221, 255, 0.12),
-      0 0 0 8px rgba(103, 221, 255, 0.04),
-      0 4px 12px rgba(0, 0, 0, 0.65);
+      0 0 0 4px var(--riser-btn-ring-1),
+      0 0 0 8px var(--riser-btn-ring-2),
+      0 4px 12px var(--riser-btn-shadow);
   }
   50% {
     box-shadow:
-      0 0 0 7px rgba(103, 221, 255, 0.18),
-      0 0 0 14px rgba(103, 221, 255, 0.06),
-      0 4px 12px rgba(0, 0, 0, 0.65);
+      0 0 0 7px var(--riser-btn-hover-ring-1),
+      0 0 0 14px var(--riser-btn-hover-ring-2),
+      0 4px 12px var(--riser-btn-shadow);
   }
 }
 
@@ -475,7 +555,7 @@
   padding: 18px 20px;
   border-radius: 18px;
   border: 1px solid var(--border-strong);
-  background: rgba(8, 11, 18, 0.84);
+  background: var(--overlay-bg-strong);
   backdrop-filter: blur(20px);
   box-shadow: var(--shadow);
   text-align: center;
@@ -512,7 +592,7 @@
   height: 40px;
   padding: 0 12px;
   border-radius: 12px;
-  background: rgba(8, 11, 18, 0.84);
+  background: var(--overlay-bg-strong);
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
   cursor: pointer;
@@ -530,7 +610,7 @@
 }
 
 .floor-viewer__btn:hover {
-  background: rgba(14, 20, 32, 0.96);
+  background: var(--overlay-bg-hover);
   border-color: var(--accent-border);
 }
 
@@ -550,7 +630,7 @@
   padding: 5px 9px;
   border-radius: 999px;
   border: 1px solid var(--border);
-  background: rgba(8, 11, 18, 0.78);
+  background: var(--overlay-bg);
   backdrop-filter: blur(16px);
   font-size: 10px;
   font-weight: 500;

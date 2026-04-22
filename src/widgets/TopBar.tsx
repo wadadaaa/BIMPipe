@@ -1,9 +1,12 @@
 import type { ReactNode } from 'react'
+import type { ThemeMode } from '@/app/App'
 import './TopBar.css'
 
 interface TopBarProps {
   modelFileName: string | null
   currentStep: 1 | 2 | 3 | 4
+  theme: ThemeMode
+  onToggleTheme: () => void
 }
 
 const STEPS: { label: string; hint: string }[] = [
@@ -13,7 +16,12 @@ const STEPS: { label: string; hint: string }[] = [
   { label: 'Export', hint: 'Download updated IFC' },
 ]
 
-export function TopBar({ modelFileName, currentStep }: TopBarProps) {
+export function TopBar({
+  modelFileName,
+  currentStep,
+  theme,
+  onToggleTheme,
+}: TopBarProps) {
   return (
     <header className="topbar" role="banner">
       <div className="topbar__brand" aria-label="BIMPipe">
@@ -46,6 +54,20 @@ export function TopBar({ modelFileName, currentStep }: TopBarProps) {
       </nav>
 
       <div className="topbar__end">
+        <button
+          className="topbar__theme-toggle"
+          type="button"
+          onClick={onToggleTheme}
+          aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+          title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+        >
+          <span className="topbar__theme-toggle-icon" aria-hidden="true">
+            {theme === 'dark' ? 'Sun' : 'Moon'}
+          </span>
+          <span className="topbar__theme-toggle-label">
+            {theme === 'dark' ? 'Light' : 'Dark'}
+          </span>
+        </button>
         {modelFileName && (
           <span className="topbar__file" title={modelFileName}>
             {modelFileName}

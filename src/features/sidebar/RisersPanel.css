@@ -15,7 +15,7 @@
   padding: 9px 10px;
   border-radius: 10px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-soft);
   color: var(--text);
   font-size: 11px;
   font-weight: 600;
@@ -45,7 +45,7 @@
 
 /* Ghost suggest button */
 .risers-panel__btn--ghost {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--surface-muted);
   border-color: var(--border);
   color: var(--text-soft);
 }
@@ -83,9 +83,9 @@
   width: 100%;
   padding: 13px 16px;
   border-radius: 12px;
-  border: 1px solid rgba(92, 224, 196, 0.32);
-  background: rgba(92, 224, 196, 0.12);
-  color: #d2fff5;
+  border: 1px solid var(--success-border);
+  background: var(--success-bg);
+  color: var(--success-text);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -98,13 +98,13 @@
 }
 
 .risers-panel__download-btn:hover:not(:disabled) {
-  background: rgba(92, 224, 196, 0.18);
-  border-color: rgba(92, 224, 196, 0.48);
+  background: var(--success-bg-hover);
+  border-color: var(--success-border-hover);
 }
 
 .risers-panel__download-btn--secondary {
   border-color: var(--border);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-soft);
   color: var(--text-h);
 }
 
@@ -142,7 +142,7 @@
   line-height: 1.55;
   border: 1px dashed var(--border-strong);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.015);
+  background: var(--surface-subtle);
 }
 
 .risers-panel__empty-icon {
@@ -153,7 +153,7 @@
   place-items: center;
   font-size: 18px;
   color: var(--text-soft);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-soft);
 }
 
 /* ── Riser list ── */
@@ -170,7 +170,7 @@
   padding: 8px 12px;
   border-radius: 10px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--surface-soft);
   margin-bottom: 2px;
 }
 
@@ -197,7 +197,7 @@
   padding: 8px 10px;
   border-radius: 10px;
   border: 1px solid transparent;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--surface-muted);
   transition: background 100ms, border-color 100ms;
 }
 

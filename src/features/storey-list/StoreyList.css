@@ -33,7 +33,7 @@
   border-radius: 999px;
   display: grid;
   place-items: center;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-strong);
   border: 1px solid var(--border);
   color: var(--text);
   font-family: var(--mono);
@@ -58,7 +58,7 @@
   padding: 11px 14px;
   border-radius: 12px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--surface-muted);
   cursor: pointer;
   text-align: left;
   font: inherit;

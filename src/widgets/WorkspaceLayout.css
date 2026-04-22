@@ -14,7 +14,7 @@
 }
 
 .workspace-layout__left {
-  background: linear-gradient(180deg, rgba(13, 17, 26, 0.97), rgba(9, 12, 19, 0.98));
+  background: var(--panel-left-bg);
   border-right: 1px solid var(--border);
   overflow-y: auto;
   display: flex;
@@ -26,7 +26,7 @@
 
 .workspace-layout__center {
   background:
-    radial-gradient(ellipse at 50% 0%, rgba(103, 221, 255, 0.05), transparent 52%),
+    var(--center-glow),
     var(--viewer-bg);
   position: relative;
   overflow: hidden;
@@ -34,7 +34,7 @@
 }
 
 .workspace-layout__right {
-  background: linear-gradient(180deg, rgba(11, 14, 22, 0.98), rgba(7, 10, 17, 1));
+  background: var(--panel-right-bg);
   border-left: 1px solid var(--border);
   overflow-y: auto;
   min-height: 0;

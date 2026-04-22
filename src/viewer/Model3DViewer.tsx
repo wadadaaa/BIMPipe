@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type MutableRefObject } from 'react'
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import type { ThemeMode } from '@/app/App'
 import type { Riser, Storey, StoreyId } from '@/domain/types'
 import { getIfcApi } from '@/shared/ifc/ifcApi'
 import { extractFloorMeshes } from '@/shared/ifc/extractFloorMeshes'
@@ -12,6 +13,7 @@ interface Model3DViewerProps {
   storeys: Storey[]
   /** All risers across all floors. */
   risers: Riser[]
+  theme: ThemeMode
   onSwitch2D: () => void
 }
 
@@ -34,6 +36,7 @@ export function Model3DViewer({
   webIfcModelId,
   storeys,
   risers,
+  theme,
   onSwitch2D,
 }: Model3DViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -65,11 +68,11 @@ export function Model3DViewer({
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     renderer.setSize(w, h)
-    renderer.setClearColor(0x05070d, 1)
+    renderer.setClearColor(readViewerBackgroundColor(), 1)
     renderer.sortObjects = true
 
     const scene = new THREE.Scene()
-    scene.background = new THREE.Color(0x05070d)
+    scene.background = readViewerBackgroundColor()
 
     const camera = new THREE.PerspectiveCamera(45, w / h, 1, 2_000_000)
     camera.position.set(0, 50000, 100000)
@@ -123,6 +126,16 @@ export function Model3DViewer({
       renderer.dispose()
     }
   }, [])
+
+  useEffect(() => {
+    const renderer = rendererRef.current
+    const scene = sceneRef.current
+    if (!renderer || !scene) return
+
+    const viewerBackground = readViewerBackgroundColor()
+    renderer.setClearColor(viewerBackground, 1)
+    scene.background = viewerBackground
+  }, [theme])
 
   // ── Geometry loading ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -480,6 +493,14 @@ function disposeGroup(group: THREE.Group): void {
 
 function countStacks(risers: Riser[]): number {
   return new Set(risers.map((r) => r.stackId)).size
+}
+
+function readViewerBackgroundColor(): THREE.Color {
+  const viewerBackground = getComputedStyle(document.documentElement)
+    .getPropertyValue('--viewer-bg')
+    .trim()
+
+  return new THREE.Color(viewerBackground || '#040609')
 }
 
 function replaceRiserGroup(

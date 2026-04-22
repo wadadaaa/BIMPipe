@@ -38,7 +38,7 @@
   padding: 4px 9px;
   border-radius: 999px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-strong);
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.12em;
@@ -59,7 +59,7 @@
   padding: 10px 10px 9px;
   border-radius: 12px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--surface-soft);
 }
 
 .sidebar__summary-label {
@@ -89,7 +89,7 @@
   padding: 4px;
   border: 1px solid var(--border);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--surface-muted);
   flex-shrink: 0;
 }
 
@@ -138,7 +138,7 @@
   padding: 12px 14px;
   border-radius: 14px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--surface-soft);
 }
 
 .sidebar__panel-label {
@@ -176,7 +176,7 @@
   line-height: 1.5;
   border: 1px dashed var(--border-strong);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.015);
+  background: var(--surface-subtle);
 }
 
 .sidebar__empty-icon {
@@ -187,7 +187,7 @@
   place-items: center;
   font-size: 16px;
   color: var(--text-h);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-strong);
 }
 
 /* ── Unused selection info (kept for potential future use) ── */
@@ -203,7 +203,7 @@
 }
 
 .sidebar__selection-info--ghost {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-soft);
   border-color: var(--border);
 }
 

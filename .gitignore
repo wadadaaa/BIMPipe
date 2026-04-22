@@ -7,12 +7,14 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Build / deps
 node_modules
 dist
 dist-ssr
+.pnpm-store
 *.local
 
-# Editor directories and files
+# Editor files
 .vscode/*
 !.vscode/extensions.json
 .idea
@@ -22,3 +24,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local AI agent configs
+.claude/agents/
+.claude/settings.local.json
+.agents/skills/
+.codex/
+.opencode/

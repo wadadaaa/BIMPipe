@@ -6,7 +6,7 @@
   padding: 0 20px;
   height: var(--topbar-height);
   border-bottom: 1px solid var(--border);
-  background: rgba(6, 8, 14, 0.97);
+  background: var(--topbar-bg);
   backdrop-filter: blur(20px);
   position: relative;
   z-index: 10;
@@ -111,14 +111,46 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  gap: 10px;
   min-width: 0;
+}
+
+.topbar__theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
+  color: var(--text-h);
+  cursor: pointer;
+  transition:
+    background 120ms,
+    border-color 120ms,
+    transform 120ms;
+}
+
+.topbar__theme-toggle:hover {
+  background: var(--surface-strong);
+  border-color: var(--accent-border);
+  transform: translateY(-1px);
+}
+
+.topbar__theme-toggle-icon,
+.topbar__theme-toggle-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
 .topbar__file {
   padding: 4px 10px;
   border-radius: 8px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-strong);
   font-size: 11px;
   font-family: var(--mono);
   color: var(--text);
@@ -136,5 +168,9 @@
 
   .topbar {
     grid-template-columns: auto 1fr;
+  }
+
+  .topbar__file {
+    display: none;
   }
 }

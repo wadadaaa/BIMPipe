@@ -12,8 +12,8 @@
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(rgba(255, 255, 255, 0.022) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+    linear-gradient(var(--viewer-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--viewer-grid) 1px, transparent 1px);
   background-size: 52px 52px;
   opacity: 0.45;
 }
@@ -23,7 +23,7 @@
   content: '';
   position: absolute;
   inset: 0;
-  background: radial-gradient(circle at center, transparent 40%, rgba(4, 6, 9, 0.62) 100%);
+  background: radial-gradient(circle at center, transparent 40%, var(--viewer-vignette-strong) 100%);
 }
 
 /* ── HUD ── */
@@ -48,7 +48,7 @@
   padding: 5px 9px;
   border-radius: 999px;
   border: 1px solid var(--border);
-  background: rgba(8, 11, 18, 0.78);
+  background: var(--overlay-bg);
   color: var(--text);
   font-size: 10px;
   font-weight: 600;
@@ -78,7 +78,7 @@
   padding: 20px 22px;
   border-radius: 18px;
   border: 1px solid var(--border-strong);
-  background: rgba(8, 11, 18, 0.80);
+  background: var(--overlay-bg-strong);
   backdrop-filter: blur(20px);
   box-shadow: var(--shadow);
   text-align: center;

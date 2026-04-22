@@ -85,7 +85,7 @@
   padding: 10px 10px 11px;
   border-radius: 12px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-soft);
 }
 
 .validation-panel__stat-label {
@@ -206,7 +206,7 @@
   padding: 12px 14px;
   border-radius: 12px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-soft);
   font-size: 13px;
   color: var(--text);
   line-height: 1.5;
@@ -224,7 +224,7 @@
   line-height: 1.5;
   border: 1px dashed var(--border-strong);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--surface-muted);
 }
 
 .validation-panel__empty-icon {
@@ -235,5 +235,5 @@
   place-items: center;
   font-size: 18px;
   color: var(--text-soft);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-strong);
 }

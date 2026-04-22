@@ -21,7 +21,7 @@
   align-items: center;
   justify-content: center;
   user-select: none;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--surface-muted);
   min-height: 88px;
 }
 
@@ -41,14 +41,14 @@
 .ifc-upload__zone--loaded {
   border-style: solid;
   border-color: var(--border);
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--surface-soft);
   padding: 14px 16px;
   min-height: 0;
 }
 
 .ifc-upload__zone--loaded:hover {
   border-color: var(--border-strong);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-strong);
 }
 
 /* ── Idle state ── */
@@ -129,7 +129,7 @@
   padding: 10px 12px;
   border-radius: 12px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--surface-soft);
 }
 
 .ifc-upload__meta-label {

@@ -6,6 +6,7 @@ import { ViewTransition } from '@/shared/reactViewTransition'
 import { ViewerPlaceholder } from '@/viewer/ViewerPlaceholder'
 import { WorkspaceLayout } from '@/widgets/WorkspaceLayout'
 import { TopBar } from '@/widgets/TopBar'
+import type { ThemeMode } from '@/app/App'
 import { getIfcApi } from '@/shared/ifc/ifcApi'
 import { parseStoreys } from '@/shared/ifc/parseStoreys'
 import type { FloorMeshes } from '@/shared/ifc/extractFloorMeshes'
@@ -55,6 +56,11 @@ function waitForNextPaint(): Promise<void> {
   })
 }
 
+interface WorkspacePageProps {
+  theme: ThemeMode
+  onToggleTheme: () => void
+}
+
 const FloorViewer = lazy(async () => {
   const mod = await loadFloorViewerModule()
   return { default: mod.FloorViewer }
@@ -66,7 +72,10 @@ const Model3DViewer = lazy(async () => {
 })
 
 
-export function WorkspacePage() {
+export function WorkspacePage({
+  theme = 'dark',
+  onToggleTheme = () => {},
+}: Partial<WorkspacePageProps>) {
   // --- file / model ---
   const webIfcModelIdRef = useRef<number | null>(null)
   const [webIfcModelId, setWebIfcModelId] = useState<number | null>(null)
@@ -424,6 +433,7 @@ export function WorkspacePage() {
         webIfcModelId={webIfcModelId}
         storeys={storeys}
         risers={risers}
+        theme={theme}
         onSwitch2D={() => setViewMode('2d')}
       />
     </Suspense>
@@ -440,6 +450,7 @@ export function WorkspacePage() {
           floorMeshes={floorMeshes}
           isLoading={isExtractingGeometry}
           error={geometryError}
+          theme={theme}
           onObjectHover={setHoveredExpressId}
           onObjectSelect={setSelectedExpressId}
           modelFileName={modelFileName}
@@ -485,7 +496,14 @@ export function WorkspacePage() {
 
   return (
     <WorkspaceLayout
-      header={<TopBar modelFileName={modelFileName} currentStep={currentStep} />}
+      header={
+        <TopBar
+          modelFileName={modelFileName}
+          currentStep={currentStep}
+          theme={theme}
+          onToggleTheme={onToggleTheme}
+        />
+      }
       leftPanel={leftPanel}
       centerPanel={centerPanel}
       rightPanel={rightPanel}

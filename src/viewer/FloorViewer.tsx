@@ -1,6 +1,7 @@
 import { startTransition, useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { MapControls } from 'three/examples/jsm/controls/MapControls.js'
+import type { ThemeMode } from '@/app/App'
 import type { FloorMeshes } from '@/shared/ifc/extractFloorMeshes'
 import type { Fixture, FixtureKind, KitchenArea, Riser, RiserId } from '@/domain/types'
 import { ViewTransition } from '@/shared/reactViewTransition'
@@ -13,6 +14,7 @@ interface FloorViewerProps {
   floorMeshes: FloorMeshes | null
   isLoading: boolean
   error: string | null
+  theme: ThemeMode
   onObjectHover: (expressId: number | null) => void
   onObjectSelect: (expressId: number | null) => void
   modelFileName?: string | null
@@ -36,6 +38,7 @@ export function FloorViewer({
   floorMeshes,
   isLoading,
   error,
+  theme,
   onObjectHover,
   onObjectSelect,
   modelFileName = null,
@@ -95,10 +98,10 @@ export function FloorViewer({
 
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
     renderer.setPixelRatio(window.devicePixelRatio)
-    renderer.setClearColor(0x05070d, 1)
+    renderer.setClearColor(readViewerBackgroundColor(), 1)
 
     const scene = new THREE.Scene()
-    scene.background = new THREE.Color(0x05070d)
+    scene.background = readViewerBackgroundColor()
 
     const w = canvas.clientWidth || 800
     const h = canvas.clientHeight || 600
@@ -185,6 +188,17 @@ export function FloorViewer({
   }, [onObjectHover, onObjectSelect])
 
   useEffect(() => {
+    const renderer = rendererRef.current
+    const scene = sceneRef.current
+    if (!renderer || !scene) return
+
+    const viewerBackground = readViewerBackgroundColor()
+    renderer.setClearColor(viewerBackground, 1)
+    scene.background = viewerBackground
+    scheduleRender()
+  }, [theme])
+
+  useEffect(() => {
     const scene = sceneRef.current
     const camera = cameraRef.current
     const controls = controlsRef.current
@@ -208,7 +222,7 @@ export function FloorViewer({
     }
 
     const { group, boundingBox } = floorMeshes
-    styleFloorGroup(group)
+    styleFloorGroup(group, theme)
     scene.add(group)
     floorGroupRef.current = group
     boundsRef.current = boundingBox
@@ -224,7 +238,7 @@ export function FloorViewer({
       .normalize()
     planPlaneRef.current.setFromNormalAndCoplanarPoint(camNormal, center)
     scheduleRender()
-  }, [floorMeshes, onObjectHover, onObjectSelect])
+  }, [floorMeshes, onObjectHover, onObjectSelect, theme])
 
   useEffect(() => {
     const floorGroup = floorGroupRef.current
@@ -628,7 +642,6 @@ export function FloorViewer({
                   onPointerDown={(e) => handleRiserPointerDown(e, riser)}
                   onPointerMove={(e) => handleRiserPointerMove(e, riser)}
                   onPointerUp={handleRiserPointerUp}
-                  title={`${riser.stackLabel} — drag to reposition`}
                   aria-label={riser.stackLabel}
                 >
                   {riser.stackLabel}
@@ -903,7 +916,7 @@ function fitCamera(
   controls.update()
 }
 
-function styleFloorGroup(group: THREE.Group) {
+function styleFloorGroup(group: THREE.Group, theme: ThemeMode) {
   group.traverse((object) => {
     if (!(object instanceof THREE.Mesh)) return
 
@@ -911,7 +924,7 @@ function styleFloorGroup(group: THREE.Group) {
     if (!(material instanceof THREE.MeshBasicMaterial)) return
 
     const themedMaterial = material.clone()
-    const surfaceColor = createSurfaceColor(material.color)
+    const surfaceColor = createSurfaceColor(material.color, theme)
 
     themedMaterial.color.copy(surfaceColor)
     themedMaterial.transparent = true
@@ -1021,13 +1034,15 @@ function clearInteractionState(
 }
 
 
-function createSurfaceColor(source: THREE.Color): THREE.Color {
-  // Preserve the original IFC hue but push lightness up so elements are
-  // readable on the dark background without the desaturated blue-gray cast.
+function createSurfaceColor(source: THREE.Color, theme: ThemeMode): THREE.Color {
+  // Preserve the original IFC hue while shifting lightness toward the active
+  // viewer theme so plan geometry remains readable on both canvases.
   const hsl = { h: 0, s: 0, l: 0 }
   source.getHSL(hsl)
-  const l = THREE.MathUtils.clamp(hsl.l + 0.45, 0.72, 0.96)
-  const s = hsl.s * 0.35 // reduce saturation for a clean plan aesthetic
+  const l = theme === 'dark'
+    ? THREE.MathUtils.clamp(hsl.l + 0.45, 0.72, 0.96)
+    : THREE.MathUtils.clamp(hsl.l - 0.08, 0.34, 0.62)
+  const s = hsl.s * 0.35
   return new THREE.Color().setHSL(hsl.h, s, l)
 }
 
@@ -1049,4 +1064,12 @@ function disposeSceneObject(root: THREE.Object3D) {
       }
     }
   })
+}
+
+function readViewerBackgroundColor(): THREE.Color {
+  const viewerBackground = getComputedStyle(document.documentElement)
+    .getPropertyValue('--viewer-bg')
+    .trim()
+
+  return new THREE.Color(viewerBackground || '#040609')
 }
