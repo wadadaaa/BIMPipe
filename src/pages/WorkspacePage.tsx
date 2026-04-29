@@ -106,7 +106,7 @@ export function WorkspacePage({
   // --- risers ---
   const [risers, setRisers] = useState<Riser[]>([])
   const [isAddingRiser, setIsAddingRiser] = useState(false)
-  const [downloadMode, setDownloadMode] = useState<'plumbing' | 'full' | null>(null)
+  const [downloadMode, setDownloadMode] = useState<'full' | null>(null)
   const [downloadError, setDownloadError] = useState<string | null>(null)
 
   // --- sidebar ---
@@ -324,7 +324,7 @@ export function WorkspacePage({
     })
   }
 
-  async function handleDownloadIfc(mode: 'plumbing' | 'full') {
+  async function handleDownloadIfc() {
     if (
       sourceIfcBytesRef.current === null ||
       selectedStoreyId === null ||
@@ -334,36 +334,52 @@ export function WorkspacePage({
       return
     }
 
-    setDownloadMode(mode)
+    setDownloadMode('full')
     setDownloadError(null)
 
     try {
       const api = await getIfcApi()
-      const exportedBytes = mode === 'plumbing'
-        ? await (await import('@/shared/ifc/exportIfcWithRisers')).exportIfcWithRisers(
-            api,
-            sourceIfcBytesRef.current,
-            selectedStoreyId,
-            risers,
-          )
-        : await (await import('@/shared/ifc/exportFullIfcWithRisers')).exportFullIfcWithRisers(
-            api,
-            sourceIfcBytesRef.current,
-            selectedStoreyId,
-            risers,
-          )
+      const exportRunId = createExportRunId()
+      const timestamp = new Date().toISOString()
+      const { exportFullIfcWithRisersWithDebug } = await import('@/shared/ifc/exportFullIfcWithRisers')
+      const fullExport = await exportFullIfcWithRisersWithDebug(
+        api,
+        sourceIfcBytesRef.current,
+        selectedStoreyId,
+        risers,
+        floorMeshes
+          ? {
+              minX: floorMeshes.boundingBox.min.x,
+              maxX: floorMeshes.boundingBox.max.x,
+              minZ: floorMeshes.boundingBox.min.z,
+              maxZ: floorMeshes.boundingBox.max.z,
+            }
+          : null,
+        {
+          exportRunId,
+          timestamp,
+          sourceIfcName: modelFileName,
+          storeys: storeys.map((storey) => ({
+            id: storey.id,
+            name: storey.name,
+            elevation: storey.elevation,
+          })),
+        },
+      )
 
       downloadBinary(
-        exportedBytes,
-        buildExportFileName(modelFileName, selectedStorey?.name ?? null, mode),
+        fullExport.ifcBytes,
+        buildExportFileName(modelFileName, selectedStorey?.name ?? null),
+      )
+      downloadJson(
+        fullExport.debugMapping,
+        buildExportDebugFileName(modelFileName, selectedStorey?.name ?? null),
       )
     } catch (err) {
       setDownloadError(
         err instanceof Error
           ? err.message
-          : mode === 'plumbing'
-            ? 'Failed to generate the plumbing-only IFC.'
-            : 'Failed to generate the full IFC.',
+          : 'Failed to generate the IFC.',
       )
     } finally {
       setDownloadMode(null)
@@ -489,8 +505,7 @@ export function WorkspacePage({
       onRemoveRiser={handleRemoveRiser}
       downloadMode={downloadMode}
       downloadError={downloadError}
-      onDownloadPlumbingIfc={() => void handleDownloadIfc('plumbing')}
-      onDownloadFullIfc={() => void handleDownloadIfc('full')}
+      onDownloadFullIfc={() => void handleDownloadIfc()}
     />
   )
 
@@ -600,22 +615,39 @@ function ensureRiserStackLabels(
 function buildExportFileName(
   fileName: string,
   storeyName: string | null,
-  mode: 'plumbing' | 'full',
 ): string {
   const baseName = fileName.replace(/\.ifc$/i, '')
   const storeySegment = storeyName
     ? `-${storeyName.trim().replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase()}`
     : ''
 
-  return mode === 'plumbing'
-    ? `${baseName}${storeySegment}-plumbing.ifc`
-    : `${baseName}${storeySegment}-full.ifc`
+  return `${baseName}${storeySegment}-full.ifc`
+}
+
+function buildExportDebugFileName(
+  fileName: string,
+  storeyName: string | null,
+): string {
+  return buildExportFileName(fileName, storeyName).replace(/\.ifc$/i, '-riser-mapping.json')
+}
+
+function createExportRunId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `riser-export-${Date.now().toString(36)}`
 }
 
 function downloadBinary(bytes: Uint8Array, fileName: string) {
   const buffer = new ArrayBuffer(bytes.byteLength)
   new Uint8Array(buffer).set(bytes)
   const blob = new Blob([buffer], { type: 'application/octet-stream' })
+  downloadBlob(blob, fileName)
+}
+
+function downloadJson(value: unknown, fileName: string) {
+  const blob = new Blob([`${JSON.stringify(value, null, 2)}\n`], { type: 'application/json' })
+  downloadBlob(blob, fileName)
+}
+
+function downloadBlob(blob: Blob, fileName: string) {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url

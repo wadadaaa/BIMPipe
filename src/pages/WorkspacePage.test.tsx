@@ -9,8 +9,8 @@ const mocks = vi.hoisted(() => ({
   extractFloorMeshes: vi.fn(),
   detectFixtures: vi.fn(),
   detectKitchens: vi.fn(),
-  exportIfcWithRisers: vi.fn(),
   exportFullIfcWithRisers: vi.fn(),
+  exportFullIfcWithRisersWithDebug: vi.fn(),
 }))
 
 vi.mock('@/shared/ifc/ifcApi', () => ({
@@ -33,12 +33,9 @@ vi.mock('@/shared/ifc/detectKitchens', () => ({
   detectKitchens: mocks.detectKitchens,
 }))
 
-vi.mock('@/shared/ifc/exportIfcWithRisers', () => ({
-  exportIfcWithRisers: mocks.exportIfcWithRisers,
-}))
-
 vi.mock('@/shared/ifc/exportFullIfcWithRisers', () => ({
   exportFullIfcWithRisers: mocks.exportFullIfcWithRisers,
+  exportFullIfcWithRisersWithDebug: mocks.exportFullIfcWithRisersWithDebug,
 }))
 
 vi.mock('@/viewer/FloorViewer', () => ({
@@ -117,8 +114,20 @@ describe('WorkspacePage', () => {
         ],
       },
     ])
-    mocks.exportIfcWithRisers.mockResolvedValue(new Uint8Array([5, 4, 3]))
     mocks.exportFullIfcWithRisers.mockResolvedValue(new Uint8Array([8, 7, 6]))
+    mocks.exportFullIfcWithRisersWithDebug.mockResolvedValue({
+      ifcBytes: new Uint8Array([8, 7, 6]),
+      debugMapping: {
+        exportRunId: 'test-run',
+        timestamp: '2026-04-27T00:00:00.000Z',
+        sourceIfcName: 'tower.ifc',
+        schema: 'IFC2X3',
+        sourceFloorPlanBounds: { minX: 0, maxX: 1200, minZ: 0, maxZ: 1200 },
+        risers: [],
+        warnings: [],
+        notes: [],
+      },
+    })
   })
 
   afterEach(() => {
@@ -132,8 +141,8 @@ describe('WorkspacePage', () => {
     mocks.extractFloorMeshes.mockReset()
     mocks.detectFixtures.mockReset()
     mocks.detectKitchens.mockReset()
-    mocks.exportIfcWithRisers.mockReset()
     mocks.exportFullIfcWithRisers.mockReset()
+    mocks.exportFullIfcWithRisersWithDebug.mockReset()
   })
 
   it('auto-opens קומה 2 instead of מרתף 2 after upload and supports riser deletion and IFC export', async () => {
@@ -166,13 +175,13 @@ describe('WorkspacePage', () => {
     expect(screen.getByLabelText('Remove riser R1')).toBeInTheDocument()
     expect(screen.getByLabelText('Remove riser R3')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: /download plumbing ifc/i }))
+    await user.click(screen.getByRole('button', { name: /^download ifc$/i }))
 
     await waitFor(() => {
-      expect(mocks.exportIfcWithRisers).toHaveBeenCalledTimes(1)
+      expect(mocks.exportFullIfcWithRisersWithDebug).toHaveBeenCalledTimes(1)
     })
 
-    const [api, sourceBytes, primaryStoreyId, risers] = mocks.exportIfcWithRisers.mock.calls[0]
+    const [api, sourceBytes, primaryStoreyId, risers] = mocks.exportFullIfcWithRisersWithDebug.mock.calls[0]
     expect(api).toMatchObject({ OpenModel: expect.any(Function), CloseModel: expect.any(Function) })
     expect(sourceBytes).toBeInstanceOf(Uint8Array)
     expect(primaryStoreyId).toBe(2)
@@ -180,10 +189,10 @@ describe('WorkspacePage', () => {
     expect(new Set(risers.map((riser: { stackLabel: string }) => riser.stackLabel))).toEqual(
       new Set(['R1', 'R3']),
     )
-    expect(anchorClick).toHaveBeenCalledTimes(1)
+    expect(anchorClick).toHaveBeenCalledTimes(2)
   })
 
-  it('keeps a separate full IFC download option', async () => {
+  it('exposes one validated IFC download option that writes IFC and debug mapping', async () => {
     const user = userEvent.setup()
     render(<WorkspacePage />)
 
@@ -193,12 +202,35 @@ describe('WorkspacePage', () => {
 
     await screen.findByLabelText('Remove riser R1')
 
-    await user.click(screen.getByRole('button', { name: /download full ifc/i }))
+    expect(screen.queryByRole('button', { name: /download plumbing ifc/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /download full ifc/i })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /^download ifc$/i }))
 
     await waitFor(() => {
-      expect(mocks.exportFullIfcWithRisers).toHaveBeenCalledTimes(1)
+      expect(mocks.exportFullIfcWithRisersWithDebug).toHaveBeenCalledTimes(1)
     })
-    expect(mocks.exportIfcWithRisers).not.toHaveBeenCalled()
+
+    const [, sourceBytes, primaryStoreyId, risers, floorBounds, debugOptions] =
+      mocks.exportFullIfcWithRisersWithDebug.mock.calls[0]
+    expect(sourceBytes).toBeInstanceOf(Uint8Array)
+    expect(primaryStoreyId).toBe(2)
+    expect(risers).toHaveLength(9)
+    expect(floorBounds).toEqual({ minX: 0, maxX: 1200, minZ: 0, maxZ: 1200 })
+    expect(debugOptions).toMatchObject({
+      sourceIfcName: 'tower.ifc',
+      storeys: [
+        { id: 102, name: 'מרתף 2', elevation: -600 },
+        { id: 2, name: 'קומה 2', elevation: 612 },
+        { id: 3, name: 'קומה 3', elevation: 918 },
+      ],
+    })
+    expect(debugOptions.exportRunId).toEqual(expect.any(String))
+    expect(debugOptions.timestamp).toEqual(expect.any(String))
+    expect(anchorClick).toHaveBeenCalledTimes(2)
+    expect(
+      anchorClick.mock.contexts.map((link) => (link as HTMLAnchorElement).download),
+    ).toEqual(['tower-2-full.ifc', 'tower-2-full-riser-mapping.json'])
   })
 
   it('does not auto-open negative floor labels like קומה -2 when there is no above-ground floor 2', async () => {
