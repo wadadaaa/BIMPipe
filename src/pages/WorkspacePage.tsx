@@ -503,6 +503,7 @@ export function WorkspacePage({
       onToggleAddRiser={handleToggleAddRiser}
       onSuggestRisers={handleSuggestRisers}
       onRemoveRiser={handleRemoveRiser}
+      canDownloadIfc={risers.length > 0}
       downloadMode={downloadMode}
       downloadError={downloadError}
       onDownloadFullIfc={() => void handleDownloadIfc()}

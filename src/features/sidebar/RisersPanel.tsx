@@ -9,6 +9,7 @@ interface RisersPanelProps {
   onToggleAddMode: () => void
   onSuggestRisers: () => void
   onRemove: (id: RiserId) => void
+  canDownloadIfc?: boolean
   downloadMode?: 'full' | null
   downloadError?: string | null
   onDownloadFullIfc?: () => void
@@ -22,6 +23,7 @@ export function RisersPanel({
   onToggleAddMode,
   onSuggestRisers,
   onRemove,
+  canDownloadIfc = false,
   downloadMode = null,
   downloadError = null,
   onDownloadFullIfc = () => {},
@@ -29,7 +31,6 @@ export function RisersPanel({
   const canSuggest =
     fixtures.some((fixture) => fixture.position !== null) ||
     kitchens.some((kitchen) => kitchen.position !== null)
-  const canDownload = risers.length > 0
   const isDownloadingFullIfc = downloadMode === 'full'
 
   return (
@@ -68,7 +69,7 @@ export function RisersPanel({
         <button
           className="risers-panel__download-btn"
           onClick={onDownloadFullIfc}
-          disabled={!canDownload || downloadMode !== null}
+          disabled={!canDownloadIfc || downloadMode !== null}
         >
           {isDownloadingFullIfc ? 'Preparing IFC...' : 'Download IFC'}
         </button>
