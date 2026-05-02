@@ -142,8 +142,13 @@ export function LandingPage({ theme, onToggleTheme }: LandingPageProps) {
                 <span />
               </div>
               <img
+                key={theme}
                 className="landing__hero-shot"
-                src="/landing/workspace-placed-dark.png"
+                src={
+                  theme === 'light'
+                    ? '/landing/workspace-placed-light.png'
+                    : '/landing/workspace-placed-dark.png'
+                }
                 alt="BIMPipe workspace with seven risers placed across an architectural floor plan"
                 loading="eager"
                 decoding="async"
