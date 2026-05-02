@@ -83,19 +83,19 @@ export function Sidebar({
         <div className="sidebar__summary-card">
           <span className="sidebar__summary-label">Toilets</span>
           <strong className="sidebar__summary-value">
-            {selectedStoreyName ? fixtures.length : '--'}
+            {selectedStoreyName ? fixtures.length : '—'}
           </strong>
         </div>
         <div className="sidebar__summary-card">
           <span className="sidebar__summary-label">Kitchens</span>
           <strong className="sidebar__summary-value">
-            {selectedStoreyName ? kitchens.length : '--'}
+            {selectedStoreyName ? kitchens.length : '—'}
           </strong>
         </div>
         <div className="sidebar__summary-card">
           <span className="sidebar__summary-label">Risers</span>
           <strong className="sidebar__summary-value">
-            {selectedStoreyName ? risers.length : '--'}
+            {selectedStoreyName ? risers.length : '—'}
           </strong>
         </div>
       </div>
