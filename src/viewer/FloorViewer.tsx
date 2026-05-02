@@ -645,6 +645,7 @@ export function FloorViewer({
                 data-riser-x={String(riser.position.x)}
                 data-riser-y={String(riser.position.y)}
                 data-riser-z={String(riser.position.z)}
+                style={{ '--riser-enter-delay': `${Math.min(index, 16) * 60}ms` } as CSSProperties}
               >
                 <button
                   className="floor-viewer__riser-btn"
@@ -652,7 +653,6 @@ export function FloorViewer({
                   onPointerMove={(e) => handleRiserPointerMove(e, riser)}
                   onPointerUp={handleRiserPointerUp}
                   aria-label={riser.stackLabel}
-                  style={{ '--riser-enter-delay': `${Math.min(index, 16) * 60}ms` } as CSSProperties}
                 >
                   {riser.stackLabel}
                 </button>

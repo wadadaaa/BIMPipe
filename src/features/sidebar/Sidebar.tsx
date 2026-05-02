@@ -82,19 +82,35 @@ export function Sidebar({
       <div className="sidebar__summary-grid">
         <div className="sidebar__summary-card">
           <span className="sidebar__summary-label">Toilets</span>
-          <strong className="sidebar__summary-value">
+          <strong
+            key={`toilets-${selectedStoreyName ? fixtures.length : 'idle'}`}
+            className="sidebar__summary-value sidebar__summary-value--flash"
+          >
             {selectedStoreyName ? fixtures.length : '—'}
           </strong>
         </div>
         <div className="sidebar__summary-card">
           <span className="sidebar__summary-label">Kitchens</span>
-          <strong className="sidebar__summary-value">
+          <strong
+            key={`kitchens-${selectedStoreyName ? kitchens.length : 'idle'}`}
+            className="sidebar__summary-value sidebar__summary-value--flash"
+          >
             {selectedStoreyName ? kitchens.length : '—'}
           </strong>
         </div>
-        <div className="sidebar__summary-card">
+        <div
+          className={[
+            'sidebar__summary-card',
+            risers.length > 0 ? 'sidebar__summary-card--accent' : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+        >
           <span className="sidebar__summary-label">Risers</span>
-          <strong className="sidebar__summary-value">
+          <strong
+            key={`risers-${selectedStoreyName ? risers.length : 'idle'}`}
+            className="sidebar__summary-value sidebar__summary-value--flash"
+          >
             {selectedStoreyName ? risers.length : '—'}
           </strong>
         </div>

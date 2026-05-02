@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { Fixture } from '@/domain/types'
 import './FixturesPanel.css'
 
@@ -16,6 +17,15 @@ export function FixturesPanel({
   hasRisers = false,
   onPlaceRisers,
 }: FixturesPanelProps) {
+  const [isFiring, setIsFiring] = useState(false)
+
+  function handlePlaceRisers() {
+    if (!onPlaceRisers || !canPlaceRisers) return
+    setIsFiring(true)
+    window.setTimeout(() => setIsFiring(false), 550)
+    onPlaceRisers()
+  }
+
   if (isLoading) {
     return (
       <div className="fixtures-panel">
@@ -56,10 +66,11 @@ export function FixturesPanel({
           className={[
             'fixtures-panel__place-cta',
             hasRisers ? 'fixtures-panel__place-cta--reset' : '',
+            isFiring ? 'fixtures-panel__place-cta--firing' : '',
           ]
             .filter(Boolean)
             .join(' ')}
-          onClick={onPlaceRisers}
+          onClick={handlePlaceRisers}
           disabled={!canPlaceRisers}
         >
           <span className="fixtures-panel__place-cta-icon" aria-hidden="true">
