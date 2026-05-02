@@ -69,4 +69,40 @@ describe('Sidebar', () => {
     expect(screen.queryByLabelText('Remove riser R1')).not.toBeInTheDocument()
     expect(screen.getByLabelText('Remove riser R2')).toBeInTheDocument()
   })
+
+  it('enables IFC download from explicit full-model availability even when the visible floor has no risers', async () => {
+    const onDownloadFullIfc = vi.fn()
+    render(
+      <Sidebar
+        activeTab="risers"
+        onTabChange={vi.fn()}
+        selectedStoreyName="03"
+        risers={[]}
+        canDownloadIfc
+        onDownloadFullIfc={onDownloadFullIfc}
+      />,
+    )
+
+    expect(screen.getByText(/no risers placed yet/i)).toBeInTheDocument()
+
+    const downloadButton = screen.getByRole('button', { name: /^download ifc$/i })
+    expect(downloadButton).toBeEnabled()
+
+    await userEvent.click(downloadButton)
+    expect(onDownloadFullIfc).toHaveBeenCalledTimes(1)
+  })
+
+  it('disables IFC download when no risers exist anywhere', () => {
+    render(
+      <Sidebar
+        activeTab="risers"
+        onTabChange={vi.fn()}
+        selectedStoreyName="03"
+        risers={[]}
+        canDownloadIfc={false}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: /^download ifc$/i })).toBeDisabled()
+  })
 })

@@ -9,9 +9,9 @@ interface RisersPanelProps {
   onToggleAddMode: () => void
   onSuggestRisers: () => void
   onRemove: (id: RiserId) => void
-  downloadMode?: 'plumbing' | 'full' | null
+  canDownloadIfc?: boolean
+  downloadMode?: 'full' | null
   downloadError?: string | null
-  onDownloadPlumbingIfc?: () => void
   onDownloadFullIfc?: () => void
 }
 
@@ -23,16 +23,14 @@ export function RisersPanel({
   onToggleAddMode,
   onSuggestRisers,
   onRemove,
+  canDownloadIfc = false,
   downloadMode = null,
   downloadError = null,
-  onDownloadPlumbingIfc = () => {},
   onDownloadFullIfc = () => {},
 }: RisersPanelProps) {
   const canSuggest =
     fixtures.some((fixture) => fixture.position !== null) ||
     kitchens.some((kitchen) => kitchen.position !== null)
-  const canDownload = risers.length > 0
-  const isDownloadingPlumbingIfc = downloadMode === 'plumbing'
   const isDownloadingFullIfc = downloadMode === 'full'
 
   return (
@@ -70,19 +68,11 @@ export function RisersPanel({
       <div className="risers-panel__download-actions">
         <button
           className="risers-panel__download-btn"
-          onClick={onDownloadPlumbingIfc}
-          disabled={!canDownload || downloadMode !== null}
-        >
-          <DownloadIcon spinning={isDownloadingPlumbingIfc} />
-          <span>{isDownloadingPlumbingIfc ? 'Preparing plumbing IFC' : 'Download plumbing IFC'}</span>
-        </button>
-        <button
-          className="risers-panel__download-btn risers-panel__download-btn--secondary"
           onClick={onDownloadFullIfc}
-          disabled={!canDownload || downloadMode !== null}
+          disabled={!canDownloadIfc || downloadMode !== null}
         >
           <DownloadIcon spinning={isDownloadingFullIfc} />
-          <span>{isDownloadingFullIfc ? 'Preparing full IFC' : 'Download full IFC'}</span>
+          <span>{isDownloadingFullIfc ? 'Preparing IFC' : 'Download IFC'}</span>
         </button>
       </div>
 
