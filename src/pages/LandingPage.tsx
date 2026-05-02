@@ -34,7 +34,7 @@ const PIPELINE_STEPS: Array<{ index: string; title: string; copy: string; icon: 
   {
     index: '05',
     title: 'Export',
-    copy: 'Download an enriched IFC ready for Revit. Plumbing-only or full model — your call.',
+    copy: 'Download an enriched IFC ready for Revit, ArchiCAD, or any IFC-aware tool.',
     icon: 'export',
   },
 ]
@@ -130,10 +130,6 @@ export function LandingPage({ theme, onToggleTheme }: LandingPageProps) {
               <li>
                 <DotIcon />
                 Up to 50 MB IFC · 30 storeys
-              </li>
-              <li>
-                <DotIcon />
-                Plumbing-only or full export
               </li>
             </ul>
           </div>
