@@ -175,7 +175,7 @@ export function WorkspacePage({
       preloadFloorInspectionModules()
       const defaultStoreyId = findDefaultStoreyId(parsed)
       if (defaultStoreyId !== null) {
-        void openStorey(defaultStoreyId, parsed)
+        void openStorey(defaultStoreyId)
       }
     } catch (err) {
       setUploadError(
@@ -186,7 +186,7 @@ export function WorkspacePage({
     }
   }
 
-  async function openStorey(id: StoreyId, availableStoreys: Storey[] = storeys) {
+  async function openStorey(id: StoreyId) {
     const modelId = webIfcModelIdRef.current
     if (modelId === null) return
 
@@ -202,7 +202,7 @@ export function WorkspacePage({
     setIsDetectingFixtures(true)
     // Risers are NOT cleared — they span all floors and persist across selection.
     setIsAddingRiser(false)
-    setActiveTab('risers')
+    setActiveTab(risers.length > 0 ? 'risers' : 'fixtures')
     setDownloadError(null)
 
     await waitForNextPaint()
@@ -234,20 +234,11 @@ export function WorkspacePage({
         startTransition(() => {
           setFixtures(toiletFixtures)
           setKitchens(kitchensResult)
-          // Auto-suggest only if no risers have been placed yet (first floor opened).
-          setRisers((prev) => {
-            if (prev.length > 0) return prev
-            nextRiserLabelRef.current = 1
-            return buildSuggestedRisers(
-              availableStoreys,
-              id,
-              toiletFixtures,
-              kitchensResult,
-              meshes,
-              nextRiserLabelRef,
-            )
-          })
-          setActiveTab('risers')
+          // Detection and placement are split into two distinct phases.
+          // Risers are placed only when the user explicitly clicks Suggest.
+          if (risers.length === 0) {
+            setActiveTab('fixtures')
+          }
         })
       } catch {
         // Detection failure is non-fatal — floor plan stays visible, fixtures stay empty.

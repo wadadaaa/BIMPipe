@@ -136,6 +136,12 @@ export function Sidebar({
               <FixturesPanel
                 fixtures={fixtures}
                 isLoading={isDetectingFixtures}
+                canPlaceRisers={
+                  fixtures.some((fixture) => fixture.position !== null) ||
+                  kitchens.some((kitchen) => kitchen.position !== null)
+                }
+                hasRisers={risers.length > 0}
+                onPlaceRisers={onSuggestRisers}
               />
             ) : (
               <RisersPanel

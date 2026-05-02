@@ -457,3 +457,133 @@
 .fixtures-panel__diagnostics--inline {
   padding-top: 4px;
 }
+
+/* ── Place-risers CTA ── */
+.fixtures-panel__place-cta {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--accent-border);
+  background: linear-gradient(
+    135deg,
+    var(--accent-bg) 0%,
+    var(--surface-strong) 100%
+  );
+  color: var(--text-h);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color 150ms,
+    background 150ms,
+    transform 150ms,
+    box-shadow 200ms;
+  animation: fixtures-cta-enter 320ms ease-out both;
+}
+
+.fixtures-panel__place-cta:hover:not(:disabled) {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 22px -16px var(--accent-glow), 0 0 0 1px var(--accent-border);
+}
+
+.fixtures-panel__place-cta:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.fixtures-panel__place-cta:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.fixtures-panel__place-cta--reset {
+  background: var(--surface-soft);
+  border-color: var(--border-strong);
+}
+
+.fixtures-panel__place-cta-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  border: 1px solid var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.fixtures-panel__place-cta-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.fixtures-panel__place-cta-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fixtures-panel__place-cta-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.fixtures-panel__place-cta-meta {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text);
+}
+
+.fixtures-panel__place-cta-arrow {
+  width: 14px;
+  height: 14px;
+  color: var(--accent);
+  flex-shrink: 0;
+  transition: transform 200ms;
+}
+
+.fixtures-panel__place-cta:hover:not(:disabled) .fixtures-panel__place-cta-arrow {
+  transform: translateX(2px);
+}
+
+@keyframes fixtures-cta-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Stagger enter for fixture list rows ── */
+.fixtures-panel__item-row--enter {
+  animation: fixtures-row-enter 280ms cubic-bezier(0.2, 0.6, 0.2, 1) both;
+}
+
+@keyframes fixtures-row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fixtures-panel__place-cta,
+  .fixtures-panel__item-row--enter {
+    animation: none;
+  }
+}
