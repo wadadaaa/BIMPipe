@@ -134,18 +134,23 @@ export function LandingPage({ theme, onToggleTheme }: LandingPageProps) {
               <span />
               <span />
             </div>
-            <img
+            <video
               key={theme}
-              src={
+              className="landing__shot-video"
+              src="/landing/promo.mp4"
+              poster={
                 theme === 'light'
                   ? '/landing/workspace-placed-light.png'
                   : '/landing/workspace-placed-dark.png'
               }
-              alt="BIMPipe workspace with seven risers placed across an architectural floor plan"
-              loading="eager"
-              decoding="async"
-              width="1600"
-              height="1000"
+              autoPlay
+              muted
+              loop
+              playsInline
+              preload="metadata"
+              aria-label="BIMPipe demo: detecting toilets and placing risers across an IFC floor plan"
+              width="1920"
+              height="1080"
             />
           </div>
         </figure>

@@ -319,10 +319,12 @@
   background: var(--landing-border-strong);
 }
 
-.landing__shot img {
+.landing__shot img,
+.landing__shot-video {
   display: block;
   width: 100%;
   height: auto;
+  background: var(--landing-bg-elev);
 }
 
 /* ─────────────── Pipeline ─────────────── */
