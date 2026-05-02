@@ -143,9 +143,13 @@ select {
   margin: 0;
   text-align: left;
   border-inline: none;
+  display: block;
+}
+
+/* Workspace locks the root viewport; the landing page is allowed to scroll. */
+#root:has(> .workspace-layout) {
   height: 100svh;
   overflow: hidden;
-  display: block;
 }
 
 h1,
@@ -348,7 +352,7 @@ code {
     font-size: 15px;
   }
 
-  #root {
+  #root:has(> .workspace-layout) {
     height: auto;
     min-height: 100svh;
     overflow: visible;
