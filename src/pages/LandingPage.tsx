@@ -63,10 +63,10 @@ const PRINCIPLES: Array<{ label: string; copy: string }> = [
 
 export function LandingPage({ theme, onToggleTheme }: LandingPageProps) {
   return (
-    <div className="cursor-landing">
-      <header className="cursor-landing__nav">
-        <a className="cursor-landing__brand" href="/" aria-label="BIMPipe">
-          <span className="cursor-landing__brand-mark" aria-hidden="true">
+    <div className="landing">
+      <header className="landing__nav">
+        <a className="landing__brand" href="/" aria-label="BIMPipe">
+          <span className="landing__brand-mark" aria-hidden="true">
             <svg viewBox="0 0 20 20" fill="none">
               <circle cx="10" cy="10" r="6.5" stroke="currentColor" strokeWidth="1.5" />
               <circle cx="10" cy="10" r="2.5" stroke="currentColor" strokeWidth="1.2" />
@@ -80,56 +80,56 @@ export function LandingPage({ theme, onToggleTheme }: LandingPageProps) {
           </span>
           <span>BIMPipe</span>
         </a>
-        <nav className="cursor-landing__nav-links" aria-label="Sections">
+        <nav className="landing__nav-links" aria-label="Sections">
           <a href="#pipeline">Pipeline</a>
           <a href="#principles">Principles</a>
         </nav>
-        <div className="cursor-landing__nav-actions">
+        <div className="landing__nav-actions">
           <button
             type="button"
-            className="cursor-landing__icon-btn"
+            className="landing__icon-btn"
             onClick={onToggleTheme}
             aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
           >
             {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
           </button>
-          <a className="cursor-landing__cta" href="/app">
+          <a className="landing__cta" href="/app">
             Open app
           </a>
         </div>
       </header>
 
-      <section className="cursor-landing__hero">
-        <span className="cursor-landing__tag">
+      <section className="landing__hero">
+        <span className="landing__tag">
           <DotMark />
           <span>Sanitary &amp; drainage planning, IFC-native</span>
         </span>
-        <h1 className="cursor-landing__h1">
+        <h1 className="landing__h1">
           The riser layer
           <br />
           for your IFC.
         </h1>
-        <p className="cursor-landing__lede">
+        <p className="landing__lede">
           Drop an architect's IFC. See every toilet and kitchen detected.
           Place vertical risers in seconds. Hand a clean IFC back to Revit.
         </p>
-        <div className="cursor-landing__hero-cta">
-          <a className="cursor-landing__cta cursor-landing__cta--primary" href="/app">
+        <div className="landing__hero-cta">
+          <a className="landing__cta landing__cta--primary" href="/app">
             Try it with your IFC
           </a>
-          <a className="cursor-landing__cta cursor-landing__cta--ghost" href="#pipeline">
+          <a className="landing__cta landing__cta--ghost" href="#pipeline">
             See how it works
           </a>
         </div>
-        <div className="cursor-landing__meta">
+        <div className="landing__meta">
           <span>Web-only · nothing uploaded</span>
-          <span className="cursor-landing__meta-sep" aria-hidden="true">—</span>
+          <span className="landing__meta-sep" aria-hidden="true">—</span>
           <span>Up to 50 MB IFC · 30 storeys</span>
         </div>
 
-        <figure className="cursor-landing__shot">
-          <div className="cursor-landing__shot-frame">
-            <div className="cursor-landing__shot-bar" aria-hidden="true">
+        <figure className="landing__shot">
+          <div className="landing__shot-frame">
+            <div className="landing__shot-bar" aria-hidden="true">
               <span />
               <span />
               <span />
@@ -151,51 +151,51 @@ export function LandingPage({ theme, onToggleTheme }: LandingPageProps) {
         </figure>
       </section>
 
-      <section id="pipeline" className="cursor-landing__pipeline">
-        <div className="cursor-landing__section-head">
-          <span className="cursor-landing__kicker">// pipeline</span>
-          <h2 className="cursor-landing__h2">Five steps. Each one explicit.</h2>
+      <section id="pipeline" className="landing__pipeline">
+        <div className="landing__section-head">
+          <span className="landing__kicker">// pipeline</span>
+          <h2 className="landing__h2">Five steps. Each one explicit.</h2>
         </div>
-        <ol className="cursor-landing__steps">
+        <ol className="landing__steps">
           {STEPS.map((step) => (
-            <li key={step.index} className="cursor-landing__step">
-              <span className="cursor-landing__step-index">{step.index}</span>
-              <h3 className="cursor-landing__step-title">{step.title}</h3>
-              <p className="cursor-landing__step-copy">{step.copy}</p>
+            <li key={step.index} className="landing__step">
+              <span className="landing__step-index">{step.index}</span>
+              <h3 className="landing__step-title">{step.title}</h3>
+              <p className="landing__step-copy">{step.copy}</p>
             </li>
           ))}
         </ol>
       </section>
 
-      <section id="principles" className="cursor-landing__principles">
-        <div className="cursor-landing__section-head">
-          <span className="cursor-landing__kicker">// principles</span>
-          <h2 className="cursor-landing__h2">Opinionated where it counts.</h2>
+      <section id="principles" className="landing__principles">
+        <div className="landing__section-head">
+          <span className="landing__kicker">// principles</span>
+          <h2 className="landing__h2">Opinionated where it counts.</h2>
         </div>
-        <div className="cursor-landing__principles-grid">
+        <div className="landing__principles-grid">
           {PRINCIPLES.map((p) => (
-            <article key={p.label} className="cursor-landing__principle">
-              <h3 className="cursor-landing__principle-label">{p.label}</h3>
-              <p className="cursor-landing__principle-copy">{p.copy}</p>
+            <article key={p.label} className="landing__principle">
+              <h3 className="landing__principle-label">{p.label}</h3>
+              <p className="landing__principle-copy">{p.copy}</p>
             </article>
           ))}
         </div>
       </section>
 
-      <section className="cursor-landing__final">
-        <span className="cursor-landing__kicker">// ready</span>
-        <h2 className="cursor-landing__h1 cursor-landing__h1--final">Drop in your IFC.</h2>
-        <p className="cursor-landing__lede">
+      <section className="landing__final">
+        <span className="landing__kicker">// ready</span>
+        <h2 className="landing__h1 landing__h1--final">Drop in your IFC.</h2>
+        <p className="landing__lede">
           No signup. No queue. The model is parsed locally, the export is yours.
         </p>
-        <a className="cursor-landing__cta cursor-landing__cta--primary cursor-landing__cta--lg" href="/app">
+        <a className="landing__cta landing__cta--primary landing__cta--lg" href="/app">
           Open BIMPipe
         </a>
       </section>
 
-      <footer className="cursor-landing__footer">
-        <div className="cursor-landing__footer-left">
-          <span className="cursor-landing__brand-mark" aria-hidden="true">
+      <footer className="landing__footer">
+        <div className="landing__footer-left">
+          <span className="landing__brand-mark" aria-hidden="true">
             <svg viewBox="0 0 20 20" fill="none">
               <circle cx="10" cy="10" r="6.5" stroke="currentColor" strokeWidth="1.5" />
               <circle cx="10" cy="10" r="2.5" stroke="currentColor" strokeWidth="1.2" />
@@ -209,7 +209,7 @@ export function LandingPage({ theme, onToggleTheme }: LandingPageProps) {
           </span>
           <span>BIMPipe</span>
         </div>
-        <span className="cursor-landing__footer-tag">A scalpel inside the BIM pipeline.</span>
+        <span className="landing__footer-tag">A scalpel inside the BIM pipeline.</span>
       </footer>
     </div>
   )
@@ -244,6 +244,6 @@ function MoonIcon() {
 
 function DotMark() {
   return (
-    <span className="cursor-landing__tag-dot" aria-hidden="true" />
+    <span className="landing__tag-dot" aria-hidden="true" />
   )
 }
