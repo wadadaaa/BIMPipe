@@ -134,9 +134,24 @@ export function LandingPage({ theme, onToggleTheme }: LandingPageProps) {
             </ul>
           </div>
 
-          <div className="landing__hero-visual" aria-hidden="true">
-            <HeroFigure />
-          </div>
+          <figure className="landing__hero-visual">
+            <div className="landing__hero-frame">
+              <div className="landing__hero-frame-bar" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+              </div>
+              <img
+                className="landing__hero-shot"
+                src="/landing/workspace-placed-dark.png"
+                alt="BIMPipe workspace with seven risers placed across an architectural floor plan"
+                loading="eager"
+                decoding="async"
+                width="1600"
+                height="1000"
+              />
+            </div>
+          </figure>
         </div>
       </section>
 
@@ -434,91 +449,3 @@ function FeatureIcon({ name }: { name: 'browser' | 'override' | 'aligned' | 'rtl
   }
 }
 
-function HeroFigure() {
-  return (
-    <svg
-      className="landing__hero-svg"
-      viewBox="0 0 480 360"
-      fill="none"
-      role="img"
-      aria-label="Schematic illustration of an IFC building with vertical riser shafts"
-    >
-      <defs>
-        <linearGradient id="landing-floor" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="currentColor" stopOpacity="0.18" />
-          <stop offset="100%" stopColor="currentColor" stopOpacity="0.04" />
-        </linearGradient>
-      </defs>
-
-      <g className="landing__hero-floors" stroke="currentColor" strokeWidth="1.2">
-        {[0, 1, 2, 3, 4].map((i) => {
-          const y = 50 + i * 50
-          return (
-            <g key={i} style={{ animationDelay: `${i * 90}ms` }} className="landing__hero-floor">
-              <path
-                d={`M120 ${y} L320 ${y - 14} L420 ${y + 6} L220 ${y + 20} Z`}
-                fill="url(#landing-floor)"
-              />
-              <path d={`M120 ${y} L220 ${y + 20}`} opacity="0.4" />
-              <path d={`M320 ${y - 14} L420 ${y + 6}`} opacity="0.4" />
-            </g>
-          )
-        })}
-      </g>
-
-      <g className="landing__hero-risers">
-        {[
-          { x: 200, label: 'R1' },
-          { x: 270, label: 'R2' },
-          { x: 340, label: 'R3' },
-        ].map((riser, i) => (
-          <g key={riser.label} style={{ animationDelay: `${300 + i * 140}ms` }} className="landing__hero-riser">
-            <line
-              x1={riser.x}
-              y1={40}
-              x2={riser.x}
-              y2={260}
-              stroke="var(--accent)"
-              strokeWidth="2"
-              strokeLinecap="round"
-              opacity="0.6"
-            />
-            {[50, 100, 150, 200, 250].map((cy, j) => (
-              <circle
-                key={cy}
-                cx={riser.x}
-                cy={cy}
-                r="4"
-                fill="var(--accent)"
-                style={{ animationDelay: `${300 + i * 140 + j * 50}ms` }}
-                className="landing__hero-riser-dot"
-              />
-            ))}
-            <g transform={`translate(${riser.x}, 24)`}>
-              <rect
-                x="-14"
-                y="-10"
-                width="28"
-                height="18"
-                rx="9"
-                fill="var(--accent-bg)"
-                stroke="var(--accent-border)"
-              />
-              <text
-                x="0"
-                y="2"
-                textAnchor="middle"
-                fontSize="9"
-                fontWeight="700"
-                fill="var(--accent)"
-                fontFamily="var(--mono)"
-              >
-                {riser.label}
-              </text>
-            </g>
-          </g>
-        ))}
-      </g>
-    </svg>
-  )
-}
