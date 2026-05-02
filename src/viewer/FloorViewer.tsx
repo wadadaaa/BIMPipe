@@ -157,8 +157,12 @@ export function FloorViewer({
       if (width === 0 || height === 0) return
       renderer.setSize(width, height)
       renderer.setPixelRatio(window.devicePixelRatio)
+      // Preserve the current vertical world extent and only re-derive the
+      // horizontal extent from the new aspect — otherwise the camera bounds
+      // set by fitCamera get clobbered with a stale `frustum = 100` base,
+      // which makes the plan look mis-fitted until the user clicks Fit.
       const a = width / height
-      const half = (frustum * (1 / camera.zoom)) / 2
+      const half = camera.top
       camera.left = -half * a
       camera.right = half * a
       camera.updateProjectionMatrix()
