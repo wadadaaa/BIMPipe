@@ -6,251 +6,221 @@ interface LandingPageProps {
   onToggleTheme: () => void
 }
 
-const PIPELINE_STEPS: Array<{ index: string; title: string; copy: string; icon: 'upload' | 'detect' | 'place' | 'adjust' | 'export' }> = [
+const STEPS: Array<{ index: string; title: string; copy: string }> = [
   {
     index: '01',
     title: 'Upload',
-    copy: 'Drop a single .ifc file, parsed entirely in your browser. Nothing leaves your machine.',
-    icon: 'upload',
+    copy: 'A single .ifc file. Parsed locally. Nothing leaves your machine.',
   },
   {
     index: '02',
     title: 'Detect',
-    copy: 'Toilets and kitchens are extracted from the IFC. Floors are grouped by IfcBuildingStorey.',
-    icon: 'detect',
+    copy: 'Toilets and kitchens are extracted. Floors group by IfcBuildingStorey.',
   },
   {
     index: '03',
     title: 'Place',
-    copy: 'Risers auto-suggest one per toilet and one per kitchen, vertically aligned across floors.',
-    icon: 'place',
+    copy: 'Risers auto-suggest one per fixture, vertically aligned across floors.',
   },
   {
     index: '04',
     title: 'Adjust',
-    copy: 'Drag pins to the exact corner. Manual overrides survive re-suggest. Everything stays deterministic.',
-    icon: 'adjust',
+    copy: 'Drag pins to the exact corner. Manual overrides survive re-suggest.',
   },
   {
     index: '05',
     title: 'Export',
-    copy: 'Download an enriched IFC ready for Revit, ArchiCAD, or any IFC-aware tool.',
-    icon: 'export',
+    copy: 'An enriched IFC ready for Revit, ArchiCAD, or any IFC-aware tool.',
   },
 ]
 
-const FEATURES: Array<{ title: string; copy: string; icon: 'browser' | 'override' | 'aligned' | 'rtl' | 'deterministic' | 'ifc' }> = [
+const PRINCIPLES: Array<{ label: string; copy: string }> = [
   {
-    title: 'In-browser, end to end',
-    copy: 'No server upload, no auth, no waiting room. The IFC is parsed locally with web-ifc and never leaves the tab.',
-    icon: 'browser',
+    label: 'In-browser, end to end',
+    copy: 'No server upload, no auth, no waiting room. Parsed with web-ifc, never leaves the tab.',
   },
   {
-    title: 'Manual override always wins',
-    copy: 'Re-suggest replaces auto risers without touching anything you placed by hand. Destructive actions ask first.',
-    icon: 'override',
+    label: 'Manual override always wins',
+    copy: 'Re-suggest replaces auto risers without touching anything you placed by hand.',
   },
   {
-    title: 'Vertical alignment by default',
-    copy: 'A riser at (x, y) on one floor implies the same shaft on every floor it spans. Misalignment is flagged, not silent.',
-    icon: 'aligned',
+    label: 'Vertical alignment by default',
+    copy: 'A riser at (x, y) on one floor implies the same shaft on every floor it spans.',
   },
   {
-    title: 'Deterministic placement',
-    copy: 'Same input IFC produces identical riser positions, IDs, and ordering. No coin flips, no surprise diffs.',
-    icon: 'deterministic',
+    label: 'Deterministic placement',
+    copy: 'Same input IFC produces identical riser positions, IDs, and ordering.',
   },
   {
-    title: 'IFC in, IFC out',
-    copy: 'Stays inside the existing BIM pipeline. Open the export in Revit, ArchiCAD, or any IFC-aware tool.',
-    icon: 'ifc',
+    label: 'IFC in, IFC out',
+    copy: 'Stays inside the existing BIM pipeline. The export opens in any IFC-aware tool.',
   },
   {
-    title: 'Hebrew & RTL ready',
-    copy: 'Floor names like קומה 2 and מרתף flow naturally. Mixed-direction text gets dir="auto" so layouts stay sane.',
-    icon: 'rtl',
+    label: 'Hebrew & RTL ready',
+    copy: 'Floor names like קומה 2 flow naturally; mixed-direction text gets dir="auto".',
   },
 ]
 
 export function LandingPage({ theme, onToggleTheme }: LandingPageProps) {
   return (
-    <div className="landing">
-      <header className="landing__nav" role="banner">
-        <a href="/" className="landing__brand" aria-label="BIMPipe">
-          <BrandMark />
-          <span className="landing__brand-word">BIMPipe</span>
+    <div className="cursor-landing">
+      <header className="cursor-landing__nav">
+        <a className="cursor-landing__brand" href="/" aria-label="BIMPipe">
+          <span className="cursor-landing__brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 20 20" fill="none">
+              <circle cx="10" cy="10" r="6.5" stroke="currentColor" strokeWidth="1.5" />
+              <circle cx="10" cy="10" r="2.5" stroke="currentColor" strokeWidth="1.2" />
+              <path
+                d="M10 3.5V7.5M10 12.5V16.5M3.5 10H7.5M12.5 10H16.5"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+            </svg>
+          </span>
+          <span>BIMPipe</span>
         </a>
-        <nav className="landing__nav-links" aria-label="Page sections">
+        <nav className="cursor-landing__nav-links" aria-label="Sections">
           <a href="#pipeline">Pipeline</a>
-          <a href="#features">Features</a>
+          <a href="#principles">Principles</a>
         </nav>
-        <div className="landing__nav-actions">
+        <div className="cursor-landing__nav-actions">
           <button
             type="button"
-            className="landing__theme-toggle"
+            className="cursor-landing__icon-btn"
             onClick={onToggleTheme}
             aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
           >
-            <ThemeIcon theme={theme} />
+            {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
           </button>
-          <a className="landing__cta landing__cta--ghost" href="/app">
+          <a className="cursor-landing__cta" href="/app">
             Open app
           </a>
         </div>
       </header>
 
-      <section className="landing__hero">
-        <div className="landing__hero-grid">
-          <div className="landing__hero-copy">
-            <span className="landing__eyebrow">Sanitary &amp; drainage planning · IFC-native</span>
-            <h1 className="landing__headline">
-              Risers placed.
-              <br />
-              <span className="landing__headline-accent">Pipeline preserved.</span>
-            </h1>
-            <p className="landing__lede">
-              BIMPipe is a scalpel inside your existing BIM workflow. Drop an architect's IFC,
-              see every toilet and kitchen detected, place vertical risers in seconds, and
-              hand a clean IFC back to Revit.
-            </p>
-            <div className="landing__hero-actions">
-              <a className="landing__cta landing__cta--primary" href="/app">
-                <span>Try it with your IFC</span>
-                <ArrowIcon />
-              </a>
-              <a className="landing__cta landing__cta--text" href="#pipeline">
-                See how it works
-              </a>
-            </div>
-            <ul className="landing__hero-meta" aria-label="Key facts">
-              <li>
-                <DotIcon />
-                Web-only · nothing uploaded
-              </li>
-              <li>
-                <DotIcon />
-                Up to 50 MB IFC · 30 storeys
-              </li>
-            </ul>
-          </div>
-
-          <figure className="landing__hero-visual">
-            <div className="landing__hero-frame">
-              <div className="landing__hero-frame-bar" aria-hidden="true">
-                <span />
-                <span />
-                <span />
-              </div>
-              <img
-                key={theme}
-                className="landing__hero-shot"
-                src={
-                  theme === 'light'
-                    ? '/landing/workspace-placed-light.png'
-                    : '/landing/workspace-placed-dark.png'
-                }
-                alt="BIMPipe workspace with seven risers placed across an architectural floor plan"
-                loading="eager"
-                decoding="async"
-                width="1600"
-                height="1000"
-              />
-            </div>
-          </figure>
+      <section className="cursor-landing__hero">
+        <span className="cursor-landing__tag">
+          <DotMark />
+          <span>Sanitary &amp; drainage planning, IFC-native</span>
+        </span>
+        <h1 className="cursor-landing__h1">
+          The riser layer
+          <br />
+          for your IFC.
+        </h1>
+        <p className="cursor-landing__lede">
+          Drop an architect's IFC. See every toilet and kitchen detected.
+          Place vertical risers in seconds. Hand a clean IFC back to Revit.
+        </p>
+        <div className="cursor-landing__hero-cta">
+          <a className="cursor-landing__cta cursor-landing__cta--primary" href="/app">
+            Try it with your IFC
+          </a>
+          <a className="cursor-landing__cta cursor-landing__cta--ghost" href="#pipeline">
+            See how it works
+          </a>
         </div>
+        <div className="cursor-landing__meta">
+          <span>Web-only · nothing uploaded</span>
+          <span className="cursor-landing__meta-sep" aria-hidden="true">—</span>
+          <span>Up to 50 MB IFC · 30 storeys</span>
+        </div>
+
+        <figure className="cursor-landing__shot">
+          <div className="cursor-landing__shot-frame">
+            <div className="cursor-landing__shot-bar" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </div>
+            <img
+              key={theme}
+              src={
+                theme === 'light'
+                  ? '/landing/workspace-placed-light.png'
+                  : '/landing/workspace-placed-dark.png'
+              }
+              alt="BIMPipe workspace with seven risers placed across an architectural floor plan"
+              loading="eager"
+              decoding="async"
+              width="1600"
+              height="1000"
+            />
+          </div>
+        </figure>
       </section>
 
-      <section id="pipeline" className="landing__pipeline">
-        <div className="landing__section-head">
-          <span className="landing__eyebrow">The pipeline</span>
-          <h2 className="landing__section-title">Five steps. No surprises.</h2>
-          <p className="landing__section-copy">
-            Every step is explicit, reversible, and fully visible to the engineer.
-            Detection is one phase. Placement is another. You decide when each fires.
-          </p>
+      <section id="pipeline" className="cursor-landing__pipeline">
+        <div className="cursor-landing__section-head">
+          <span className="cursor-landing__kicker">// pipeline</span>
+          <h2 className="cursor-landing__h2">Five steps. Each one explicit.</h2>
         </div>
-        <ol className="landing__steps">
-          {PIPELINE_STEPS.map((step, i) => (
-            <li
-              key={step.index}
-              className="landing__step"
-              style={{ animationDelay: `${i * 80}ms` }}
-            >
-              <div className="landing__step-marker">
-                <span className="landing__step-index">{step.index}</span>
-                <span className="landing__step-icon" aria-hidden="true">
-                  <StepIcon name={step.icon} />
-                </span>
-              </div>
-              <div className="landing__step-copy">
-                <h3 className="landing__step-title">{step.title}</h3>
-                <p className="landing__step-text">{step.copy}</p>
-              </div>
+        <ol className="cursor-landing__steps">
+          {STEPS.map((step) => (
+            <li key={step.index} className="cursor-landing__step">
+              <span className="cursor-landing__step-index">{step.index}</span>
+              <h3 className="cursor-landing__step-title">{step.title}</h3>
+              <p className="cursor-landing__step-copy">{step.copy}</p>
             </li>
           ))}
         </ol>
       </section>
 
-      <section id="features" className="landing__features">
-        <div className="landing__section-head">
-          <span className="landing__eyebrow">Built for engineers</span>
-          <h2 className="landing__section-title">Opinionated where it counts.</h2>
-          <p className="landing__section-copy">
-            Determinism, manual override, and explicit failure paths are first-class —
-            not afterthoughts. BIMPipe complements Revit, it doesn't replace it.
-          </p>
+      <section id="principles" className="cursor-landing__principles">
+        <div className="cursor-landing__section-head">
+          <span className="cursor-landing__kicker">// principles</span>
+          <h2 className="cursor-landing__h2">Opinionated where it counts.</h2>
         </div>
-        <div className="landing__features-grid">
-          {FEATURES.map((feature, i) => (
-            <article
-              key={feature.title}
-              className="landing__feature"
-              style={{ animationDelay: `${i * 60}ms` }}
-            >
-              <span className="landing__feature-icon" aria-hidden="true">
-                <FeatureIcon name={feature.icon} />
-              </span>
-              <h3 className="landing__feature-title">{feature.title}</h3>
-              <p className="landing__feature-copy">{feature.copy}</p>
+        <div className="cursor-landing__principles-grid">
+          {PRINCIPLES.map((p) => (
+            <article key={p.label} className="cursor-landing__principle">
+              <h3 className="cursor-landing__principle-label">{p.label}</h3>
+              <p className="cursor-landing__principle-copy">{p.copy}</p>
             </article>
           ))}
         </div>
       </section>
 
-      <section className="landing__final-cta">
-        <div className="landing__final-cta-inner">
-          <span className="landing__eyebrow">Ready when you are</span>
-          <h2 className="landing__section-title">Drop in your IFC.</h2>
-          <p className="landing__section-copy">
-            No signup. No queue. The model is parsed locally, the export is yours.
-          </p>
-          <a className="landing__cta landing__cta--primary landing__cta--large" href="/app">
-            <span>Open BIMPipe</span>
-            <ArrowIcon />
-          </a>
-        </div>
+      <section className="cursor-landing__final">
+        <span className="cursor-landing__kicker">// ready</span>
+        <h2 className="cursor-landing__h1 cursor-landing__h1--final">Drop in your IFC.</h2>
+        <p className="cursor-landing__lede">
+          No signup. No queue. The model is parsed locally, the export is yours.
+        </p>
+        <a className="cursor-landing__cta cursor-landing__cta--primary cursor-landing__cta--lg" href="/app">
+          Open BIMPipe
+        </a>
       </section>
 
-      <footer className="landing__footer">
-        <div className="landing__footer-inner">
-          <span className="landing__footer-brand">
-            <BrandMark />
-            <span>BIMPipe</span>
+      <footer className="cursor-landing__footer">
+        <div className="cursor-landing__footer-left">
+          <span className="cursor-landing__brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 20 20" fill="none">
+              <circle cx="10" cy="10" r="6.5" stroke="currentColor" strokeWidth="1.5" />
+              <circle cx="10" cy="10" r="2.5" stroke="currentColor" strokeWidth="1.2" />
+              <path
+                d="M10 3.5V7.5M10 12.5V16.5M3.5 10H7.5M12.5 10H16.5"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+            </svg>
           </span>
-          <span className="landing__footer-tag">A scalpel inside the BIM pipeline.</span>
+          <span>BIMPipe</span>
         </div>
+        <span className="cursor-landing__footer-tag">A scalpel inside the BIM pipeline.</span>
       </footer>
     </div>
   )
 }
 
-function BrandMark() {
+function SunIcon() {
   return (
-    <svg className="landing__mark" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-      <circle cx="10" cy="10" r="6.5" stroke="currentColor" strokeWidth="1.5" />
-      <circle cx="10" cy="10" r="2.5" stroke="currentColor" strokeWidth="1.2" />
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <circle cx="10" cy="10" r="3.5" stroke="currentColor" strokeWidth="1.5" />
       <path
-        d="M10 3.5V7.5M10 12.5V16.5M3.5 10H7.5M12.5 10H16.5"
+        d="M10 2.5v1.6M10 15.9v1.6M2.5 10h1.6M15.9 10h1.6M4.7 4.7l1.1 1.1M14.2 14.2l1.1 1.1M4.7 15.3l1.1-1.1M14.2 5.8l1.1-1.1"
         stroke="currentColor"
         strokeWidth="1.5"
         strokeLinecap="round"
@@ -259,20 +229,7 @@ function BrandMark() {
   )
 }
 
-function ThemeIcon({ theme }: { theme: ThemeMode }) {
-  if (theme === 'dark') {
-    return (
-      <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-        <circle cx="10" cy="10" r="3.5" stroke="currentColor" strokeWidth="1.5" />
-        <path
-          d="M10 2.5v1.6M10 15.9v1.6M2.5 10h1.6M15.9 10h1.6M4.7 4.7l1.1 1.1M14.2 14.2l1.1 1.1M4.7 15.3l1.1-1.1M14.2 5.8l1.1-1.1"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-        />
-      </svg>
-    )
-  }
+function MoonIcon() {
   return (
     <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
       <path
@@ -285,172 +242,8 @@ function ThemeIcon({ theme }: { theme: ThemeMode }) {
   )
 }
 
-function ArrowIcon() {
+function DotMark() {
   return (
-    <svg
-      className="landing__cta-arrow"
-      viewBox="0 0 16 16"
-      fill="none"
-      aria-hidden="true"
-    >
-      <path
-        d="M3 8h10M9 4l4 4-4 4"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
+    <span className="cursor-landing__tag-dot" aria-hidden="true" />
   )
 }
-
-function DotIcon() {
-  return (
-    <svg viewBox="0 0 8 8" fill="none" aria-hidden="true">
-      <circle cx="4" cy="4" r="3" stroke="currentColor" strokeWidth="1.4" />
-    </svg>
-  )
-}
-
-function StepIcon({ name }: { name: 'upload' | 'detect' | 'place' | 'adjust' | 'export' }) {
-  switch (name) {
-    case 'upload':
-      return (
-        <svg viewBox="0 0 24 24" fill="none">
-          <path
-            d="M12 16V8M12 8L9 11M12 8L15 11"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          <path
-            d="M6.5 18.5A4.5 4.5 0 0 1 4 10a6 6 0 0 1 11.8-1.5A3.5 3.5 0 1 1 19 15h-1"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-          />
-        </svg>
-      )
-    case 'detect':
-      return (
-        <svg viewBox="0 0 24 24" fill="none">
-          <circle cx="11" cy="11" r="6" stroke="currentColor" strokeWidth="1.5" />
-          <path d="M16 16l4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          <circle cx="11" cy="11" r="2" fill="currentColor" />
-        </svg>
-      )
-    case 'place':
-      return (
-        <svg viewBox="0 0 24 24" fill="none">
-          <path
-            d="M12 3v6.5l5-3M12 9.5L7 6.5"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinejoin="round"
-          />
-          <path
-            d="M5 11v6l7 4 7-4v-6l-7 4-7-4Z"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinejoin="round"
-          />
-        </svg>
-      )
-    case 'adjust':
-      return (
-        <svg viewBox="0 0 24 24" fill="none">
-          <path d="M5 12h6M13 12h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          <circle cx="12" cy="12" r="2.5" stroke="currentColor" strokeWidth="1.5" />
-          <path d="M12 5v3M12 16v3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
-      )
-    case 'export':
-      return (
-        <svg viewBox="0 0 24 24" fill="none">
-          <path
-            d="M5 4h11l3 3v13H5V4Z"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinejoin="round"
-          />
-          <path d="M12 9v6M9 12l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      )
-  }
-}
-
-function FeatureIcon({ name }: { name: 'browser' | 'override' | 'aligned' | 'rtl' | 'deterministic' | 'ifc' }) {
-  switch (name) {
-    case 'browser':
-      return (
-        <svg viewBox="0 0 24 24" fill="none">
-          <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="1.5" />
-          <path d="M3 9h18" stroke="currentColor" strokeWidth="1.5" />
-          <circle cx="6.5" cy="7" r="0.7" fill="currentColor" />
-          <circle cx="9" cy="7" r="0.7" fill="currentColor" />
-          <path d="M9 14h6M12 11v6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
-      )
-    case 'override':
-      return (
-        <svg viewBox="0 0 24 24" fill="none">
-          <path
-            d="M5 8h11l-3-3M19 16H8l3 3"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      )
-    case 'aligned':
-      return (
-        <svg viewBox="0 0 24 24" fill="none">
-          <path d="M12 3v18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          <circle cx="12" cy="6" r="2" stroke="currentColor" strokeWidth="1.5" />
-          <circle cx="12" cy="12" r="2" stroke="currentColor" strokeWidth="1.5" />
-          <circle cx="12" cy="18" r="2" stroke="currentColor" strokeWidth="1.5" />
-        </svg>
-      )
-    case 'deterministic':
-      return (
-        <svg viewBox="0 0 24 24" fill="none">
-          <path
-            d="M5 12a7 7 0 1 1 7 7"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-          />
-          <path
-            d="M12 19l-3-3M12 19l3-3"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      )
-    case 'ifc':
-      return (
-        <svg viewBox="0 0 24 24" fill="none">
-          <rect x="4" y="4" width="7" height="16" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
-          <rect x="13" y="4" width="7" height="16" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
-          <path d="M11 12h2M11 9h2M11 15h2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
-      )
-    case 'rtl':
-      return (
-        <svg viewBox="0 0 24 24" fill="none">
-          <path
-            d="M16 6l-4 6 4 6M8 6l-4 6 4 6"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      )
-  }
-}
-
