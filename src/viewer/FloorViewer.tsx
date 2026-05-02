@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useMemo, useRef } from 'react'
+import { startTransition, useEffect, useMemo, useRef, type CSSProperties } from 'react'
 import * as THREE from 'three'
 import { MapControls } from 'three/examples/jsm/controls/MapControls.js'
 import type { ThemeMode } from '@/app/App'
@@ -157,8 +157,12 @@ export function FloorViewer({
       if (width === 0 || height === 0) return
       renderer.setSize(width, height)
       renderer.setPixelRatio(window.devicePixelRatio)
+      // Preserve the current vertical world extent and only re-derive the
+      // horizontal extent from the new aspect — otherwise the camera bounds
+      // set by fitCamera get clobbered with a stale `frustum = 100` base,
+      // which makes the plan look mis-fitted until the user clicks Fit.
       const a = width / height
-      const half = (frustum * (1 / camera.zoom)) / 2
+      const half = camera.top
       camera.left = -half * a
       camera.right = half * a
       camera.updateProjectionMatrix()
@@ -541,11 +545,12 @@ export function FloorViewer({
       {!showOverlay && (
         <>
           <div className="floor-viewer__fixture-overlay" aria-hidden="true">
-            {plottedFixtures.map((fixture) => {
+            {plottedFixtures.map((fixture, index) => {
               const isSelected = fixture.expressId === selectedExpressId
               const isHovered = !isSelected && fixture.expressId === hoveredExpressId
               const markerLabel =
                 fixtureMarkerLabels.get(fixture.expressId) ?? getFixtureKindCode(fixture)
+              const enterDelay = `${Math.min(index, 16) * 40}ms`
 
               return (
                 <div
@@ -587,6 +592,7 @@ export function FloorViewer({
                     }}
                     title={`${fixture.name} — ${getFixtureKindLabel(fixture)} — IFC #${fixture.expressId}`}
                     aria-label={`${fixture.name}, ${getFixtureKindLabel(fixture)}, IFC ${fixture.expressId}`}
+                    style={{ animationDelay: enterDelay }}
                   >
                     <span className="floor-viewer__fixture-core">
                       <span className="floor-viewer__fixture-code">
@@ -601,7 +607,7 @@ export function FloorViewer({
           </div>
 
           <div className="floor-viewer__kitchen-overlay" aria-hidden="true">
-            {plottedKitchens.map((kitchen) => (
+            {plottedKitchens.map((kitchen, index) => (
               <div
                 key={kitchen.expressId}
                 className="floor-viewer__kitchen-pin"
@@ -613,7 +619,10 @@ export function FloorViewer({
                 data-kitchen-y={String(kitchen.position.y)}
                 data-kitchen-z={String(kitchen.position.z)}
               >
-                <div className="floor-viewer__kitchen-badge">
+                <div
+                  className="floor-viewer__kitchen-badge"
+                  style={{ animationDelay: `${Math.min(index, 12) * 50}ms` }}
+                >
                   <span className="floor-viewer__kitchen-core">KT</span>
                   <span className="floor-viewer__kitchen-label">
                     {kitchenMarkerLabels.get(kitchen.expressId) ?? 'KT'}
@@ -625,7 +634,7 @@ export function FloorViewer({
 
           {/* Riser markers — positioned imperatively in the rAF loop via data-* attributes */}
           <div className="floor-viewer__riser-overlay" aria-hidden="true">
-            {risers.map((riser) => (
+            {risers.map((riser, index) => (
               <div
                 key={riser.id}
                 className="floor-viewer__riser-pin"
@@ -636,6 +645,7 @@ export function FloorViewer({
                 data-riser-x={String(riser.position.x)}
                 data-riser-y={String(riser.position.y)}
                 data-riser-z={String(riser.position.z)}
+                style={{ '--riser-enter-delay': `${Math.min(index, 16) * 60}ms` } as CSSProperties}
               >
                 <button
                   className="floor-viewer__riser-btn"

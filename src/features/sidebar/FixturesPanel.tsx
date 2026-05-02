@@ -1,12 +1,31 @@
+import { useState } from 'react'
 import type { Fixture } from '@/domain/types'
 import './FixturesPanel.css'
 
 interface FixturesPanelProps {
   fixtures: Fixture[]
   isLoading: boolean
+  canPlaceRisers?: boolean
+  hasRisers?: boolean
+  onPlaceRisers?: () => void
 }
 
-export function FixturesPanel({ fixtures, isLoading }: FixturesPanelProps) {
+export function FixturesPanel({
+  fixtures,
+  isLoading,
+  canPlaceRisers = false,
+  hasRisers = false,
+  onPlaceRisers,
+}: FixturesPanelProps) {
+  const [isFiring, setIsFiring] = useState(false)
+
+  function handlePlaceRisers() {
+    if (!onPlaceRisers || !canPlaceRisers) return
+    setIsFiring(true)
+    window.setTimeout(() => setIsFiring(false), 550)
+    onPlaceRisers()
+  }
+
   if (isLoading) {
     return (
       <div className="fixtures-panel">
@@ -41,14 +60,76 @@ export function FixturesPanel({ fixtures, isLoading }: FixturesPanelProps) {
         <strong className="fixtures-panel__summary-count">{fixtures.length}</strong>
       </div>
 
+      {onPlaceRisers && (
+        <button
+          type="button"
+          className={[
+            'fixtures-panel__place-cta',
+            hasRisers ? 'fixtures-panel__place-cta--reset' : '',
+            isFiring ? 'fixtures-panel__place-cta--firing' : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+          onClick={handlePlaceRisers}
+          disabled={!canPlaceRisers}
+        >
+          <span className="fixtures-panel__place-cta-icon" aria-hidden="true">
+            <svg viewBox="0 0 16 16" fill="none">
+              <path
+                d="M8 1.5v6.8l4.4-2.4M8 1.5L3.6 5.9 8 8.3"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M3 9.5v3.2l5 2.8 5-2.8V9.5L8 12.3 3 9.5Z"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </span>
+          <span className="fixtures-panel__place-cta-copy">
+            <span className="fixtures-panel__place-cta-title">
+              {hasRisers ? 'Re-suggest risers' : 'Place risers'}
+            </span>
+            <span className="fixtures-panel__place-cta-meta">
+              {canPlaceRisers
+                ? hasRisers
+                  ? 'Replace auto risers using the latest detection'
+                  : 'Auto-place one riser per toilet and outer kitchen corner'
+                : 'No fixtures with plan coordinates yet'}
+            </span>
+          </span>
+          <svg
+            className="fixtures-panel__place-cta-arrow"
+            viewBox="0 0 16 16"
+            fill="none"
+            aria-hidden="true"
+          >
+            <path
+              d="M5 3l5 5-5 5"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+      )}
+
       <div className="fixtures-panel__group">
         <div className="fixtures-panel__group-header">
           <span className="fixtures-panel__group-label">Toilets</span>
           <span className="fixtures-panel__group-count">{fixtures.length}</span>
         </div>
         <ul className="fixtures-panel__list">
-          {fixtures.map((fixture) => (
-            <li key={fixture.expressId} className="fixtures-panel__item-row">
+          {fixtures.map((fixture, index) => (
+            <li
+              key={fixture.expressId}
+              className="fixtures-panel__item-row fixtures-panel__item-row--enter"
+              style={{ animationDelay: `${Math.min(index, 12) * 35}ms` }}
+            >
               <div className="fixtures-panel__item fixtures-panel__item--static">
                 <span className="fixtures-panel__item-copy">
                   <span className="fixtures-panel__item-name" dir="auto">

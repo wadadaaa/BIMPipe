@@ -270,6 +270,22 @@
     transform 120ms ease,
     border-color 120ms ease,
     box-shadow 120ms ease;
+  animation: fixture-marker-enter 360ms cubic-bezier(0.2, 0.8, 0.2, 1.05) both;
+}
+
+@keyframes fixture-marker-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .floor-viewer__fixture-btn--muted {
@@ -358,6 +374,7 @@
   box-shadow:
     0 0 0 3px var(--kitchen-chip-ring),
     0 4px 12px var(--fixture-chip-shadow);
+  animation: fixture-marker-enter 360ms cubic-bezier(0.2, 0.8, 0.2, 1.05) both;
 }
 
 .floor-viewer__kitchen-core {
@@ -403,6 +420,37 @@
   transition: opacity 120ms ease;
 }
 
+/* Expanding ring "ripple" that fires once when the pin first enters. */
+.floor-viewer__riser-pin::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 2px solid var(--riser-btn-border);
+  transform: translate(-50%, -50%) scale(0.4);
+  opacity: 0;
+  pointer-events: none;
+  animation: riser-ripple 1100ms cubic-bezier(0.2, 0.7, 0.2, 1)
+    calc(var(--riser-enter-delay, 0ms) + 120ms) both;
+}
+
+@keyframes riser-ripple {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.4);
+  }
+  20% {
+    opacity: 0.7;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(3.4);
+  }
+}
+
 .floor-viewer__riser-btn {
   pointer-events: auto;
   width: 36px;
@@ -422,12 +470,45 @@
     0 0 0 4px var(--riser-btn-ring-1),
     0 0 0 8px var(--riser-btn-ring-2),
     0 4px 12px var(--riser-btn-shadow);
-  animation: riser-pulse 2.8s ease-in-out infinite;
+  animation:
+    riser-marker-drop 480ms cubic-bezier(0.2, 0.8, 0.2, 1.06) var(--riser-enter-delay, 0ms) both,
+    riser-pulse 2.8s ease-in-out infinite calc(var(--riser-enter-delay, 0ms) + 480ms);
   transition:
     border-color 120ms,
     background 120ms,
     box-shadow 120ms,
     transform 120ms ease;
+}
+
+@keyframes riser-marker-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.5);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(0) scale(1.12);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .floor-viewer__fixture-btn,
+  .floor-viewer__kitchen-badge {
+    animation: none;
+  }
+
+  .floor-viewer__riser-btn {
+    animation: riser-pulse 2.8s ease-in-out infinite;
+  }
+
+  .floor-viewer__riser-pin::before {
+    animation: none;
+    opacity: 0;
+  }
 }
 
 .floor-viewer__riser-btn:hover {

@@ -159,6 +159,11 @@ describe('WorkspacePage', () => {
     })
     expect(mocks.extractFloorMeshes).toHaveBeenCalledWith(expect.anything(), 101, 2)
 
+    // Detection and placement are split — risers only appear after the user
+    // explicitly clicks Place risers in the fixtures panel.
+    const placeRisersButton = await screen.findByRole('button', { name: /place risers/i })
+    await user.click(placeRisersButton)
+
     await screen.findByLabelText('Remove riser R1')
     await screen.findByLabelText('Remove riser R2')
     await screen.findByLabelText('Remove riser R3')
@@ -199,6 +204,9 @@ describe('WorkspacePage', () => {
     const input = document.querySelector<HTMLInputElement>('input[type="file"]')
     expect(input).not.toBeNull()
     await user.upload(input!, new File([new ArrayBuffer(128)], 'tower.ifc'))
+
+    const placeRisersButton = await screen.findByRole('button', { name: /place risers/i })
+    await user.click(placeRisersButton)
 
     await screen.findByLabelText('Remove riser R1')
 

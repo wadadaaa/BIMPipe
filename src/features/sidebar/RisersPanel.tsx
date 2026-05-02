@@ -99,8 +99,12 @@ export function RisersPanel({
             <strong className="risers-panel__summary-count">{risers.length}</strong>
           </div>
 
-          {risers.map((riser) => (
-            <div key={riser.id} className="risers-panel__item">
+          {risers.map((riser, index) => (
+            <div
+              key={riser.id}
+              className="risers-panel__item risers-panel__item--enter"
+              style={{ animationDelay: `${Math.min(index, 12) * 35}ms` }}
+            >
               <span className="risers-panel__item-marker">{riser.stackLabel}</span>
               <span className="risers-panel__item-coords">
                 {fmt(riser.position.x)}, {fmt(riser.position.z)}

@@ -110,12 +110,21 @@ export function WorkspacePage({
   const [downloadError, setDownloadError] = useState<string | null>(null)
 
   // --- sidebar ---
-  const [activeTab, setActiveTab] = useState<SidebarTab>('risers')
+  const [activeTab, setActiveTab] = useState<SidebarTab>('fixtures')
 
   // --- view mode ---
   const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d')
 
   // ---------------------------------------------------------------------------
+
+  // Async handlers (handleFileAccepted, openStorey) need to read the latest
+  // riser count to decide which sidebar phase to land on, but their closure
+  // captures a snapshot from the render that defined them. A ref keeps the
+  // current value visible across awaits and after queued state updates.
+  const risersRef = useRef(risers)
+  useEffect(() => {
+    risersRef.current = risers
+  }, [risers])
 
   useEffect(() => {
     const normalized = ensureRiserStackLabels(risers, nextRiserLabelRef)
@@ -130,6 +139,9 @@ export function WorkspacePage({
   async function handleFileAccepted(file: File) {
     sourceIfcBytesRef.current = null
     nextRiserLabelRef.current = 1
+    // Sync the ref alongside the state update so openStorey sees the cleared
+    // count when it runs synchronously after this transition is queued.
+    risersRef.current = []
     setIsParsingStoreys(true)
     setModelFileName(file.name)
     setUploadError(null)
@@ -144,7 +156,7 @@ export function WorkspacePage({
       setKitchens([])
       setRisers([])
       setIsAddingRiser(false)
-      setActiveTab('risers')
+      setActiveTab('fixtures')
       setDownloadError(null)
       setViewMode('2d')
       setWebIfcModelId(null)
@@ -175,7 +187,7 @@ export function WorkspacePage({
       preloadFloorInspectionModules()
       const defaultStoreyId = findDefaultStoreyId(parsed)
       if (defaultStoreyId !== null) {
-        void openStorey(defaultStoreyId, parsed)
+        void openStorey(defaultStoreyId)
       }
     } catch (err) {
       setUploadError(
@@ -186,7 +198,7 @@ export function WorkspacePage({
     }
   }
 
-  async function openStorey(id: StoreyId, availableStoreys: Storey[] = storeys) {
+  async function openStorey(id: StoreyId) {
     const modelId = webIfcModelIdRef.current
     if (modelId === null) return
 
@@ -202,7 +214,7 @@ export function WorkspacePage({
     setIsDetectingFixtures(true)
     // Risers are NOT cleared — they span all floors and persist across selection.
     setIsAddingRiser(false)
-    setActiveTab('risers')
+    setActiveTab(risersRef.current.length > 0 ? 'risers' : 'fixtures')
     setDownloadError(null)
 
     await waitForNextPaint()
@@ -234,20 +246,11 @@ export function WorkspacePage({
         startTransition(() => {
           setFixtures(toiletFixtures)
           setKitchens(kitchensResult)
-          // Auto-suggest only if no risers have been placed yet (first floor opened).
-          setRisers((prev) => {
-            if (prev.length > 0) return prev
-            nextRiserLabelRef.current = 1
-            return buildSuggestedRisers(
-              availableStoreys,
-              id,
-              toiletFixtures,
-              kitchensResult,
-              meshes,
-              nextRiserLabelRef,
-            )
-          })
-          setActiveTab('risers')
+          // Detection and placement are split into two distinct phases.
+          // Risers are placed only when the user explicitly clicks Suggest.
+          if (risersRef.current.length === 0) {
+            setActiveTab('fixtures')
+          }
         })
       } catch {
         // Detection failure is non-fatal — floor plan stays visible, fixtures stay empty.
