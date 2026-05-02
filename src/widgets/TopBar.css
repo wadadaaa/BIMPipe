@@ -3,7 +3,7 @@
   grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 24px;
-  padding: 0 20px;
+  padding: 0 16px 0 20px;
   height: var(--topbar-height);
   border-bottom: 1px solid var(--border);
   background: var(--topbar-bg);
@@ -46,31 +46,52 @@
 .topbar__step {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
-  border-radius: 8px;
+  gap: 8px;
+  padding: 5px 14px;
+  border-radius: 999px;
   position: relative;
+  transition: background 150ms;
 }
 
 .topbar__step + .topbar__step::before {
   content: '';
   display: block;
   position: absolute;
-  left: -1px;
+  left: -6px;
   top: 50%;
-  width: 1px;
-  height: 12px;
+  width: 12px;
+  height: 1px;
   transform: translateY(-50%);
   background: var(--border-strong);
 }
 
+.topbar__step-marker {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-soft);
+  color: var(--text-soft);
+  flex-shrink: 0;
+  transition:
+    color 150ms,
+    border-color 150ms,
+    background 150ms;
+}
+
+.topbar__step-marker svg {
+  width: 12px;
+  height: 12px;
+}
+
 .topbar__step-num {
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 700;
   font-family: var(--mono);
-  letter-spacing: 0.06em;
-  color: var(--text-soft);
-  transition: color 150ms;
+  letter-spacing: 0.04em;
+  line-height: 1;
 }
 
 .topbar__step-label {
@@ -82,23 +103,34 @@
 }
 
 /* Done */
-.topbar__step--done .topbar__step-num,
+.topbar__step--done .topbar__step-marker {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
 .topbar__step--done .topbar__step-label {
   color: var(--text);
 }
 
-.topbar__step--done .topbar__step-num::after {
-  content: ' ✓';
-  font-size: 7px;
-}
-
 /* Active */
 .topbar__step--active {
-  background: rgba(103, 221, 255, 0.07);
+  background: var(--accent-bg);
+}
+
+.topbar__step--active .topbar__step-marker {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--bg);
+  box-shadow: 0 0 0 4px var(--accent-glow);
+}
+
+[data-theme='light'] .topbar__step--active .topbar__step-marker {
+  color: #ffffff;
 }
 
 .topbar__step--active .topbar__step-num {
-  color: var(--accent);
+  color: inherit;
 }
 
 .topbar__step--active .topbar__step-label {
@@ -116,12 +148,12 @@
 }
 
 .topbar__theme-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
   height: 32px;
-  padding: 0 10px;
-  border-radius: 999px;
+  padding: 0;
+  border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--surface-soft);
   color: var(--text-h);
@@ -129,25 +161,33 @@
   transition:
     background 120ms,
     border-color 120ms,
+    color 120ms,
     transform 120ms;
 }
 
 .topbar__theme-toggle:hover {
   background: var(--surface-strong);
   border-color: var(--accent-border);
+  color: var(--accent);
   transform: translateY(-1px);
 }
 
-.topbar__theme-toggle-icon,
-.topbar__theme-toggle-label {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+.topbar__theme-toggle:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.topbar__theme-icon {
+  width: 16px;
+  height: 16px;
 }
 
 .topbar__file {
-  padding: 4px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px 5px 8px;
   border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--surface-strong);
@@ -155,10 +195,36 @@
   font-family: var(--mono);
   color: var(--text);
   white-space: nowrap;
+  max-width: 240px;
+}
+
+.topbar__file-icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  color: var(--text-soft);
+}
+
+.topbar__file-name {
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 220px;
-  display: block;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+@media (max-width: 1180px) {
+  .topbar__step-label {
+    display: none;
+  }
+
+  .topbar__step {
+    padding: 4px 6px;
+  }
+
+  .topbar__step + .topbar__step::before {
+    left: -3px;
+    width: 6px;
+  }
 }
 
 @media (max-width: 900px) {

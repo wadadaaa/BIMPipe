@@ -74,20 +74,71 @@
 }
 
 .viewer-placeholder__overlay-card {
-  max-width: 300px;
-  padding: 20px 22px;
-  border-radius: 18px;
+  max-width: 340px;
+  padding: 28px 26px 24px;
+  border-radius: 22px;
   border: 1px solid var(--border-strong);
   background: var(--overlay-bg-strong);
   backdrop-filter: blur(20px);
   box-shadow: var(--shadow);
   text-align: center;
+  animation: viewer-placeholder-fade-in 320ms ease-out both;
+}
+
+@keyframes viewer-placeholder-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.viewer-placeholder__overlay-hero {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 14px;
+  border-radius: 18px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-soft);
+  color: var(--accent);
+}
+
+.viewer-placeholder__overlay-hero svg {
+  width: 40px;
+  height: 40px;
+}
+
+.viewer-placeholder__overlay-hero--idle {
+  background: linear-gradient(180deg, var(--accent-bg), var(--surface-soft));
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 6px var(--accent-glow);
+}
+
+.viewer-placeholder__overlay-hero--ready {
+  background: var(--accent-bg);
+  border-color: var(--accent-border);
+}
+
+.viewer-placeholder__overlay-hero--error {
+  background: var(--danger-bg);
+  border-color: rgba(255, 122, 136, 0.32);
+  color: var(--danger);
 }
 
 .viewer-placeholder__overlay-loader {
   display: grid;
   place-items: center;
-  margin-bottom: 12px;
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 14px;
+  border-radius: 18px;
+  border: 1px solid var(--accent-border);
+  background: var(--accent-bg);
 }
 
 .viewer-placeholder__overlay-spinner {
@@ -103,16 +154,17 @@
 .viewer-placeholder__overlay-kicker {
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--text-soft);
+  color: var(--accent);
 }
 
 .viewer-placeholder__overlay-text {
-  margin-top: 8px;
-  font-size: 13px;
-  color: var(--text);
+  margin-top: 10px;
+  font-size: 14px;
+  color: var(--text-h);
   line-height: 1.55;
+  font-weight: 500;
 }
 
 @keyframes viewer-placeholder-spin {

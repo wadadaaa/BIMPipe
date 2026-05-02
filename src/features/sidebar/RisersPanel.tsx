@@ -73,14 +73,16 @@ export function RisersPanel({
           onClick={onDownloadPlumbingIfc}
           disabled={!canDownload || downloadMode !== null}
         >
-          {isDownloadingPlumbingIfc ? 'Preparing Plumbing IFC...' : 'Download Plumbing IFC'}
+          <DownloadIcon spinning={isDownloadingPlumbingIfc} />
+          <span>{isDownloadingPlumbingIfc ? 'Preparing plumbing IFC' : 'Download plumbing IFC'}</span>
         </button>
         <button
           className="risers-panel__download-btn risers-panel__download-btn--secondary"
           onClick={onDownloadFullIfc}
           disabled={!canDownload || downloadMode !== null}
         >
-          {isDownloadingFullIfc ? 'Preparing Full IFC...' : 'Download Full IFC'}
+          <DownloadIcon spinning={isDownloadingFullIfc} />
+          <span>{isDownloadingFullIfc ? 'Preparing full IFC' : 'Download full IFC'}</span>
         </button>
       </div>
 
@@ -92,7 +94,12 @@ export function RisersPanel({
 
       {risers.length === 0 ? (
         <div className="risers-panel__empty">
-          <span className="risers-panel__empty-icon">○</span>
+          <span className="risers-panel__empty-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.4" strokeDasharray="2 3" />
+              <path d="M12 8v4l2.5 2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </span>
           <p>No risers placed yet. Use Suggest to generate one riser per toilet and one per kitchen, or place them manually.</p>
         </div>
       ) : (
@@ -126,4 +133,32 @@ export function RisersPanel({
 
 function fmt(n: number): string {
   return n.toFixed(1)
+}
+
+function DownloadIcon({ spinning }: { spinning: boolean }) {
+  if (spinning) {
+    return <span className="risers-panel__btn-spinner" aria-hidden="true" />
+  }
+  return (
+    <svg
+      className="risers-panel__btn-icon"
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path
+        d="M8 2v8.5M4.5 7L8 10.5L11.5 7"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M2.5 13h11"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
 }

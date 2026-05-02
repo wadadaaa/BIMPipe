@@ -81,20 +81,45 @@
 
 .risers-panel__download-btn {
   width: 100%;
-  padding: 13px 16px;
+  padding: 12px 14px;
   border-radius: 12px;
   border: 1px solid var(--success-border);
   background: var(--success-bg);
   color: var(--success-text);
   font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  letter-spacing: 0.04em;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   transition:
     background 120ms,
     border-color 120ms,
+    transform 120ms,
     opacity 120ms;
+}
+
+.risers-panel__download-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.risers-panel__btn-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.risers-panel__btn-spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: 1.6px solid currentColor;
+  border-top-color: transparent;
+  flex-shrink: 0;
+  animation: ifc-spin 0.7s linear infinite;
+  opacity: 0.85;
 }
 
 .risers-panel__download-btn:hover:not(:disabled) {
@@ -151,9 +176,14 @@
   border-radius: 10px;
   display: grid;
   place-items: center;
-  font-size: 18px;
-  color: var(--text-soft);
-  background: var(--surface-soft);
+  color: var(--accent);
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+}
+
+.risers-panel__empty-icon svg {
+  width: 20px;
+  height: 20px;
 }
 
 /* ── Riser list ── */

@@ -8,21 +8,34 @@
 
 /* ── Drop zone ── */
 .ifc-upload__zone {
+  position: relative;
   border: 1px dashed var(--border-strong);
   border-radius: 16px;
-  padding: 20px 16px;
+  padding: 22px 16px;
   text-align: center;
   cursor: pointer;
   transition:
     border-color 150ms,
     background 150ms,
-    transform 120ms;
+    transform 120ms,
+    box-shadow 150ms;
   display: flex;
   align-items: center;
   justify-content: center;
   user-select: none;
   background: var(--surface-muted);
-  min-height: 88px;
+  min-height: 104px;
+  overflow: hidden;
+}
+
+.ifc-upload__zone::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 0%, var(--accent-glow), transparent 60%);
+  opacity: 0;
+  transition: opacity 200ms;
+  pointer-events: none;
 }
 
 .ifc-upload__zone:hover,
@@ -30,6 +43,22 @@
   border-color: var(--accent-border);
   background: var(--accent-bg);
   transform: translateY(-1px);
+  box-shadow: 0 6px 18px -10px var(--accent-glow);
+}
+
+.ifc-upload__zone:hover::before,
+.ifc-upload__zone--dragover::before {
+  opacity: 1;
+}
+
+.ifc-upload__zone:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.ifc-upload__zone--dragover {
+  border-style: solid;
 }
 
 .ifc-upload__zone--loading {
@@ -53,6 +82,7 @@
 
 /* ── Idle state ── */
 .ifc-upload__idle {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -60,10 +90,19 @@
 }
 
 .ifc-upload__icon {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid var(--accent-border);
+  background: var(--accent-bg);
   color: var(--accent);
-  opacity: 0.8;
+  transition: transform 150ms;
+}
+
+.ifc-upload__zone:hover .ifc-upload__icon,
+.ifc-upload__zone--dragover .ifc-upload__icon {
+  transform: translateY(-2px);
 }
 
 .ifc-upload__label {

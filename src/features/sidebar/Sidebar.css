@@ -60,6 +60,12 @@
   border-radius: 12px;
   border: 1px solid var(--border);
   background: var(--surface-soft);
+  transition: border-color 150ms, background 150ms;
+}
+
+.sidebar__summary-card:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-strong);
 }
 
 .sidebar__summary-label {
@@ -74,12 +80,13 @@
 
 .sidebar__summary-value {
   display: block;
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 500;
   color: var(--text-h);
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
+  line-height: 1;
 }
 
 /* ── Tab switcher ── */
