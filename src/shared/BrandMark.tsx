@@ -4,12 +4,10 @@ interface BrandMarkProps {
   title?: string
 }
 
-const NAVY = '#0e3eb3'
-const SKY = '#67ddff'
-
 /**
- * BIMPipe bullseye logo — concentric navy/sky bands with a center dot.
- * Colors are fixed (not currentColor) because the mark is a brand asset.
+ * BIMPipe bullseye logo — three concentric stroked rings around a filled
+ * center dot. Uses currentColor so the parent picks the brand tint
+ * (typically var(--accent)).
  */
 export function BrandMark({ className, size = 22, title }: BrandMarkProps) {
   return (
@@ -24,12 +22,10 @@ export function BrandMark({ className, size = 22, title }: BrandMarkProps) {
       aria-label={title}
     >
       {title ? <title>{title}</title> : null}
-      <circle cx="16" cy="16" r="16" fill={NAVY} />
-      <circle cx="16" cy="16" r="13" fill={SKY} />
-      <circle cx="16" cy="16" r="10" fill={NAVY} />
-      <circle cx="16" cy="16" r="7" fill={SKY} />
-      <circle cx="16" cy="16" r="4" fill={NAVY} />
-      <circle cx="16" cy="16" r="1.8" fill={SKY} />
+      <circle cx="16" cy="16" r="13" stroke="currentColor" strokeWidth="2.4" />
+      <circle cx="16" cy="16" r="8" stroke="currentColor" strokeWidth="1.8" opacity="0.55" />
+      <circle cx="16" cy="16" r="4.5" stroke="currentColor" strokeWidth="1.4" opacity="0.35" />
+      <circle cx="16" cy="16" r="2.2" fill="currentColor" />
     </svg>
   )
 }
