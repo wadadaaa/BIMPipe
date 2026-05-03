@@ -71,6 +71,7 @@ export function LandingPage({ theme, onToggleTheme }: LandingPageProps) {
           <span>BIMPipe</span>
         </a>
         <nav className="landing__nav-links" aria-label="Sections">
+          <a href="#workflow">Workflow</a>
           <a href="#pipeline">Pipeline</a>
           <a href="#principles">Principles</a>
         </nav>
@@ -107,8 +108,8 @@ export function LandingPage({ theme, onToggleTheme }: LandingPageProps) {
           <a className="landing__cta landing__cta--primary" href="/app">
             Try it with your IFC
           </a>
-          <a className="landing__cta landing__cta--ghost" href="#pipeline">
-            See how it works
+          <a className="landing__cta landing__cta--ghost" href="#workflow">
+            Watch the flow
           </a>
         </div>
         <div className="landing__meta">
@@ -147,6 +148,42 @@ export function LandingPage({ theme, onToggleTheme }: LandingPageProps) {
               height="1080"
             />
           </div>
+        </figure>
+      </section>
+
+      <section id="workflow" className="landing__workflow">
+        <div className="landing__section-head">
+          <span className="landing__kicker">// workflow</span>
+          <h2 className="landing__h2">Watch the flow.</h2>
+          <p className="landing__section-copy">
+            From upload to a clean IFC export. Mute is on by default —
+            click the player to hear the voice-over.
+          </p>
+        </div>
+        <figure className="landing__workflow-stage">
+          <div className="landing__workflow-frame">
+            <video
+              className="landing__workflow-video"
+              src="/landing/workflow.mp4"
+              poster={
+                theme === 'light'
+                  ? '/landing/workspace-placed-light.png'
+                  : '/landing/workspace-placed-dark.png'
+              }
+              controls
+              autoPlay
+              muted
+              loop
+              playsInline
+              preload="metadata"
+              aria-label="BIMPipe end-to-end workflow walkthrough"
+              width="1920"
+              height="1080"
+            />
+          </div>
+          <figcaption className="landing__workflow-caption">
+            57 seconds · upload → detect → place → adjust → export
+          </figcaption>
         </figure>
       </section>
 
