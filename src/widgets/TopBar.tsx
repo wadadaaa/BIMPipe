@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import type { ThemeMode } from '@/app/App'
+import { BrandMark } from '@/shared/BrandMark'
 import './TopBar.css'
 
 interface TopBarProps {
@@ -25,21 +26,7 @@ export function TopBar({
   return (
     <header className="topbar" role="banner">
       <div className="topbar__brand" aria-label="BIMPipe">
-        <svg
-          className="topbar__mark"
-          viewBox="0 0 20 20"
-          fill="none"
-          aria-hidden="true"
-        >
-          <circle cx="10" cy="10" r="6.5" stroke="currentColor" strokeWidth="1.5" />
-          <circle cx="10" cy="10" r="2.5" stroke="currentColor" strokeWidth="1.2" />
-          <path
-            d="M10 3.5V7.5M10 12.5V16.5M3.5 10H7.5M12.5 10H16.5"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-          />
-        </svg>
+        <BrandMark className="topbar__mark" size={20} />
         <span className="topbar__wordmark">BIMPipe</span>
       </div>
 
