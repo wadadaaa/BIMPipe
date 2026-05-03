@@ -137,7 +137,11 @@ export function LandingPage({ theme, onToggleTheme }: LandingPageProps) {
             <video
               key={theme}
               className="landing__shot-video"
-              src="/landing/promo.mp4"
+              src={
+                theme === 'light'
+                  ? '/landing/promo-light.mp4'
+                  : '/landing/promo-dark.mp4'
+              }
               poster={
                 theme === 'light'
                   ? '/landing/workspace-placed-light.png'
