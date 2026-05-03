@@ -311,12 +311,75 @@
   background: var(--landing-border-strong);
 }
 
-.landing__shot img,
-.landing__shot-video {
+.landing__shot-img {
   display: block;
   width: 100%;
   height: auto;
   background: var(--landing-bg-elev);
+}
+
+/* ─────────────── Workflow ─────────────── */
+.landing__workflow {
+  position: relative;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: clamp(56px, 8vw, 112px) clamp(20px, 4vw, 40px);
+}
+
+.landing__workflow .landing__section-head {
+  align-items: center;
+  text-align: center;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.landing__workflow-stage {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.landing__workflow-stage::before {
+  content: '';
+  position: absolute;
+  inset: -8% -6% 0 -6%;
+  background: radial-gradient(
+    ellipse at 50% 0%,
+    color-mix(in srgb, var(--landing-text) 12%, transparent),
+    transparent 65%
+  );
+  pointer-events: none;
+  z-index: -1;
+  filter: blur(2px);
+}
+
+.landing__workflow-frame {
+  width: 100%;
+  border-radius: 18px;
+  border: 1px solid var(--landing-border-strong);
+  background: var(--landing-bg-elev);
+  overflow: hidden;
+  box-shadow:
+    0 60px 120px -40px rgba(0, 0, 0, 0.7),
+    0 24px 48px -24px rgba(0, 0, 0, 0.5);
+}
+
+.landing__workflow-video {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: var(--landing-bg-elev);
+}
+
+.landing__workflow-caption {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--landing-text-faint);
 }
 
 /* ─────────────── Pipeline ─────────────── */
