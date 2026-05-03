@@ -40,7 +40,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0;
+  gap: 8px;
 }
 
 .topbar__step {
@@ -57,9 +57,9 @@
   content: '';
   display: block;
   position: absolute;
-  left: -6px;
+  left: -8px;
   top: 50%;
-  width: 12px;
+  width: 8px;
   height: 1px;
   transform: translateY(-50%);
   background: var(--border-strong);
@@ -224,7 +224,7 @@
   }
 
   .topbar__step + .topbar__step::before {
-    left: -3px;
+    left: -6px;
     width: 6px;
   }
 }
