@@ -4,8 +4,8 @@ interface BrandMarkProps {
   title?: string
 }
 
-const NAVY = '#0c2e7a'
-const SKY = '#7ec6ff'
+const NAVY = '#0e3eb3'
+const SKY = '#67ddff'
 
 /**
  * BIMPipe bullseye logo — concentric navy/sky bands with a center dot.
