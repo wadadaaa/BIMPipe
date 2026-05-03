@@ -311,8 +311,7 @@
   background: var(--landing-border-strong);
 }
 
-.landing__shot img,
-.landing__shot-video {
+.landing__shot-img {
   display: block;
   width: 100%;
   height: auto;
