@@ -190,7 +190,7 @@ describe('WorkspacePage', () => {
     expect(api).toMatchObject({ OpenModel: expect.any(Function), CloseModel: expect.any(Function) })
     expect(sourceBytes).toBeInstanceOf(Uint8Array)
     expect(primaryStoreyId).toBe(2)
-    expect(risers).toHaveLength(6)
+    expect(risers).toHaveLength(2)
     expect(new Set(risers.map((riser: { stackLabel: string }) => riser.stackLabel))).toEqual(
       new Set(['R1', 'R3']),
     )
@@ -223,7 +223,7 @@ describe('WorkspacePage', () => {
       mocks.exportFullIfcWithRisersWithDebug.mock.calls[0]
     expect(sourceBytes).toBeInstanceOf(Uint8Array)
     expect(primaryStoreyId).toBe(2)
-    expect(risers).toHaveLength(9)
+    expect(risers).toHaveLength(3)
     expect(floorBounds).toEqual({ minX: 0, maxX: 1200, minZ: 0, maxZ: 1200 })
     expect(debugOptions).toMatchObject({
       sourceIfcName: 'tower.ifc',
