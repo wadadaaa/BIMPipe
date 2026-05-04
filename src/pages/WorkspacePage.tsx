@@ -12,7 +12,9 @@ import { parseStoreys } from '@/shared/ifc/parseStoreys'
 import type { FloorMeshes } from '@/shared/ifc/extractFloorMeshes'
 import type { Fixture, KitchenArea, Riser, RiserId, Storey, StoreyId, SidebarTab } from '@/domain/types'
 import { buildRiserStack, removeRiserStack } from '@/shared/routes/buildRiserStacks'
+import { classifyFloors, getEligibleStoreyIdsForAutoRisers } from '@/shared/routes/floorClassification'
 import { suggestRiserPositions } from '@/shared/routes/suggestRisers'
+import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE, resolveRiserPlacementRuleProfile } from '@/shared/routes/riserPlacementProfile'
 
 let floorViewerModulePromise: Promise<typeof import('@/viewer/FloorViewer')> | null = null
 let model3DViewerModulePromise: Promise<typeof import('@/viewer/Model3DViewer')> | null = null
@@ -375,7 +377,11 @@ export function WorkspacePage({
         buildExportFileName(modelFileName, selectedStorey?.name ?? null),
       )
       downloadJson(
-        fullExport.debugMapping,
+        {
+          ...fullExport.debugMapping,
+          placementRuleProfile: resolveRiserPlacementRuleProfile(DEFAULT_RISER_PLACEMENT_RULE_PROFILE),
+          floorClassification: classifyFloors(storeys),
+        },
         buildExportDebugFileName(modelFileName, selectedStorey?.name ?? null),
       )
     } catch (err) {
@@ -544,6 +550,7 @@ function buildSuggestedRisers(
   floorMeshes: FloorMeshes | null,
   nextRiserLabelRef: MutableRefObject<number>,
 ): Riser[] {
+  const ruleProfile = resolveRiserPlacementRuleProfile(DEFAULT_RISER_PLACEMENT_RULE_PROFILE)
   const floorPlanBounds = floorMeshes
     ? {
         minX: floorMeshes.boundingBox.min.x,
@@ -553,14 +560,16 @@ function buildSuggestedRisers(
       }
     : null
 
-  const positions = suggestRiserPositions(fixtures, kitchens, floorPlanBounds)
+  const positions = suggestRiserPositions(fixtures, kitchens, floorPlanBounds, ruleProfile)
+  const eligibleStoreyIds = new Set(getEligibleStoreyIdsForAutoRisers(storeys, ruleProfile))
+
   return positions.flatMap((position) =>
     buildRiserStack(
       storeys,
       sourceStoreyId,
       position,
       takeNextRiserLabel(nextRiserLabelRef),
-    ),
+    ).filter((riser) => eligibleStoreyIds.has(riser.storeyId)),
   )
 }
 

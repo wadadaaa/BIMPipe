@@ -1,5 +1,6 @@
 import type { Fixture, KitchenArea, PlanBounds } from '@/domain/types'
 import { averagePosition, detectPlanUnits, planDistance, type Point3D } from './planGeometry'
+import type { RiserPlacementRuleProfile } from './riserPlacementProfile'
 
 interface RiserCluster {
   points: Point3D[]
@@ -17,7 +18,9 @@ export function suggestRiserPositions(
   fixtures: Fixture[],
   kitchens: KitchenArea[] = [],
   floorPlanBounds: PlanBounds | null = null,
+  ruleProfile?: Partial<RiserPlacementRuleProfile> | null,
 ): Point3D[] {
+  const fixtureOffsetToleranceMm = ruleProfile?.fixtureOffsetToleranceMm ?? 450
   const positionedFixtures = fixtures.filter(
     (fixture): fixture is PositionedFixture =>
       fixture.position !== null,
@@ -26,7 +29,7 @@ export function suggestRiserPositions(
     (kitchen): kitchen is PositionedKitchen =>
       kitchen.position !== null,
   )
-  const dedicatedKitchenPositions = buildKitchenRiserPositions(positionedKitchens, floorPlanBounds)
+  const dedicatedKitchenPositions = buildKitchenRiserPositions(positionedKitchens, floorPlanBounds, fixtureOffsetToleranceMm)
   const points = positionedFixtures.map((fixture) => fixture.position)
 
   if (points.length === 0 && dedicatedKitchenPositions.length === 0) return []
@@ -71,6 +74,7 @@ export function suggestRiserPositions(
 function buildKitchenRiserPositions(
   kitchens: PositionedKitchen[],
   floorPlanBounds: PlanBounds | null,
+  fixtureOffsetToleranceMm: number,
 ): Point3D[] {
   if (kitchens.length === 0) return []
 
@@ -79,7 +83,7 @@ function buildKitchenRiserPositions(
   const fallbackOffset = units === 'mm' ? 1200 : 1.2
   const edgeMargin = units === 'mm' ? 220 : 0.22
   const minCornerShift = units === 'mm' ? 350 : 0.35
-  const minKitchenSeparation = units === 'mm' ? 1400 : 1.4
+  const minKitchenSeparation = units === 'mm' ? fixtureOffsetToleranceMm * 3.1 : 1.4
 
   return kitchens.map((kitchen) => {
     let candidate: Point3D
