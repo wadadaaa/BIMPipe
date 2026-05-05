@@ -190,12 +190,9 @@ describe('WorkspacePage', () => {
     expect(api).toMatchObject({ OpenModel: expect.any(Function), CloseModel: expect.any(Function) })
     expect(sourceBytes).toBeInstanceOf(Uint8Array)
     expect(primaryStoreyId).toBe(2)
-<<<<<<< codex/linear-mention-bim-8-detect-toilet-rooms-and-plumbing-fixt
-=======
     // Auto-placement is generated on the selected floor only in this flow.
     // Basement/roof/penthouse exclusions matter for cross-floor expansion paths,
     // but this selected-floor test should keep exactly two TOILETPAN-derived risers.
->>>>>>> main
     expect(risers).toHaveLength(2)
     expect(new Set(risers.map((riser: { stackLabel: string }) => riser.stackLabel))).toEqual(
       new Set(['R1', 'R3']),
@@ -229,11 +226,8 @@ describe('WorkspacePage', () => {
       mocks.exportFullIfcWithRisersWithDebug.mock.calls[0]
     expect(sourceBytes).toBeInstanceOf(Uint8Array)
     expect(primaryStoreyId).toBe(2)
-<<<<<<< codex/linear-mention-bim-8-detect-toilet-rooms-and-plumbing-fixt
-=======
     // Selected-floor generation keeps one riser per detected anchor on Level 2
     // (2 TOILETPAN fixtures + 1 kitchen anchor = 3 total).
->>>>>>> main
     expect(risers).toHaveLength(3)
     expect(floorBounds).toEqual({ minX: 0, maxX: 1200, minZ: 0, maxZ: 1200 })
     expect(debugOptions).toMatchObject({
