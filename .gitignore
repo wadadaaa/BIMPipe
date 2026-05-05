@@ -28,6 +28,7 @@ __MACOSX/
 *.sw?
 
 # Local AI agent configs/state
+.claude/agents/
 .claude/settings.local.json
 .codex/
 .opencode/

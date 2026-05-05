@@ -135,6 +135,8 @@ Auto-placed risers and manual overrides are stored separately and merged at rend
 This rule is the heart of `manual override must always win`. Any code path that violates it is a bug.
 
 ## Vertical alignment invariant
+> **Intended behavior (not yet implemented):**
+> This section describes the target product behavior. Do not implement it unless the current Linear issue explicitly asks for it.
 
 Risers represent physical vertical shafts through the building. Therefore:
 
@@ -165,6 +167,8 @@ The UI must always show whether vertical alignment is locked or broken for the a
 - Preserve current repo structure unless there is a strong reason to change it.
 
 ## Performance and limits
+> **Intended behavior (not yet implemented):**
+> This section describes the target product behavior. Do not implement it unless the current Linear issue explicitly asks for it.
 
 V0 supported envelope:
 
@@ -196,6 +200,8 @@ The user must always be able to tell:
 Every long-running operation (parse, suggest, export) must show progress or be cancellable. No silent spinners that exceed 10 seconds.
 
 ## Validation before export
+> **Intended behavior (not yet implemented):**
+> This section describes the target product behavior. Do not implement it unless the current Linear issue explicitly asks for it.
 
 Before enabling export, run validation and surface the result. Validation rules in V0:
 
