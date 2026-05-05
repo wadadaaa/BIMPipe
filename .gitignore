@@ -12,6 +12,7 @@ node_modules
 dist
 dist-ssr
 .pnpm-store
+coverage/
 *.local
 
 # Editor files
@@ -19,15 +20,21 @@ dist-ssr
 !.vscode/extensions.json
 .idea
 .DS_Store
+__MACOSX/
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
 
-# Local AI agent configs
-.claude/agents/
+# Local AI agent configs/state
 .claude/settings.local.json
-.agents/skills/
 .codex/
 .opencode/
+
+# Generated AI prompt handoff files
+.ai-flow/
+
+# IFC experiment outputs
+experiments/ifc-riser-lab/output/*
+!experiments/ifc-riser-lab/output/.gitkeep
