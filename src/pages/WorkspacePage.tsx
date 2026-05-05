@@ -15,7 +15,7 @@ import type { Fixture, KitchenArea, Riser, RiserId, Storey, StoreyId, SidebarTab
 import { buildRiserStack, removeRiserStack } from '@/shared/routes/buildRiserStacks'
 import { classifyFloors, getEligibleStoreyIdsForAutoRisers } from '@/shared/routes/floorClassification'
 import { suggestRiserPositions } from '@/shared/routes/suggestRisers'
-import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE, resolveRiserPlacementRuleProfile } from '@/shared/routes/riserPlacementProfile'
+import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE } from '@/shared/routes/riserPlacementProfile'
 
 let floorViewerModulePromise: Promise<typeof import('@/viewer/FloorViewer')> | null = null
 let model3DViewerModulePromise: Promise<typeof import('@/viewer/Model3DViewer')> | null = null
@@ -396,7 +396,7 @@ export function WorkspacePage({
       downloadJson(
         {
           ...fullExport.debugMapping,
-          placementRuleProfile: resolveRiserPlacementRuleProfile(DEFAULT_RISER_PLACEMENT_RULE_PROFILE),
+          placementRuleProfile: DEFAULT_RISER_PLACEMENT_RULE_PROFILE,
           floorClassification: classifyFloors(storeys),
         },
         buildExportDebugFileName(modelFileName, selectedStorey?.name ?? null),
@@ -567,7 +567,7 @@ function buildSuggestedRisers(
   floorMeshes: FloorMeshes | null,
   nextRiserLabelRef: MutableRefObject<number>,
 ): Riser[] {
-  const ruleProfile = resolveRiserPlacementRuleProfile(DEFAULT_RISER_PLACEMENT_RULE_PROFILE)
+  const ruleProfile = DEFAULT_RISER_PLACEMENT_RULE_PROFILE
   const floorPlanBounds = floorMeshes
     ? {
         minX: floorMeshes.boundingBox.min.x,

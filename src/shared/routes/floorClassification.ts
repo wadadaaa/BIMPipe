@@ -34,18 +34,23 @@ export function classifyFloor(storey: Storey, penthouseStoreyId: StoreyId | null
   return { storeyId: storey.id, class: 'standard', confidence: 0.8, reasons: ['eligible residential/standard floor'] }
 }
 
+export function isEligibleForAutoRisers(
+  floorClass: FloorClass,
+  ruleProfile: RiserPlacementRuleProfile,
+): boolean {
+  if (floorClass === 'basement' && ruleProfile.excludedFloorTypes.includes('basement')) return false
+  if (floorClass === 'roof' && ruleProfile.excludedFloorTypes.includes('roof')) return false
+  if (floorClass === 'penthouse' && ruleProfile.penthouseRule === 'exclude_new_risers') return false
+  return true
+}
+
 export function getEligibleStoreyIdsForAutoRisers(
   storeys: Storey[],
   ruleProfile: RiserPlacementRuleProfile,
 ): StoreyId[] {
   const classifications = classifyFloors(storeys)
   return classifications
-    .filter((entry) => {
-      if (entry.class === 'basement' && ruleProfile.excludedFloorTypes.includes('basement')) return false
-      if (entry.class === 'roof' && ruleProfile.excludedFloorTypes.includes('roof')) return false
-      if (entry.class === 'penthouse' && ruleProfile.penthouseRule === 'exclude_new_risers') return false
-      return true
-    })
+    .filter((entry) => isEligibleForAutoRisers(entry.class, ruleProfile))
     .map((entry) => entry.storeyId)
 }
 
