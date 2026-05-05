@@ -8,8 +8,9 @@ import { WorkspaceLayout } from '@/widgets/WorkspaceLayout'
 import { TopBar } from '@/widgets/TopBar'
 import type { ThemeMode } from '@/app/App'
 import { getIfcApi } from '@/shared/ifc/ifcApi'
-import { parseStoreys } from '@/shared/ifc/parseStoreys'
 import type { FloorMeshes } from '@/shared/ifc/extractFloorMeshes'
+import { aggregateStoreyDetections } from '@/shared/ifc/aggregateStoreyDetections'
+import { parseStoreys } from '@/shared/ifc/parseStoreys'
 import type { Fixture, KitchenArea, Riser, RiserId, Storey, StoreyId, SidebarTab } from '@/domain/types'
 import { buildRiserStack, removeRiserStack } from '@/shared/routes/buildRiserStacks'
 import { classifyFloors, getEligibleStoreyIdsForAutoRisers } from '@/shared/routes/floorClassification'
@@ -104,6 +105,7 @@ export function WorkspacePage({
   const [fixtures, setFixtures] = useState<Fixture[]>([])
   const [kitchens, setKitchens] = useState<KitchenArea[]>([])
   const [isDetectingFixtures, setIsDetectingFixtures] = useState(false)
+  const detectionDebugRef = useRef<Awaited<ReturnType<typeof aggregateStoreyDetections>> | null>(null)
 
   // --- risers ---
   const [risers, setRisers] = useState<Riser[]>([])
@@ -312,6 +314,21 @@ export function WorkspacePage({
 
   function handleSuggestRisers() {
     if (!selectedStoreyId || (fixtures.length === 0 && kitchens.length === 0)) return
+
+    const modelId = webIfcModelIdRef.current
+    if (modelId !== null) {
+      void getIfcApi()
+        .then((api) => {
+          const profile = DEFAULT_RISER_PLACEMENT_RULE_PROFILE
+          return aggregateStoreyDetections(api, modelId, storeys, profile)
+        })
+        .then((result) => {
+          detectionDebugRef.current = result
+        })
+        .catch(() => {
+          // Keep suggest flow non-fatal even when full-building detection aggregation fails.
+        })
+    }
     startTransition(() => {
       nextRiserLabelRef.current = 1
       setRisers(
