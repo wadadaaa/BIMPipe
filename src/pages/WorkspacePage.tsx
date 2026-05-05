@@ -319,7 +319,7 @@ export function WorkspacePage({
     if (modelId !== null) {
       void getIfcApi()
         .then((api) => {
-          const profile = resolveRiserPlacementRuleProfile(DEFAULT_RISER_PLACEMENT_RULE_PROFILE)
+          const profile = DEFAULT_RISER_PLACEMENT_RULE_PROFILE
           return aggregateStoreyDetections(api, modelId, storeys, profile)
         })
         .then((result) => {
