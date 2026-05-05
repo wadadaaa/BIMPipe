@@ -8,13 +8,13 @@ import { WorkspaceLayout } from '@/widgets/WorkspaceLayout'
 import { TopBar } from '@/widgets/TopBar'
 import type { ThemeMode } from '@/app/App'
 import { getIfcApi } from '@/shared/ifc/ifcApi'
-import { parseStoreys } from '@/shared/ifc/parseStoreys'
 import type { FloorMeshes } from '@/shared/ifc/extractFloorMeshes'
+import { aggregateStoreyDetections } from '@/shared/ifc/aggregateStoreyDetections'
+import { parseStoreys } from '@/shared/ifc/parseStoreys'
 import type { Fixture, KitchenArea, Riser, RiserId, Storey, StoreyId, SidebarTab } from '@/domain/types'
 import { buildRiserStack, removeRiserStack } from '@/shared/routes/buildRiserStacks'
 import { classifyFloors, getEligibleStoreyIdsForAutoRisers } from '@/shared/routes/floorClassification'
 import { suggestRiserPositions } from '@/shared/routes/suggestRisers'
-import { aggregateStoreyDetections } from '@/shared/ifc/aggregateStoreyDetections'
 import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE, resolveRiserPlacementRuleProfile } from '@/shared/routes/riserPlacementProfile'
 
 let floorViewerModulePromise: Promise<typeof import('@/viewer/FloorViewer')> | null = null
@@ -317,16 +317,17 @@ export function WorkspacePage({
 
     const modelId = webIfcModelIdRef.current
     if (modelId !== null) {
-      try {
-        void getIfcApi().then((api) => {
+      void getIfcApi()
+        .then((api) => {
           const profile = resolveRiserPlacementRuleProfile(DEFAULT_RISER_PLACEMENT_RULE_PROFILE)
           return aggregateStoreyDetections(api, modelId, storeys, profile)
-        }).then((result) => {
+        })
+        .then((result) => {
           detectionDebugRef.current = result
         })
-      } catch {
-        // Keep suggest flow non-fatal even when full-building detection aggregation fails.
-      }
+        .catch(() => {
+          // Keep suggest flow non-fatal even when full-building detection aggregation fails.
+        })
     }
     startTransition(() => {
       nextRiserLabelRef.current = 1
