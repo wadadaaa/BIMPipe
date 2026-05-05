@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Storey } from '@/domain/types'
-import { classifyFloors, getEligibleStoreyIdsForAutoRisers } from './floorClassification'
+import { classifyFloors, getEligibleStoreyIdsForAutoRisers, isEligibleForAutoRisers } from './floorClassification'
 import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE } from './riserPlacementProfile'
 
 function storey(id: number, name: string, elevation: number): Storey {
@@ -37,6 +37,33 @@ describe('floorClassification', () => {
     ], DEFAULT_RISER_PLACEMENT_RULE_PROFILE)
 
     expect(ids).toEqual([2, 3])
+  })
+
+
+  it('marks top floor as penthouse in a two-floor building and excludes it by default', () => {
+    const classified = classifyFloors([
+      storey(2, 'Level 1', 0),
+      storey(3, 'Level 2', 3),
+    ])
+
+    expect(classified.map((entry) => [entry.storeyId, entry.class])).toEqual([
+      [2, 'standard'],
+      [3, 'penthouse'],
+    ])
+
+    const ids = getEligibleStoreyIdsForAutoRisers([
+      storey(2, 'Level 1', 0),
+      storey(3, 'Level 2', 3),
+    ], DEFAULT_RISER_PLACEMENT_RULE_PROFILE)
+
+    expect(ids).toEqual([2])
+  })
+
+  it('shares one eligibility predicate with the same default exclusions', () => {
+    expect(isEligibleForAutoRisers('standard', DEFAULT_RISER_PLACEMENT_RULE_PROFILE)).toBe(true)
+    expect(isEligibleForAutoRisers('basement', DEFAULT_RISER_PLACEMENT_RULE_PROFILE)).toBe(false)
+    expect(isEligibleForAutoRisers('roof', DEFAULT_RISER_PLACEMENT_RULE_PROFILE)).toBe(false)
+    expect(isEligibleForAutoRisers('penthouse', DEFAULT_RISER_PLACEMENT_RULE_PROFILE)).toBe(false)
   })
 
   it('can include penthouse when rule is changed', () => {

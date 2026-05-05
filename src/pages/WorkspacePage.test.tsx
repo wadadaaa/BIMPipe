@@ -145,7 +145,7 @@ describe('WorkspacePage', () => {
     mocks.exportFullIfcWithRisersWithDebug.mockReset()
   })
 
-  it('auto-opens קומה 2 instead of מרתף 2 after upload and supports riser deletion and IFC export', async () => {
+  it('auto-opens קומה 2 instead of מרתף 2 and excludes penthouse floor from auto-generated risers by default', async () => {
     const user = userEvent.setup()
     render(<WorkspacePage />)
 
@@ -190,14 +190,17 @@ describe('WorkspacePage', () => {
     expect(api).toMatchObject({ OpenModel: expect.any(Function), CloseModel: expect.any(Function) })
     expect(sourceBytes).toBeInstanceOf(Uint8Array)
     expect(primaryStoreyId).toBe(2)
-    expect(risers).toHaveLength(6)
+    // Auto-placement is generated on the selected floor only in this flow.
+    // Basement/roof/penthouse exclusions matter for cross-floor expansion paths,
+    // but this selected-floor test should keep exactly two TOILETPAN-derived risers.
+    expect(risers).toHaveLength(2)
     expect(new Set(risers.map((riser: { stackLabel: string }) => riser.stackLabel))).toEqual(
       new Set(['R1', 'R3']),
     )
     expect(anchorClick).toHaveBeenCalledTimes(2)
   })
 
-  it('exposes one validated IFC download option that writes IFC and debug mapping', async () => {
+  it('writes IFC + debug mapping and keeps basement/roof/penthouse exclusions explicit in counts', async () => {
     const user = userEvent.setup()
     render(<WorkspacePage />)
 
@@ -223,7 +226,9 @@ describe('WorkspacePage', () => {
       mocks.exportFullIfcWithRisersWithDebug.mock.calls[0]
     expect(sourceBytes).toBeInstanceOf(Uint8Array)
     expect(primaryStoreyId).toBe(2)
-    expect(risers).toHaveLength(9)
+    // Selected-floor generation keeps one riser per detected anchor on Level 2
+    // (2 TOILETPAN fixtures + 1 kitchen anchor = 3 total).
+    expect(risers).toHaveLength(3)
     expect(floorBounds).toEqual({ minX: 0, maxX: 1200, minZ: 0, maxZ: 1200 })
     expect(debugOptions).toMatchObject({
       sourceIfcName: 'tower.ifc',
