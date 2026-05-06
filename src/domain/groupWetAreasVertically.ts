@@ -37,7 +37,9 @@ export type StoreyEligibilityById = Map<StoreyId, boolean>
 export type StoreyEligibilitySummary = Pick<Storey, 'id'> & { eligibleForNewRisers: boolean }
 
 const DEFAULT_OPTIONS: Required<VerticalGroupingOptions> = {
+  // V0 default: require at least 45% overlap against the smaller plan footprint.
   minOverlapRatio: 0.45,
+  // V0 default: allow up to 1.8m centroid drift before rejecting vertical pairing.
   maxCentroidDistanceMeters: 1.8,
 }
 
@@ -158,6 +160,7 @@ function toCandidateMember(
 function compareByElevation(a: StoreyId, b: StoreyId, storeys: Storey[]): number {
   const storeyA = storeys.find((storey) => storey.id === a)
   const storeyB = storeys.find((storey) => storey.id === b)
+  // Missing storey metadata is invalid/rare; numeric id fallback keeps ordering deterministic.
   if (!storeyA || !storeyB) return a - b
   if (storeyA.elevation !== storeyB.elevation) return storeyA.elevation - storeyB.elevation
   return storeyA.id - storeyB.id
