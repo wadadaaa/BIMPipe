@@ -75,6 +75,24 @@ describe('groupWetAreasVertically', () => {
     expect(groups[0].members.map((member) => member.areaId)).toEqual(['base', 'strong'])
   })
 
+  it('keeps losing same-storey passing candidate as its own later group', () => {
+    const wetAreas: DetectedWetArea[] = [
+      { areaId: 'base', storeyId: 101, planBounds: { minX: 0, maxX: 4, minZ: 0, maxZ: 4 } },
+      { areaId: 'strong', storeyId: 102, planBounds: { minX: 0.05, maxX: 4.05, minZ: 0.05, maxZ: 4.05 } },
+      { areaId: 'weaker-but-passing', storeyId: 102, planBounds: { minX: 0.8, maxX: 4.8, minZ: 0.8, maxZ: 4.8 } },
+    ]
+
+    const groups = groupWetAreasVertically(wetAreas, STOREYS, ELIGIBILITY)
+    expect(groups).toHaveLength(2)
+
+    const baseGroup = groups.find((group) => group.members.some((member) => member.areaId === 'base'))
+    expect(baseGroup?.members.map((member) => member.areaId)).toEqual(['base', 'strong'])
+
+    const loserGroup = groups.find((group) => group.members.some((member) => member.areaId === 'weaker-but-passing'))
+    expect(loserGroup?.members).toHaveLength(1)
+    expect(loserGroup?.members[0].areaId).toBe('weaker-but-passing')
+  })
+
   it('uses stable content-based groupId independent of input order', () => {
     const wetAreasA: DetectedWetArea[] = [
       { areaId: 'w2', storeyId: 102, planBounds: { minX: 0, maxX: 2, minZ: 0, maxZ: 2 } },
@@ -149,6 +167,17 @@ describe('groupWetAreasVertically', () => {
       storeyId: 101,
       planBounds: { minX: 1, maxX: 3, minZ: 2, maxZ: 4 },
     })
+  })
+
+  it('returns null for KitchenArea without planBounds', () => {
+    const kitchen: KitchenArea = {
+      expressId: 78,
+      name: 'Kitchen B',
+      storeyId: 102,
+      position: { x: 2, y: 0, z: 3 },
+    }
+
+    expect(detectedWetAreaFromKitchenArea(kitchen)).toBeNull()
   })
 
   it('does not convert Fixture without plan bounds silently', () => {

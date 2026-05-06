@@ -27,7 +27,7 @@ export interface VerticalWetGroupMember {
 export interface VerticalWetGroup {
   groupId: string
   members: VerticalWetGroupMember[]
-  debug?: {
+  debug: {
     confidence: number
     reasons: string[]
   }
@@ -94,12 +94,14 @@ export function groupWetAreasVertically(
 
     const members = Array.from(candidateByStorey.values()).sort((a, b) => compareByElevation(a.storeyId, b.storeyId, storeys))
     const groupId = buildGroupId(members)
+    // Losing same-storey candidates are intentionally not visited here; they may later
+    // anchor their own single-member group. Downstream strategy must handle overlaps.
     members.forEach((member) => visited.add(member.areaId))
 
     const nonBase = members.filter((member) => member.areaId !== base.areaId)
     const groupConfidence = nonBase.length === 0
       ? 1
-      : nonBase.reduce((acc, member) => acc + (member.debug?.confidence ?? 0), 0) / nonBase.length
+      : nonBase.reduce((acc, member) => acc + member.debug.confidence, 0) / nonBase.length
 
     groups.push({
       groupId,
@@ -145,7 +147,7 @@ function toCandidateMember(
     debug: {
       confidence,
       reasons: [
-      `plan overlap ${overlapRatio.toFixed(3)} >= threshold`,
+        `plan overlap ${overlapRatio.toFixed(3)} >= threshold`,
         `centroid distance ${centroidDistanceMeters.toFixed(3)}m within tolerance`,
       ],
     },
@@ -173,7 +175,13 @@ function isStrongerMember(candidate: VerticalWetGroupMember, incumbent: Vertical
 }
 
 function buildGroupId(members: VerticalWetGroupMember[]): string {
-  const signature = members.map((member) => `${member.storeyId}:${member.areaId}`).sort().join('|')
+  const signature = [...members]
+    .sort((a, b) => {
+      if (a.storeyId !== b.storeyId) return a.storeyId - b.storeyId
+      return a.areaId.localeCompare(b.areaId)
+    })
+    .map((member) => `${member.storeyId}:${member.areaId}`)
+    .join('|')
   return `vertical-wet-group:${signature}`
 }
 
@@ -186,6 +194,7 @@ function buildGroupReasons(members: VerticalWetGroupMember[]): string[] {
 }
 
 function computeOverlapRatio(a: PlanBounds, b: PlanBounds): number {
+  // V0 intentionally measures coverage against the smaller area, not IoU.
   const overlapWidth = Math.max(0, Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX))
   const overlapHeight = Math.max(0, Math.min(a.maxZ, b.maxZ) - Math.max(a.minZ, b.minZ))
   const overlapArea = overlapWidth * overlapHeight
