@@ -34,97 +34,102 @@ interface GroupProfile {
 
 export function decideRiserStrategyPerToiletRoom(groups: VerticalWetGroup[]): RiserStrategyDecision[] {
   const sortedGroups = [...groups].sort((a, b) => a.groupId.localeCompare(b.groupId))
-  const profiles = new Map<string, GroupProfile>()
-  for (const group of sortedGroups) {
-    const eligibleCount = group.members.filter((m) => m.eligibleForNewRisers).length
-    profiles.set(group.groupId, { group, eligibleCount, confidence: group.debug.confidence })
-  }
-
-  const overlappingByArea = new Map<string, VerticalWetGroup[]>()
-  for (const group of sortedGroups) {
-    for (const member of group.members) {
-      const list = overlappingByArea.get(member.areaId) ?? []
-      list.push(group)
-      overlappingByArea.set(member.areaId, list)
-    }
-  }
+  const profiles = buildProfiles(sortedGroups)
+  const overlappingByArea = buildOverlappingByArea(sortedGroups)
 
   const decisions: RiserStrategyDecision[] = []
   for (const group of sortedGroups) {
-    const primary = choosePrimaryPlacedGroup(group, profiles)
-    const placedGroupId = primary?.groupId
+    const hasEligible = hasEligibleMember(group)
+    const highestEligibleStoreyId = hasEligible ? maxEligibleStoreyId(group) : null
 
     for (const member of sortMembers(group.members)) {
       const overlaps = (overlappingByArea.get(member.areaId) ?? []).sort((a, b) => a.groupId.localeCompare(b.groupId))
-      const overlapIds = overlaps.map((g) => g.groupId)
-      const stronger = overlaps.filter((g) => isStrongerGroup(g, group, profiles))
-      const topStronger = stronger[0]
-      const ambiguous = stronger.length > 1 && sameStrength(stronger[0], stronger[1], profiles)
-
+      const strongerGroups = overlaps.filter((candidate) => isStrongerGroup(candidate, group, profiles))
+      const topStronger = strongerGroups[0]
       const reasons: string[] = []
-      let decision: RiserStrategyDecisionType = RISER_STRATEGY_DECISION.COORDINATION_REQUIRED
-      let coveredByGroupId: string | undefined
-      let servedByGroupId: string | undefined
+
+      let decision: RiserStrategyDecision
 
       if (!member.eligibleForNewRisers) {
-        if (placedGroupId && hasEligibleMember(group) && member.storeyId > minEligibleStoreyId(group)) {
-          decision = RISER_STRATEGY_DECISION.PENTHOUSE_SERVED_BY_EXISTING_RISER
-          servedByGroupId = placedGroupId
-          reasons.push('non-eligible top-floor member aligned with lower eligible placed group')
+        if (highestEligibleStoreyId !== null && member.storeyId > highestEligibleStoreyId) {
+          reasons.push('non-eligible member is above highest eligible storey in this group')
+          decision = createDecision(group, member, RISER_STRATEGY_DECISION.PENTHOUSE_SERVED_BY_EXISTING_RISER, reasons, overlaps, {
+            servedByGroupId: group.groupId,
+          })
         } else {
-          decision = RISER_STRATEGY_DECISION.EXCLUDED_FLOOR
           reasons.push('storey is not eligible for new risers')
+          decision = createDecision(group, member, RISER_STRATEGY_DECISION.EXCLUDED_FLOOR, reasons, overlaps)
         }
       } else if (topStronger) {
-        if (ambiguous) {
-          decision = RISER_STRATEGY_DECISION.COORDINATION_REQUIRED
-          reasons.push('overlap with multiple equally strong groups requires coordination')
-        } else {
-          decision = RISER_STRATEGY_DECISION.COVERED_BY_EXISTING_RISER_GROUP
-          coveredByGroupId = topStronger.groupId
-          reasons.push('covered by stronger overlapping group to avoid duplicate riser')
-        }
-      } else if (placedGroupId === group.groupId) {
-        decision = RISER_STRATEGY_DECISION.RISER_PLACED
-        reasons.push('eligible primary group receives riser placement')
-      } else if (placedGroupId) {
-        decision = RISER_STRATEGY_DECISION.COVERED_BY_EXISTING_RISER_GROUP
-        coveredByGroupId = placedGroupId
-        reasons.push('member covered by riser placed for this vertical group')
+        reasons.push('covered by stronger overlapping group to avoid duplicate riser')
+        decision = createDecision(group, member, RISER_STRATEGY_DECISION.COVERED_BY_EXISTING_RISER_GROUP, reasons, overlaps, {
+          coveredByGroupId: topStronger.groupId,
+        })
+      } else if (hasEligible) {
+        reasons.push('eligible member in strongest available group receives riser placement')
+        decision = createDecision(group, member, RISER_STRATEGY_DECISION.RISER_PLACED, reasons, overlaps)
+      } else {
+        throw new Error(`Unexpected strategy state for area ${member.areaId} in group ${group.groupId}`)
       }
 
-      decisions.push({
-        decisionId: buildDecisionId(group.groupId, member),
-        groupId: group.groupId,
-        areaId: member.areaId,
-        storeyId: member.storeyId,
-        decision,
-        coveredByGroupId,
-        servedByGroupId,
-        reasons,
-        debug: {
-          confidence: member.debug.confidence,
-          overlapGroupIds: overlapIds,
-        },
-      })
+      decisions.push(decision)
     }
   }
 
   return decisions.sort((a, b) => a.decisionId.localeCompare(b.decisionId))
 }
 
-function choosePrimaryPlacedGroup(group: VerticalWetGroup, profiles: Map<string, GroupProfile>): VerticalWetGroup | null {
-  const profile = profiles.get(group.groupId)
-  if (!profile || profile.eligibleCount === 0) return null
-  return group
+function createDecision(
+  group: VerticalWetGroup,
+  member: VerticalWetGroupMember,
+  type: RiserStrategyDecisionType,
+  reasons: string[],
+  overlaps: VerticalWetGroup[],
+  refs?: { coveredByGroupId?: string, servedByGroupId?: string },
+): RiserStrategyDecision {
+  return {
+    decisionId: buildDecisionId(group.groupId, member),
+    groupId: group.groupId,
+    areaId: member.areaId,
+    storeyId: member.storeyId,
+    decision: type,
+    coveredByGroupId: refs?.coveredByGroupId,
+    servedByGroupId: refs?.servedByGroupId,
+    reasons,
+    debug: {
+      confidence: member.debug.confidence,
+      overlapGroupIds: overlaps.map((g) => g.groupId),
+    },
+  }
+}
+
+function buildProfiles(groups: VerticalWetGroup[]): Map<string, GroupProfile> {
+  const profiles = new Map<string, GroupProfile>()
+  for (const group of groups) {
+    const eligibleCount = group.members.filter((m) => m.eligibleForNewRisers).length
+    profiles.set(group.groupId, { group, eligibleCount, confidence: group.debug.confidence })
+  }
+  return profiles
+}
+
+function buildOverlappingByArea(groups: VerticalWetGroup[]): Map<string, VerticalWetGroup[]> {
+  const overlappingByArea = new Map<string, VerticalWetGroup[]>()
+  for (const group of groups) {
+    for (const member of group.members) {
+      const list = overlappingByArea.get(member.areaId) ?? []
+      list.push(group)
+      overlappingByArea.set(member.areaId, list)
+    }
+  }
+  return overlappingByArea
 }
 
 function hasEligibleMember(group: VerticalWetGroup): boolean {
   return group.members.some((m) => m.eligibleForNewRisers)
 }
 
-function minEligibleStoreyId(group: VerticalWetGroup): number {
-  return Math.min(...group.members.filter((m) => m.eligibleForNewRisers).map((m) => m.storeyId))
+function maxEligibleStoreyId(group: VerticalWetGroup): number {
+  return Math.max(...group.members.filter((m) => m.eligibleForNewRisers).map((m) => m.storeyId))
 }
 
 function sortMembers(members: VerticalWetGroupMember[]): VerticalWetGroupMember[] {
@@ -139,16 +144,8 @@ function isStrongerGroup(a: VerticalWetGroup, b: VerticalWetGroup, profiles: Map
   if (pa.eligibleCount !== pb.eligibleCount) return pa.eligibleCount > pb.eligibleCount
   if (pa.group.members.length !== pb.group.members.length) return pa.group.members.length > pb.group.members.length
   if (pa.confidence !== pb.confidence) return pa.confidence > pb.confidence
+  // Deterministic tie-break to avoid spurious coordination flags.
   return a.groupId.localeCompare(b.groupId) < 0
-}
-
-function sameStrength(a: VerticalWetGroup, b: VerticalWetGroup, profiles: Map<string, GroupProfile>): boolean {
-  const pa = profiles.get(a.groupId)
-  const pb = profiles.get(b.groupId)
-  if (!pa || !pb) return false
-  return pa.eligibleCount === pb.eligibleCount
-    && pa.group.members.length === pb.group.members.length
-    && pa.confidence === pb.confidence
 }
 
 function buildDecisionId(groupId: string, member: VerticalWetGroupMember): string {
