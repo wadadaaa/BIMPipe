@@ -39,8 +39,10 @@ export function decideRiserStrategyPerToiletRoom(groups: VerticalWetGroup[]): Ri
 
   const decisions: RiserStrategyDecision[] = []
   for (const group of sortedGroups) {
-    const hasEligible = hasEligibleMember(group)
+    const eligibleMembers = sortMembers(group.members).filter((member) => member.eligibleForNewRisers)
+    const hasEligible = eligibleMembers.length > 0
     const highestEligibleStoreyId = hasEligible ? maxEligibleStoreyId(group) : null
+    const primaryEligibleAreaId = hasEligible ? eligibleMembers[0].areaId : null
 
     for (const member of sortMembers(group.members)) {
       const overlaps = (overlappingByArea.get(member.areaId) ?? []).sort((a, b) => a.groupId.localeCompare(b.groupId))
@@ -65,9 +67,14 @@ export function decideRiserStrategyPerToiletRoom(groups: VerticalWetGroup[]): Ri
         decision = createDecision(group, member, RISER_STRATEGY_DECISION.COVERED_BY_EXISTING_RISER_GROUP, reasons, overlaps, {
           coveredByGroupId: topStronger.groupId,
         })
-      } else if (hasEligible) {
-        reasons.push('eligible member in strongest available group receives riser placement')
+      } else if (hasEligible && primaryEligibleAreaId === member.areaId) {
+        reasons.push('eligible primary member receives riser placement for this group')
         decision = createDecision(group, member, RISER_STRATEGY_DECISION.RISER_PLACED, reasons, overlaps)
+      } else if (hasEligible) {
+        reasons.push('eligible non-primary member is covered by riser placed for this group')
+        decision = createDecision(group, member, RISER_STRATEGY_DECISION.COVERED_BY_EXISTING_RISER_GROUP, reasons, overlaps, {
+          coveredByGroupId: group.groupId,
+        })
       } else {
         throw new Error(`Unexpected strategy state for area ${member.areaId} in group ${group.groupId}`)
       }
@@ -122,10 +129,6 @@ function buildOverlappingByArea(groups: VerticalWetGroup[]): Map<string, Vertica
     }
   }
   return overlappingByArea
-}
-
-function hasEligibleMember(group: VerticalWetGroup): boolean {
-  return group.members.some((m) => m.eligibleForNewRisers)
 }
 
 function maxEligibleStoreyId(group: VerticalWetGroup): number {

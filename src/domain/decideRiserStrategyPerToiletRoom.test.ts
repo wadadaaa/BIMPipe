@@ -24,6 +24,21 @@ describe('decideRiserStrategyPerToiletRoom', () => {
     expect(decisions[0].decision).toBe(RISER_STRATEGY_DECISION.RISER_PLACED)
   })
 
+
+  it('places one primary riser decision per eligible group and covers other eligible members', () => {
+    const decisions = decideRiserStrategyPerToiletRoom([
+      group('g1', [member('a-low', 101, true), member('a-high', 102, true)]),
+    ])
+
+    const placed = decisions.filter((d) => d.groupId === 'g1' && d.decision === RISER_STRATEGY_DECISION.RISER_PLACED)
+    const covered = decisions.find((d) => d.groupId === 'g1' && d.areaId === 'a-high')
+
+    expect(placed).toHaveLength(1)
+    expect(placed[0].areaId).toBe('a-low')
+    expect(covered?.decision).toBe(RISER_STRATEGY_DECISION.COVERED_BY_EXISTING_RISER_GROUP)
+    expect(covered?.coveredByGroupId).toBe('g1')
+  })
+
   it('marks eligible overlaps as covered by stronger group', () => {
     const decisions = decideRiserStrategyPerToiletRoom([
       group('g-strong', [member('a-base', 101, true), member('a-top', 102, true)], 0.95),
@@ -76,7 +91,9 @@ describe('decideRiserStrategyPerToiletRoom', () => {
       group('g-loser', [member('a2', 102, true)]),
     ])
 
+    const placedInLoser = decisions.filter((d) => d.groupId === 'g-loser' && d.decision === RISER_STRATEGY_DECISION.RISER_PLACED)
     const loser = decisions.find((d) => d.groupId === 'g-loser')
+    expect(placedInLoser).toHaveLength(0)
     expect(loser?.decision).toBe(RISER_STRATEGY_DECISION.COVERED_BY_EXISTING_RISER_GROUP)
   })
 
