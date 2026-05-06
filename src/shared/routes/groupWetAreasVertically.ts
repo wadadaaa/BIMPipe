@@ -1,22 +1,23 @@
 import type { StoreyId } from '@/domain/types'
+import type { StoreyDetectionAggregation } from '@/shared/ifc/aggregateStoreyDetections'
 
 export interface DetectedWetArea {
   id: string
-  storeyId: StoreyId | string
-  centroid: { xMm: number; yMm: number }
-  bounds: { minXmm: number; minYmm: number; maxXmm: number; maxYmm: number }
+  storeyId: StoreyId
+  centroid: { x: number; z: number }
+  bounds: { minX: number; minZ: number; maxX: number; maxZ: number }
   confidence?: number
 }
 
 export interface VerticalGroupingOptions {
   minOverlapRatio: number
   maxCentroidDistanceMm: number
-  minConfidenceToGroup: number
+  minPairScoreToGroup: number
 }
 
 export interface VerticalWetGroupMember {
   areaId: string
-  storeyId: StoreyId | string
+  storeyId: StoreyId
   overlapRatio: number
   centroidDistanceMm: number
   confidence: number
@@ -30,19 +31,15 @@ export interface VerticalWetGroup {
   reasons: string[]
 }
 
-export interface VerticalGroupingAggregation {
-  floors: Array<{ storeyId: StoreyId | string; eligibleForNewRisers: boolean }>
-}
-
 const DEFAULT_OPTIONS: VerticalGroupingOptions = {
   minOverlapRatio: 0.2,
   maxCentroidDistanceMm: 2000,
-  minConfidenceToGroup: 0.35,
+  minPairScoreToGroup: 0.35,
 }
 
 export function groupWetAreasVertically(
   wetAreas: DetectedWetArea[],
-  aggregation: VerticalGroupingAggregation,
+  aggregation: StoreyDetectionAggregation,
   options: Partial<VerticalGroupingOptions> = {},
 ): VerticalWetGroup[] {
   const resolved = { ...DEFAULT_OPTIONS, ...options }
@@ -50,7 +47,7 @@ export function groupWetAreasVertically(
   const taken = new Set<string>()
   const eligibleByStorey = new Map(aggregation.floors.map((f) => [f.storeyId, f.eligibleForNewRisers]))
   const groups: VerticalWetGroup[] = []
-  const storeys = uniqueStoreys(sorted)
+  const storeys = orderedStoreysByElevation(sorted, aggregation)
 
   for (const base of sorted) {
     if (taken.has(base.id)) continue
@@ -87,7 +84,7 @@ export function groupWetAreasVertically(
       reasons: [
         `overlap >= ${resolved.minOverlapRatio}`,
         `centroidDistance <= ${resolved.maxCentroidDistanceMm}mm`,
-        `confidence >= ${resolved.minConfidenceToGroup}`,
+        `pairScore >= ${resolved.minPairScoreToGroup}`,
       ],
     })
   }
@@ -106,7 +103,7 @@ function pickBestCandidate(
       (score) =>
         score.overlapRatio >= options.minOverlapRatio &&
         score.centroidDistanceMm <= options.maxCentroidDistanceMm &&
-        score.confidence >= options.minConfidenceToGroup,
+        score.confidence >= options.minPairScoreToGroup,
     )
     .sort((a, b) => {
       if (b.confidence !== a.confidence) return b.confidence - a.confidence
@@ -118,8 +115,21 @@ function pickBestCandidate(
   return ranked[0] ?? null
 }
 
-function uniqueStoreys(areas: DetectedWetArea[]): Array<StoreyId | string> {
-  return [...new Set(areas.map((a) => a.storeyId))].sort((a, b) => String(a).localeCompare(String(b)))
+function orderedStoreysByElevation(
+  areas: DetectedWetArea[],
+  aggregation: StoreyDetectionAggregation,
+): StoreyId[] {
+  const areaStoreys = new Set(areas.map((a) => a.storeyId))
+  const floorOrder = new Map(aggregation.floors.map((floor, index) => [floor.storeyId, index]))
+
+  return [...areaStoreys].sort((a, b) => {
+    const aOrder = floorOrder.get(a)
+    const bOrder = floorOrder.get(b)
+    if (aOrder !== undefined && bOrder !== undefined) return aOrder - bOrder
+    if (aOrder !== undefined) return -1
+    if (bOrder !== undefined) return 1
+    return a - b
+  })
 }
 
 function toMember(
@@ -127,7 +137,7 @@ function toMember(
   overlapRatio: number,
   centroidDistanceMm: number,
   confidence: number,
-  eligibleByStorey: Map<StoreyId | string, boolean>,
+  eligibleByStorey: Map<StoreyId, boolean>,
 ): VerticalWetGroupMember {
   return {
     areaId: area.id,
@@ -146,7 +156,7 @@ function buildStableGroupId(members: VerticalWetGroupMember[]): string {
 
 function scorePair(base: DetectedWetArea, candidate: DetectedWetArea, options: VerticalGroupingOptions) {
   const overlapRatio = overlap(base.bounds, candidate.bounds)
-  const centroidDistanceMm = Math.hypot(base.centroid.xMm - candidate.centroid.xMm, base.centroid.yMm - candidate.centroid.yMm)
+  const centroidDistanceMm = Math.hypot(base.centroid.x - candidate.centroid.x, base.centroid.z - candidate.centroid.z)
   const overlapScore = clamp01(overlapRatio / Math.max(options.minOverlapRatio, 0.000_001))
   const distanceScore = clamp01(1 - centroidDistanceMm / Math.max(options.maxCentroidDistanceMm, 0.000_001))
   const intrinsic = candidate.confidence ?? 1
@@ -155,15 +165,15 @@ function scorePair(base: DetectedWetArea, candidate: DetectedWetArea, options: V
 }
 
 function overlap(a: DetectedWetArea['bounds'], b: DetectedWetArea['bounds']): number {
-  const ix = Math.max(0, Math.min(a.maxXmm, b.maxXmm) - Math.max(a.minXmm, b.minXmm))
-  const iy = Math.max(0, Math.min(a.maxYmm, b.maxYmm) - Math.max(a.minYmm, b.minYmm))
-  const intersection = ix * iy
+  const ix = Math.max(0, Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX))
+  const iz = Math.max(0, Math.min(a.maxZ, b.maxZ) - Math.max(a.minZ, b.minZ))
+  const intersection = ix * iz
   if (intersection <= 0) return 0
 
-  const areaA = Math.max(0, a.maxXmm - a.minXmm) * Math.max(0, a.maxYmm - a.minYmm)
-  const areaB = Math.max(0, b.maxXmm - b.minXmm) * Math.max(0, b.maxYmm - b.minYmm)
-  const denominator = Math.min(areaA, areaB)
-  return denominator > 0 ? intersection / denominator : 0
+  const areaA = Math.max(0, a.maxX - a.minX) * Math.max(0, a.maxZ - a.minZ)
+  const areaB = Math.max(0, b.maxX - b.minX) * Math.max(0, b.maxZ - b.minZ)
+  const union = areaA + areaB - intersection
+  return union > 0 ? intersection / union : 0
 }
 
 function average(values: number[]): number {
