@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import type { Fixture, KitchenArea, Storey } from '@/domain/types'
+import type { KitchenArea, Storey } from '@/domain/types'
 import {
   buildStoreyEligibilityById,
-  detectedWetAreaFromFixture,
   detectedWetAreaFromKitchenArea,
   groupWetAreasVertically,
   type DetectedWetArea,
@@ -180,15 +179,4 @@ describe('groupWetAreasVertically', () => {
     expect(detectedWetAreaFromKitchenArea(kitchen)).toBeNull()
   })
 
-  it('does not convert Fixture without plan bounds silently', () => {
-    const fixture: Fixture = {
-      expressId: 11,
-      name: 'Toilet',
-      kind: 'TOILETPAN',
-      storeyId: 101,
-      position: { x: 1, y: 0, z: 2 },
-    }
-
-    expect(detectedWetAreaFromFixture(fixture)).toBeNull()
-  })
 })

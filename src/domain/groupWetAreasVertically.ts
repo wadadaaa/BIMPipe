@@ -1,4 +1,4 @@
-import type { Fixture, KitchenArea, PlanBounds, Storey, StoreyId } from '@/domain/types'
+import type { KitchenArea, PlanBounds, Storey, StoreyId } from '@/domain/types'
 
 export interface DetectedWetArea {
   areaId: string
@@ -235,12 +235,4 @@ export function detectedWetAreaFromKitchenArea(kitchen: KitchenArea): DetectedWe
     storeyId: kitchen.storeyId,
     planBounds: kitchen.planBounds,
   }
-}
-
-/**
- * Fixtures currently expose position only, not plan bounds.
- * This conversion intentionally returns null unless a future upstream stage provides plan bounds.
- */
-export function detectedWetAreaFromFixture(_fixture: Fixture): DetectedWetArea | null {
-  return null
 }
