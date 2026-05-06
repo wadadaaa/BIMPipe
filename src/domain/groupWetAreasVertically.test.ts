@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import type { Storey } from '@/domain/types'
-import { groupWetAreasVertically, type DetectedWetArea, type StoreyEligibilityById } from './groupWetAreasVertically'
+import type { Fixture, KitchenArea, Storey } from '@/domain/types'
+import {
+  buildStoreyEligibilityById,
+  detectedWetAreaFromFixture,
+  detectedWetAreaFromKitchenArea,
+  groupWetAreasVertically,
+  type DetectedWetArea,
+  type StoreyEligibilityById,
+} from './groupWetAreasVertically'
 
 const STOREYS: Storey[] = [
   { id: 101, name: 'L1', elevation: 0, modelId: 'm1' },
@@ -15,6 +22,10 @@ const ELIGIBILITY: StoreyEligibilityById = new Map([
 ])
 
 describe('groupWetAreasVertically', () => {
+  it('returns empty list when wetAreas is empty', () => {
+    expect(groupWetAreasVertically([], STOREYS, ELIGIBILITY)).toEqual([])
+  })
+
   it('groups typical aligned wet areas across floors', () => {
     const wetAreas: DetectedWetArea[] = [
       { areaId: 'a-101', storeyId: 101, planBounds: { minX: 0, maxX: 2, minZ: 0, maxZ: 2 } },
@@ -45,8 +56,7 @@ describe('groupWetAreasVertically', () => {
 
     const groups = groupWetAreasVertically(wetAreas, STOREYS, ELIGIBILITY, {
       minOverlapRatio: 0.1,
-      maxCentroidDistanceMm: 1000,
-      minConfidenceToGroup: 0.2,
+      maxCentroidDistanceMeters: 1,
     })
 
     expect(groups).toHaveLength(2)
@@ -75,6 +85,7 @@ describe('groupWetAreasVertically', () => {
     const groupA = groupWetAreasVertically(wetAreasA, STOREYS, ELIGIBILITY)[0]
     const groupB = groupWetAreasVertically(wetAreasB, STOREYS, ELIGIBILITY)[0]
     expect(groupA.groupId).toBe(groupB.groupId)
+    expect(groupA.groupId).toBe('vertical-wet-group:101:w1|102:w2')
   })
 
   it('orders members by storey elevation, not id ordering', () => {
@@ -111,5 +122,44 @@ describe('groupWetAreasVertically', () => {
 
     const groups = groupWetAreasVertically(wetAreas, STOREYS, eligibility)
     expect(groups[0].members.map((member) => member.eligibleForNewRisers)).toEqual([false, true, false])
+  })
+
+  it('builds eligibility map from minimal floor summaries', () => {
+    const result = buildStoreyEligibilityById([
+      { id: 5001, eligibleForNewRisers: true },
+      { id: 5002, eligibleForNewRisers: false },
+    ])
+
+    expect(result.get(5001)).toBe(true)
+    expect(result.get(5002)).toBe(false)
+    expect(result.get(5003)).toBeUndefined()
+  })
+
+  it('converts KitchenArea with planBounds to DetectedWetArea', () => {
+    const kitchen: KitchenArea = {
+      expressId: 77,
+      name: 'Kitchen A',
+      storeyId: 101,
+      position: { x: 1, y: 0, z: 2 },
+      planBounds: { minX: 1, maxX: 3, minZ: 2, maxZ: 4 },
+    }
+
+    expect(detectedWetAreaFromKitchenArea(kitchen)).toEqual({
+      areaId: 'kitchen:77',
+      storeyId: 101,
+      planBounds: { minX: 1, maxX: 3, minZ: 2, maxZ: 4 },
+    })
+  })
+
+  it('does not convert Fixture without plan bounds silently', () => {
+    const fixture: Fixture = {
+      expressId: 11,
+      name: 'Toilet',
+      kind: 'TOILETPAN',
+      storeyId: 101,
+      position: { x: 1, y: 0, z: 2 },
+    }
+
+    expect(detectedWetAreaFromFixture(fixture)).toBeNull()
   })
 })

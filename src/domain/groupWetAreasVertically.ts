@@ -1,4 +1,4 @@
-import type { PlanBounds, Storey, StoreyId } from '@/domain/types'
+import type { Fixture, KitchenArea, PlanBounds, Storey, StoreyId } from '@/domain/types'
 
 export interface DetectedWetArea {
   areaId: string
@@ -8,8 +8,7 @@ export interface DetectedWetArea {
 
 export interface VerticalGroupingOptions {
   minOverlapRatio?: number
-  maxCentroidDistanceMm?: number
-  minConfidenceToGroup?: number
+  maxCentroidDistanceMeters?: number
 }
 
 export interface VerticalWetGroupMember {
@@ -17,30 +16,36 @@ export interface VerticalWetGroupMember {
   storeyId: StoreyId
   planBounds: PlanBounds
   overlapRatio: number
-  centroidDistanceMm: number
-  reasons: string[]
+  centroidDistanceMeters: number
   eligibleForNewRisers: boolean
-  debug?: {
+  debug: {
     confidence: number
+    reasons: string[]
   }
 }
 
 export interface VerticalWetGroup {
   groupId: string
   members: VerticalWetGroupMember[]
-  reasons: string[]
   debug?: {
     confidence: number
+    reasons: string[]
   }
 }
 
 export type StoreyEligibilityById = Map<StoreyId, boolean>
+export type StoreyEligibilitySummary = Pick<Storey, 'id'> & { eligibleForNewRisers: boolean }
 
 const DEFAULT_OPTIONS: Required<VerticalGroupingOptions> = {
   minOverlapRatio: 0.45,
-  maxCentroidDistanceMm: 1800,
-  minConfidenceToGroup: 0.5,
+  maxCentroidDistanceMeters: 1.8,
 }
+
+/**
+ * BIM-9 V0 uses base-anchored greedy matching:
+ * each non-visited wet area becomes a base anchor, then picks at most one strongest
+ * candidate per storey against that base area only (not accumulated group bounds).
+ */
 
 export function groupWetAreasVertically(
   wetAreas: DetectedWetArea[],
@@ -65,13 +70,22 @@ export function groupWetAreasVertically(
       const overlapRatio = computeOverlapRatio(base.planBounds, candidate.planBounds)
       if (overlapRatio < resolved.minOverlapRatio) continue
 
-      const centroidDistanceMm = computeCentroidDistanceMm(base.planBounds, candidate.planBounds)
-      if (centroidDistanceMm > resolved.maxCentroidDistanceMm) continue
+      const centroidDistanceMeters = computeCentroidDistanceMeters(base.planBounds, candidate.planBounds)
+      if (centroidDistanceMeters > resolved.maxCentroidDistanceMeters) continue
 
-      const confidence = computeConfidence(overlapRatio, centroidDistanceMm, resolved.maxCentroidDistanceMm)
-      if (confidence < resolved.minConfidenceToGroup) continue
+      const confidence = computeConfidence(
+        overlapRatio,
+        centroidDistanceMeters,
+        resolved.maxCentroidDistanceMeters,
+      )
 
-      const member = toCandidateMember(candidate, eligibilityByStoreyId, overlapRatio, centroidDistanceMm, confidence)
+      const member = toCandidateMember(
+        candidate,
+        eligibilityByStoreyId,
+        overlapRatio,
+        centroidDistanceMeters,
+        confidence,
+      )
       const existing = candidateByStorey.get(candidate.storeyId)
       if (!existing || isStrongerMember(member, existing)) {
         candidateByStorey.set(candidate.storeyId, member)
@@ -90,8 +104,10 @@ export function groupWetAreasVertically(
     groups.push({
       groupId,
       members,
-      reasons: buildGroupReasons(members),
-      debug: { confidence: Number(groupConfidence.toFixed(6)) },
+      debug: {
+        confidence: Number(groupConfidence.toFixed(6)),
+        reasons: buildGroupReasons(members),
+      },
     })
   }
 
@@ -104,10 +120,12 @@ function toBaseMember(area: DetectedWetArea, eligibilityByStoreyId: StoreyEligib
     storeyId: area.storeyId,
     planBounds: area.planBounds,
     overlapRatio: 1,
-    centroidDistanceMm: 0,
-    reasons: ['base wet-area anchor'],
+    centroidDistanceMeters: 0,
     eligibleForNewRisers: eligibilityByStoreyId.get(area.storeyId) ?? false,
-    debug: { confidence: 1 },
+    debug: {
+      confidence: 1,
+      reasons: ['base wet-area anchor'],
+    },
   }
 }
 
@@ -115,7 +133,7 @@ function toCandidateMember(
   area: DetectedWetArea,
   eligibilityByStoreyId: StoreyEligibilityById,
   overlapRatio: number,
-  centroidDistanceMm: number,
+  centroidDistanceMeters: number,
   confidence: number,
 ): VerticalWetGroupMember {
   return {
@@ -123,13 +141,15 @@ function toCandidateMember(
     storeyId: area.storeyId,
     planBounds: area.planBounds,
     overlapRatio,
-    centroidDistanceMm,
-    reasons: [
+    centroidDistanceMeters,
+    debug: {
+      confidence,
+      reasons: [
       `plan overlap ${overlapRatio.toFixed(3)} >= threshold`,
-      `centroid distance ${centroidDistanceMm.toFixed(1)}mm within tolerance`,
-    ],
+        `centroid distance ${centroidDistanceMeters.toFixed(3)}m within tolerance`,
+      ],
+    },
     eligibleForNewRisers: eligibilityByStoreyId.get(area.storeyId) ?? false,
-    debug: { confidence },
   }
 }
 
@@ -142,11 +162,13 @@ function compareByElevation(a: StoreyId, b: StoreyId, storeys: Storey[]): number
 }
 
 function isStrongerMember(candidate: VerticalWetGroupMember, incumbent: VerticalWetGroupMember): boolean {
-  const c = candidate.debug?.confidence ?? 0
-  const i = incumbent.debug?.confidence ?? 0
+  const c = candidate.debug.confidence
+  const i = incumbent.debug.confidence
   if (c !== i) return c > i
   if (candidate.overlapRatio !== incumbent.overlapRatio) return candidate.overlapRatio > incumbent.overlapRatio
-  if (candidate.centroidDistanceMm !== incumbent.centroidDistanceMm) return candidate.centroidDistanceMm < incumbent.centroidDistanceMm
+  if (candidate.centroidDistanceMeters !== incumbent.centroidDistanceMeters) {
+    return candidate.centroidDistanceMeters < incumbent.centroidDistanceMeters
+  }
   return candidate.areaId.localeCompare(incumbent.areaId) < 0
 }
 
@@ -175,18 +197,41 @@ function computeOverlapRatio(a: PlanBounds, b: PlanBounds): number {
   return overlapArea / baselineArea
 }
 
-function computeCentroidDistanceMm(a: PlanBounds, b: PlanBounds): number {
+function computeCentroidDistanceMeters(a: PlanBounds, b: PlanBounds): number {
   const centroidAX = (a.minX + a.maxX) / 2
   const centroidAZ = (a.minZ + a.maxZ) / 2
   const centroidBX = (b.minX + b.maxX) / 2
   const centroidBZ = (b.minZ + b.maxZ) / 2
   const dx = centroidAX - centroidBX
   const dz = centroidAZ - centroidBZ
-  return Math.sqrt(dx * dx + dz * dz) * 1000
+  return Math.sqrt(dx * dx + dz * dz)
 }
 
-function computeConfidence(overlapRatio: number, centroidDistanceMm: number, maxDistanceMm: number): number {
+function computeConfidence(overlapRatio: number, centroidDistanceMeters: number, maxDistanceMeters: number): number {
   const overlapScore = Math.max(0, Math.min(1, overlapRatio))
-  const distanceScore = Math.max(0, Math.min(1, 1 - centroidDistanceMm / maxDistanceMm))
+  const distanceScore = Math.max(0, Math.min(1, 1 - centroidDistanceMeters / maxDistanceMeters))
   return Number((0.7 * overlapScore + 0.3 * distanceScore).toFixed(6))
+}
+
+export function buildStoreyEligibilityById(
+  floors: ReadonlyArray<StoreyEligibilitySummary>,
+): StoreyEligibilityById {
+  return new Map(floors.map((floor) => [floor.id, floor.eligibleForNewRisers]))
+}
+
+export function detectedWetAreaFromKitchenArea(kitchen: KitchenArea): DetectedWetArea | null {
+  if (!kitchen.planBounds) return null
+  return {
+    areaId: `kitchen:${kitchen.expressId}`,
+    storeyId: kitchen.storeyId,
+    planBounds: kitchen.planBounds,
+  }
+}
+
+/**
+ * Fixtures currently expose position only, not plan bounds.
+ * This conversion intentionally returns null unless a future upstream stage provides plan bounds.
+ */
+export function detectedWetAreaFromFixture(_fixture: Fixture): DetectedWetArea | null {
+  return null
 }
