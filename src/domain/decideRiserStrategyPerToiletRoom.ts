@@ -36,6 +36,7 @@ export interface RiserStrategyDecision {
  * Explicitly suppresses new riser generation for matching toilet-room members.
  * Selector fields use AND semantics: when more than one selector is present,
  * groupIds, areaIds, and storeyIds must all match for the rule to apply.
+ * Rules with no selector fields match nothing.
  */
 export interface RiserCoverageExceptionRule {
   ruleId: string
@@ -126,6 +127,11 @@ export function decideRiserStrategyPerToiletRoom(
           reasons.push('storey is not eligible for new risers')
           decision = createDecision(group, member, RISER_STRATEGY_DECISION.EXCLUDED_FLOOR, reasons, overlaps)
         }
+      } else if (primaryEligibleAreaId !== member.areaId && primaryExceptionRule) {
+        reasons.push(primaryExceptionRule.reason ?? `eligible non-primary member inherits exception coverage from primary member rule ${primaryExceptionRule.ruleId}`)
+        decision = createDecision(group, member, RISER_STRATEGY_DECISION.COVERED_BY_EXCEPTION_RULE, reasons, overlaps, {
+          coveredByExceptionRuleId: primaryExceptionRule.ruleId,
+        })
       } else if (topStronger && secondStronger && hasEqualStrength(topStronger, secondStronger, profiles)) {
         reasons.push('multiple stronger overlapping groups have equal strength; coordination required')
         decision = createDecision(group, member, RISER_STRATEGY_DECISION.COORDINATION_REQUIRED, reasons, overlaps)
@@ -137,11 +143,6 @@ export function decideRiserStrategyPerToiletRoom(
       } else if (primaryEligibleAreaId === member.areaId) {
         reasons.push('eligible primary member receives riser placement for this group')
         decision = createDecision(group, member, RISER_STRATEGY_DECISION.RISER_PLACED, reasons, overlaps)
-      } else if (primaryExceptionRule) {
-        reasons.push(primaryExceptionRule.reason ?? `eligible non-primary member inherits exception coverage from primary member rule ${primaryExceptionRule.ruleId}`)
-        decision = createDecision(group, member, RISER_STRATEGY_DECISION.COVERED_BY_EXCEPTION_RULE, reasons, overlaps, {
-          coveredByExceptionRuleId: primaryExceptionRule.ruleId,
-        })
       } else if (primaryServingGroup?.kind === 'ambiguous' || !primaryServingGroup?.groupId) {
         reasons.push('primary eligible member has ambiguous serving group; coordination required')
         decision = createDecision(group, member, RISER_STRATEGY_DECISION.COORDINATION_REQUIRED, reasons, overlaps)
