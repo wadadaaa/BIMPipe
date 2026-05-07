@@ -64,7 +64,7 @@ export function decideRiserStrategyPerToiletRoom(
       : undefined
 
     for (const member of sortedMembers) {
-      const overlaps = (overlappingByArea.get(member.areaId) ?? []).sort((a, b) => a.groupId.localeCompare(b.groupId))
+      const overlaps = overlappingByArea.get(member.areaId) ?? []
       const strongerGroups = overlaps
         .filter((candidate) => isStrongerGroup(candidate, group, profiles))
         .sort((a, b) => compareGroupStrength(a, b, profiles))
@@ -191,9 +191,8 @@ function isStrongerGroup(a: VerticalWetGroup, b: VerticalWetGroup, profiles: Map
 }
 
 function hasEqualStrength(a: VerticalWetGroup, b: VerticalWetGroup, profiles: Map<string, GroupProfile>): boolean {
-  const pa = profiles.get(a.groupId)
-  const pb = profiles.get(b.groupId)
-  if (!pa || !pb) return false
+  const pa = getProfile(a.groupId, profiles)
+  const pb = getProfile(b.groupId, profiles)
   return pa.eligibleCount === pb.eligibleCount
     && pa.group.members.length === pb.group.members.length
     && Math.abs(pa.confidence - pb.confidence) < CONFIDENCE_EPSILON
@@ -233,15 +232,21 @@ function buildStoreyById(storeys?: Storey[]): Map<StoreyId, Storey> {
 }
 
 function compareGroupStrength(a: VerticalWetGroup, b: VerticalWetGroup, profiles: Map<string, GroupProfile>): number {
-  const pa = profiles.get(a.groupId)
-  const pb = profiles.get(b.groupId)
-  if (!pa || !pb) return a.groupId.localeCompare(b.groupId)
+  const pa = getProfile(a.groupId, profiles)
+  const pb = getProfile(b.groupId, profiles)
 
   if (pa.eligibleCount !== pb.eligibleCount) return pb.eligibleCount - pa.eligibleCount
+  // Larger vertical/wet-area coverage is treated as stronger, including ineligible members.
   if (pa.group.members.length !== pb.group.members.length) return pb.group.members.length - pa.group.members.length
   if (Math.abs(pa.confidence - pb.confidence) >= CONFIDENCE_EPSILON) return pb.confidence - pa.confidence
 
   return a.groupId.localeCompare(b.groupId)
+}
+
+function getProfile(groupId: string, profiles: Map<string, GroupProfile>): GroupProfile {
+  const profile = profiles.get(groupId)
+  if (!profile) throw new Error(`Missing group profile for ${groupId}`)
+  return profile
 }
 
 function buildDecisionId(groupId: string, member: VerticalWetGroupMember): string {
