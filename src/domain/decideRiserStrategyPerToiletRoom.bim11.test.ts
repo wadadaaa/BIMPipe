@@ -13,14 +13,19 @@ const group = (groupId: string, members: VerticalWetGroup['members'], confidence
   debug: { confidence, reasons: [] },
 })
 
-const member = (areaId: string, storeyId: number, eligibleForNewRisers: boolean): VerticalWetGroup['members'][number] => ({
+const member = (
+  areaId: string,
+  storeyId: number,
+  eligibleForNewRisers: boolean,
+  confidence = 0.9,
+): VerticalWetGroup['members'][number] => ({
   areaId,
   storeyId,
   eligibleForNewRisers,
   overlapRatio: 1,
   centroidDistanceMeters: 0,
   planBounds: { minX: 0, maxX: 1, minZ: 0, maxZ: 1 },
-  debug: { confidence: 0.9, reasons: [] },
+  debug: { confidence, reasons: [] },
 })
 
 const storey = (id: number, elevation: number): Storey => ({
@@ -30,7 +35,7 @@ const storey = (id: number, elevation: number): Storey => ({
   name: `S${id}`,
 })
 
-const STOREYS = [storey(101, 3), storey(102, 6), storey(103, 9)]
+const STOREYS = [storey(100, 0), storey(101, 3), storey(102, 6), storey(103, 9)]
 
 describe('decideRiserStrategyPerToiletRoom BIM-11 exception coverage', () => {
   it('places a new riser on a standard eligible floor when no group or exception covers the toilet', () => {
@@ -67,6 +72,52 @@ describe('decideRiserStrategyPerToiletRoom BIM-11 exception coverage', () => {
       coveredByExceptionRuleId: 'manual-existing-riser-A',
     })
     expect(decisions[0].reasons[0]).toContain('manual review found an existing riser')
+  })
+
+  it('supports storey-scoped exception rules for eligible standard-floor rooms', () => {
+    const exceptionRules: RiserCoverageExceptionRule[] = [{
+      ruleId: 'existing-riser-on-storey-102',
+      storeyIds: [102],
+    }]
+
+    const decisions = decideRiserStrategyPerToiletRoom([
+      group('g-storey-rule', [
+        member('toilet-room-101', 101, true),
+        member('toilet-room-102', 102, true),
+      ]),
+    ], { storeys: STOREYS, exceptionRules })
+
+    const lower = decisions.find((decision) => decision.areaId === 'toilet-room-101')
+    const coveredStorey = decisions.find((decision) => decision.areaId === 'toilet-room-102')
+
+    expect(lower).toMatchObject({
+      decision: RISER_STRATEGY_DECISION.RISER_PLACED,
+    })
+    expect(coveredStorey).toMatchObject({
+      decision: RISER_STRATEGY_DECISION.COVERED_BY_EXCEPTION_RULE,
+      coveredByExceptionRuleId: 'existing-riser-on-storey-102',
+    })
+  })
+
+  it('keeps ineligible non-penthouse floors excluded even when a broad exception rule matches them', () => {
+    const exceptionRules: RiserCoverageExceptionRule[] = [{
+      ruleId: 'broad-basement-rule-should-not-relabel-excluded-floor',
+      storeyIds: [100],
+    }]
+
+    const decisions = decideRiserStrategyPerToiletRoom([
+      group('g-basement', [
+        member('basement-room', 100, false),
+        member('standard-room', 101, true),
+      ]),
+    ], { storeys: STOREYS, exceptionRules })
+
+    const basement = decisions.find((decision) => decision.areaId === 'basement-room')
+
+    expect(basement).toMatchObject({
+      decision: RISER_STRATEGY_DECISION.EXCLUDED_FLOOR,
+    })
+    expect(basement?.coveredByExceptionRuleId).toBeUndefined()
   })
 
   it('inherits exception coverage from the primary eligible room instead of creating duplicate risers for the same vertical group', () => {
