@@ -94,21 +94,23 @@ export function decideRiserStrategyPerToiletRoom(
 
       let decision: RiserStrategyDecision
 
-      if (exceptionRule) {
+      if (member.eligibleForNewRisers && exceptionRule) {
         reasons.push(exceptionRule.reason ?? `covered by exception rule ${exceptionRule.ruleId}`)
         decision = createDecision(group, member, RISER_STRATEGY_DECISION.COVERED_BY_EXCEPTION_RULE, reasons, overlaps, {
           coveredByExceptionRuleId: exceptionRule.ruleId,
         })
       } else if (!member.eligibleForNewRisers) {
         if (highestEligibleStoreyId !== null && compareStoreysByElevation(member.storeyId, highestEligibleStoreyId, storeyById) > 0) {
-          if (primaryServingGroup?.kind === 'ambiguous' || !primaryServingGroup?.groupId) {
+          const penthouseExceptionRule = exceptionRule ?? primaryExceptionRule
+
+          if (penthouseExceptionRule) {
+            reasons.push(`penthouse is served by exception rule ${penthouseExceptionRule.ruleId}`)
+            decision = createDecision(group, member, RISER_STRATEGY_DECISION.COVERED_BY_EXCEPTION_RULE, reasons, overlaps, {
+              coveredByExceptionRuleId: penthouseExceptionRule.ruleId,
+            })
+          } else if (primaryServingGroup?.kind === 'ambiguous' || !primaryServingGroup?.groupId) {
             reasons.push('penthouse serving group is ambiguous; coordination required')
             decision = createDecision(group, member, RISER_STRATEGY_DECISION.COORDINATION_REQUIRED, reasons, overlaps)
-          } else if (primaryExceptionRule) {
-            reasons.push(`penthouse is served by exception rule ${primaryExceptionRule.ruleId} covering the group primary member`)
-            decision = createDecision(group, member, RISER_STRATEGY_DECISION.COVERED_BY_EXCEPTION_RULE, reasons, overlaps, {
-              coveredByExceptionRuleId: primaryExceptionRule.ruleId,
-            })
           } else {
             reasons.push('non-eligible member is above highest eligible storey in this group')
             decision = createDecision(group, member, RISER_STRATEGY_DECISION.PENTHOUSE_SERVED_BY_EXISTING_RISER, reasons, overlaps, {
