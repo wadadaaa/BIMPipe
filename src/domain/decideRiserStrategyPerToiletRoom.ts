@@ -140,7 +140,7 @@ function createDecision(
     servedByGroupId: refs?.servedByGroupId,
     reasons,
     debug: {
-      confidence: member.debug.confidence,
+      confidence: group.debug.confidence,
       overlapGroupIds: overlaps.map((g) => g.groupId).filter((groupId) => groupId !== group.groupId),
     },
   }
@@ -168,10 +168,13 @@ function buildOverlappingByArea(groups: VerticalWetGroup[]): Map<string, Vertica
 }
 
 function maxEligibleStoreyId(group: VerticalWetGroup, storeyById: Map<StoreyId, Storey>): StoreyId {
-  return [...group.members]
+  const eligibleMembers = [...group.members]
     .filter((m) => m.eligibleForNewRisers)
     .sort((a, b) => compareStoreysByElevation(a.storeyId, b.storeyId, storeyById))
-    .at(-1)!.storeyId
+  if (eligibleMembers.length === 0) {
+    throw new Error(`Cannot resolve highest eligible storey for group ${group.groupId} without eligible members`)
+  }
+  return eligibleMembers[eligibleMembers.length - 1].storeyId
 }
 
 function sortMembers(members: VerticalWetGroupMember[], storeyById: Map<StoreyId, Storey>): VerticalWetGroupMember[] {
@@ -214,12 +217,13 @@ function resolveServingGroupForArea(
 }
 
 function compareStoreysByElevation(a: StoreyId, b: StoreyId, storeyById: Map<StoreyId, Storey>): number {
-  // Callers should pass complete storey metadata so ordering uses elevation.
-  // The StoreyId fallback is deterministic only; IFC express ids are not floor order.
   if (storeyById.size === 0) return a - b
   const sa = storeyById.get(a)
   const sb = storeyById.get(b)
-  if (!sa || !sb) return a - b
+  if (!sa || !sb) {
+    const missing = [!sa ? a : null, !sb ? b : null].filter((id): id is StoreyId => id !== null)
+    throw new Error(`Missing storey metadata for storey id(s): ${missing.join(', ')}`)
+  }
   if (sa.elevation !== sb.elevation) return sa.elevation - sb.elevation
   return sa.id - sb.id
 }
