@@ -218,11 +218,9 @@ function resolveServingGroupForArea(
 }
 
 function compareStoreysByElevation(a: StoreyId, b: StoreyId, storeyById: Map<StoreyId, Storey>): number {
-  if (storeyById.size === 0) {
-    throw new Error('compareStoreysByElevation requires storey metadata; pass options.storeys to decideRiserStrategyPerToiletRoom')
-  }
   const sa = storeyById.get(a)
   const sb = storeyById.get(b)
+  if (!sa && !sb) return a - b
   if (!sa || !sb) {
     const missing = [!sa ? a : null, !sb ? b : null].filter((id): id is StoreyId => id !== null)
     throw new Error(`Missing storey metadata for storey id(s): ${missing.join(', ')}`)
