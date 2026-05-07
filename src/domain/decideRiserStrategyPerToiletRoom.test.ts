@@ -97,9 +97,21 @@ describe('decideRiserStrategyPerToiletRoom', () => {
     expect(loser?.decision).toBe(RISER_STRATEGY_DECISION.COVERED_BY_EXISTING_RISER_GROUP)
   })
 
-  it('uses deterministic groupId tie-break when strength metrics are equal', () => {
+
+  it('flags coordination required when two stronger overlaps are exactly equal strength', () => {
     const decisions = decideRiserStrategyPerToiletRoom([
       group('g-a', [member('overlap', 101, true), member('a2', 102, true)], 0.9),
+      group('g-b', [member('overlap', 101, true), member('b2', 103, true)], 0.9),
+      group('g-candidate', [member('overlap', 101, true)], 0.7),
+    ])
+
+    const candidate = decisions.find((d) => d.groupId === 'g-candidate' && d.areaId === 'overlap')
+    expect(candidate?.decision).toBe(RISER_STRATEGY_DECISION.COORDINATION_REQUIRED)
+  })
+
+  it('uses deterministic groupId tie-break when strength metrics are equal', () => {
+    const decisions = decideRiserStrategyPerToiletRoom([
+      group('g-a', [member('overlap', 101, true), member('a2', 102, true)], 0.95),
       group('g-b', [member('overlap', 101, true), member('b2', 102, true)], 0.9),
       group('g-candidate', [member('overlap', 101, true)], 0.9),
     ])

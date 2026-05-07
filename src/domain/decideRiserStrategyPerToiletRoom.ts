@@ -48,6 +48,7 @@ export function decideRiserStrategyPerToiletRoom(groups: VerticalWetGroup[]): Ri
       const overlaps = (overlappingByArea.get(member.areaId) ?? []).sort((a, b) => a.groupId.localeCompare(b.groupId))
       const strongerGroups = overlaps.filter((candidate) => isStrongerGroup(candidate, group, profiles))
       const topStronger = strongerGroups[0]
+      const secondStronger = strongerGroups[1]
       const reasons: string[] = []
 
       let decision: RiserStrategyDecision
@@ -62,6 +63,9 @@ export function decideRiserStrategyPerToiletRoom(groups: VerticalWetGroup[]): Ri
           reasons.push('storey is not eligible for new risers')
           decision = createDecision(group, member, RISER_STRATEGY_DECISION.EXCLUDED_FLOOR, reasons, overlaps)
         }
+      } else if (topStronger && secondStronger && hasEqualStrength(topStronger, secondStronger, profiles)) {
+        reasons.push('multiple stronger overlapping groups have equal strength; coordination required')
+        decision = createDecision(group, member, RISER_STRATEGY_DECISION.COORDINATION_REQUIRED, reasons, overlaps)
       } else if (topStronger) {
         reasons.push('covered by stronger overlapping group to avoid duplicate riser')
         decision = createDecision(group, member, RISER_STRATEGY_DECISION.COVERED_BY_EXISTING_RISER_GROUP, reasons, overlaps, {
@@ -149,6 +153,16 @@ function isStrongerGroup(a: VerticalWetGroup, b: VerticalWetGroup, profiles: Map
   if (pa.confidence !== pb.confidence) return pa.confidence > pb.confidence
   // Deterministic tie-break to avoid spurious coordination flags.
   return a.groupId.localeCompare(b.groupId) < 0
+}
+
+
+function hasEqualStrength(a: VerticalWetGroup, b: VerticalWetGroup, profiles: Map<string, GroupProfile>): boolean {
+  const pa = profiles.get(a.groupId)
+  const pb = profiles.get(b.groupId)
+  if (!pa || !pb) return false
+  return pa.eligibleCount === pb.eligibleCount
+    && pa.group.members.length === pb.group.members.length
+    && pa.confidence === pb.confidence
 }
 
 function buildDecisionId(groupId: string, member: VerticalWetGroupMember): string {
