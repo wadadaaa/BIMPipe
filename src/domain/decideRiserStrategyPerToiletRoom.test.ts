@@ -173,4 +173,25 @@ describe('decideRiserStrategyPerToiletRoom', () => {
     const idsB = decideRiserStrategyPerToiletRoom([...groups].reverse()).map((d) => d.decisionId)
     expect(idsA).toEqual(idsB)
   })
+
+  it('keeps competing overlap outcomes stable when input order is reversed', () => {
+    const groups = [
+      group('g-a', [member('shared', 101, true), member('a-only', 102, true)], 0.9),
+      group('g-b', [member('shared', 101, true)], 0.7),
+    ]
+
+    const decisionsA = decideRiserStrategyPerToiletRoom(groups)
+    const decisionsB = decideRiserStrategyPerToiletRoom([...groups].reverse())
+
+    const normalize = (decisions: ReturnType<typeof decideRiserStrategyPerToiletRoom>) =>
+      [...decisions]
+        .sort((a, b) => a.decisionId.localeCompare(b.decisionId))
+        .map((decision) => ({
+          decisionId: decision.decisionId,
+          decision: decision.decision,
+          coveredByGroupId: decision.coveredByGroupId,
+        }))
+
+    expect(normalize(decisionsA)).toEqual(normalize(decisionsB))
+  })
 })

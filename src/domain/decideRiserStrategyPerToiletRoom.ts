@@ -1,5 +1,5 @@
 import type { VerticalWetGroup, VerticalWetGroupMember } from './groupWetAreasVertically'
-import type { Storey } from './types'
+import type { Storey, StoreyId } from './types'
 
 export const RISER_STRATEGY_DECISION = {
   RISER_PLACED: 'RISER_PLACED',
@@ -16,7 +16,7 @@ export interface RiserStrategyDecision {
   decisionId: string
   groupId: string
   areaId: string
-  storeyId: number
+  storeyId: StoreyId
   decision: RiserStrategyDecisionType
   coveredByGroupId?: string
   servedByGroupId?: string
@@ -41,21 +41,22 @@ export function decideRiserStrategyPerToiletRoom(
   groups: VerticalWetGroup[],
   options: DecideRiserStrategyOptions = {},
 ): RiserStrategyDecision[] {
+  const storeyById = buildStoreyById(options.storeys)
   const sortedGroups = [...groups].sort((a, b) => a.groupId.localeCompare(b.groupId))
   const profiles = buildProfiles(sortedGroups)
   const overlappingByArea = buildOverlappingByArea(sortedGroups)
 
   const decisions: RiserStrategyDecision[] = []
   for (const group of sortedGroups) {
-    const eligibleMembers = sortMembers(group.members, options.storeys).filter((member) => member.eligibleForNewRisers)
+    const eligibleMembers = sortMembers(group.members, storeyById).filter((member) => member.eligibleForNewRisers)
     const hasEligible = eligibleMembers.length > 0
-    const highestEligibleStoreyId = hasEligible ? maxEligibleStoreyId(group, options.storeys) : null
+    const highestEligibleStoreyId = hasEligible ? maxEligibleStoreyId(group, storeyById) : null
     const primaryEligibleAreaId = hasEligible ? eligibleMembers[0].areaId : null
     const primaryServingGroupId = hasEligible
       ? resolveServingGroupIdForArea(primaryEligibleAreaId!, group, overlappingByArea, profiles)
       : undefined
 
-    for (const member of sortMembers(group.members, options.storeys)) {
+    for (const member of sortMembers(group.members, storeyById)) {
       const overlaps = (overlappingByArea.get(member.areaId) ?? []).sort((a, b) => a.groupId.localeCompare(b.groupId))
       const strongerGroups = overlaps
         .filter((candidate) => isStrongerGroup(candidate, group, profiles))
@@ -67,7 +68,7 @@ export function decideRiserStrategyPerToiletRoom(
       let decision: RiserStrategyDecision
 
       if (!member.eligibleForNewRisers) {
-        if (highestEligibleStoreyId !== null && compareStoreysByElevation(member.storeyId, highestEligibleStoreyId, options.storeys) > 0) {
+        if (highestEligibleStoreyId !== null && compareStoreysByElevation(member.storeyId, highestEligibleStoreyId, storeyById) > 0) {
           reasons.push('non-eligible member is above highest eligible storey in this group')
           decision = createDecision(group, member, RISER_STRATEGY_DECISION.PENTHOUSE_SERVED_BY_EXISTING_RISER, reasons, overlaps, {
             servedByGroupId: primaryServingGroupId ?? group.groupId,
@@ -146,16 +147,16 @@ function buildOverlappingByArea(groups: VerticalWetGroup[]): Map<string, Vertica
   return overlappingByArea
 }
 
-function maxEligibleStoreyId(group: VerticalWetGroup, storeys?: Storey[]): number {
+function maxEligibleStoreyId(group: VerticalWetGroup, storeyById: Map<StoreyId, Storey>): StoreyId {
   return [...group.members]
     .filter((m) => m.eligibleForNewRisers)
-    .sort((a, b) => compareStoreysByElevation(a.storeyId, b.storeyId, storeys))
+    .sort((a, b) => compareStoreysByElevation(a.storeyId, b.storeyId, storeyById))
     .at(-1)!.storeyId
 }
 
-function sortMembers(members: VerticalWetGroupMember[], storeys?: Storey[]): VerticalWetGroupMember[] {
+function sortMembers(members: VerticalWetGroupMember[], storeyById: Map<StoreyId, Storey>): VerticalWetGroupMember[] {
   return [...members].sort((a, b) => {
-    const storeyCompare = compareStoreysByElevation(a.storeyId, b.storeyId, storeys)
+    const storeyCompare = compareStoreysByElevation(a.storeyId, b.storeyId, storeyById)
     if (storeyCompare !== 0) return storeyCompare
     return a.areaId.localeCompare(b.areaId)
   })
@@ -189,13 +190,17 @@ function resolveServingGroupIdForArea(
   return stronger[0]?.groupId ?? baseGroup.groupId
 }
 
-function compareStoreysByElevation(a: number, b: number, storeys?: Storey[]): number {
-  if (!storeys || storeys.length === 0) return a - b
-  const sa = storeys.find((storey) => storey.id === a)
-  const sb = storeys.find((storey) => storey.id === b)
+function compareStoreysByElevation(a: StoreyId, b: StoreyId, storeyById: Map<StoreyId, Storey>): number {
+  if (storeyById.size === 0) return a - b
+  const sa = storeyById.get(a)
+  const sb = storeyById.get(b)
   if (!sa || !sb) return a - b
   if (sa.elevation !== sb.elevation) return sa.elevation - sb.elevation
   return sa.id - sb.id
+}
+
+function buildStoreyById(storeys?: Storey[]): Map<StoreyId, Storey> {
+  return new Map((storeys ?? []).map((storey) => [storey.id, storey]))
 }
 
 function compareGroupStrength(a: VerticalWetGroup, b: VerticalWetGroup, profiles: Map<string, GroupProfile>): number {
