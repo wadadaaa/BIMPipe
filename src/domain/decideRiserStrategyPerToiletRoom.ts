@@ -42,6 +42,8 @@ export interface DecideRiserStrategyOptions {
   storeys?: Storey[]
 }
 
+const CONFIDENCE_EPSILON = 1e-9
+
 export function decideRiserStrategyPerToiletRoom(
   groups: VerticalWetGroup[],
   options: DecideRiserStrategyOptions = {},
@@ -107,7 +109,7 @@ export function decideRiserStrategyPerToiletRoom(
           coveredByGroupId: group.groupId,
         })
       } else {
-        reasons.push('eligible non-primary member inherits coverage from the stronger group serving this group primary member')
+        reasons.push(`eligible non-primary member inherits coverage from stronger group ${primaryServingGroup.groupId} serving this group primary member`)
         decision = createDecision(group, member, RISER_STRATEGY_DECISION.COVERED_BY_EXISTING_RISER_GROUP, reasons, overlaps, {
           coveredByGroupId: primaryServingGroup.groupId,
         })
@@ -191,7 +193,7 @@ function hasEqualStrength(a: VerticalWetGroup, b: VerticalWetGroup, profiles: Ma
   if (!pa || !pb) return false
   return pa.eligibleCount === pb.eligibleCount
     && pa.group.members.length === pb.group.members.length
-    && pa.confidence === pb.confidence
+    && Math.abs(pa.confidence - pb.confidence) < CONFIDENCE_EPSILON
 }
 
 function resolveServingGroupForArea(
@@ -212,6 +214,8 @@ function resolveServingGroupForArea(
 }
 
 function compareStoreysByElevation(a: StoreyId, b: StoreyId, storeyById: Map<StoreyId, Storey>): number {
+  // Callers should pass complete storey metadata so ordering uses elevation.
+  // The StoreyId fallback is deterministic only; IFC express ids are not floor order.
   if (storeyById.size === 0) return a - b
   const sa = storeyById.get(a)
   const sb = storeyById.get(b)
@@ -231,9 +235,8 @@ function compareGroupStrength(a: VerticalWetGroup, b: VerticalWetGroup, profiles
 
   if (pa.eligibleCount !== pb.eligibleCount) return pb.eligibleCount - pa.eligibleCount
   if (pa.group.members.length !== pb.group.members.length) return pb.group.members.length - pa.group.members.length
-  if (pa.confidence !== pb.confidence) return pb.confidence - pa.confidence
+  if (Math.abs(pa.confidence - pb.confidence) >= CONFIDENCE_EPSILON) return pb.confidence - pa.confidence
 
-  // Deterministic tie-break to keep equal-strength comparisons total-ordered.
   return a.groupId.localeCompare(b.groupId)
 }
 
