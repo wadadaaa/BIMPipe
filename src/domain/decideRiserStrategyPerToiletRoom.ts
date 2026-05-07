@@ -174,7 +174,7 @@ function hasEqualStrength(a: VerticalWetGroup, b: VerticalWetGroup, profiles: Ma
   if (!pa || !pb) return false
   return pa.eligibleCount === pb.eligibleCount
     && pa.group.members.length === pb.group.members.length
-    && Math.abs(pa.confidence - pb.confidence) < 1e-6
+    && pa.confidence === pb.confidence
 }
 
 function resolveServingGroupIdForArea(
