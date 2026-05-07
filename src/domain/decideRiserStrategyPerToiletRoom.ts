@@ -141,7 +141,7 @@ function createDecision(
     reasons,
     debug: {
       confidence: member.debug.confidence,
-      overlapGroupIds: overlaps.map((g) => g.groupId),
+      overlapGroupIds: overlaps.map((g) => g.groupId).filter((groupId) => groupId !== group.groupId),
     },
   }
 }
