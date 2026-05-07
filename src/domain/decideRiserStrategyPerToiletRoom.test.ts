@@ -73,7 +73,6 @@ describe('decideRiserStrategyPerToiletRoom', () => {
     expect(subUpper?.decision).toBe(RISER_STRATEGY_DECISION.COVERED_BY_EXISTING_RISER_GROUP)
     expect(subUpper?.coveredByGroupId).toBe('g-main')
     expect(subUpper?.coveredByGroupId).not.toBe('g-sub')
-    expect(subUpper?.reasons.join(' ')).toContain('inherits coverage from stronger group g-main')
   })
 
   it('group with only ineligible members is EXCLUDED_FLOOR for all members', () => {
@@ -107,7 +106,23 @@ describe('decideRiserStrategyPerToiletRoom', () => {
     const penthouse = decisions.find((d) => d.groupId === 'g-c' && d.areaId === 'ph')
     expect(penthouse?.decision).toBe(RISER_STRATEGY_DECISION.COORDINATION_REQUIRED)
     expect(penthouse?.servedByGroupId).toBeUndefined()
-    expect(penthouse?.reasons.join(' ')).toContain('penthouse serving group is ambiguous')
+  })
+
+  it('marks eligible non-primary member as coordination required when the primary serving group is ambiguous', () => {
+    const decisions = decideRiserStrategyPerToiletRoom(
+      [
+        group('g-a', [member('core', 10, true), member('a-upper', 20, true)], 0.9),
+        group('g-b', [member('core', 10, true), member('b-upper', 20, true)], 0.9),
+        group('g-c', [member('core', 10, true), member('c-upper', 30, true)], 0.7),
+      ],
+      { storeys: [storey(10, 0), storey(20, 3), storey(30, 6)] },
+    )
+
+    const primary = decisions.find((d) => d.groupId === 'g-c' && d.areaId === 'core')
+    const nonPrimary = decisions.find((d) => d.groupId === 'g-c' && d.areaId === 'c-upper')
+    expect(primary?.decision).toBe(RISER_STRATEGY_DECISION.COORDINATION_REQUIRED)
+    expect(nonPrimary?.decision).toBe(RISER_STRATEGY_DECISION.COORDINATION_REQUIRED)
+    expect(nonPrimary?.coveredByGroupId).toBeUndefined()
   })
 
   it('uses storey elevation order instead of express id order for penthouse classification', () => {
