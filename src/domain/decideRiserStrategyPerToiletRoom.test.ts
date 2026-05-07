@@ -32,7 +32,6 @@ describe('decideRiserStrategyPerToiletRoom', () => {
     expect(decisions[0].decision).toBe(RISER_STRATEGY_DECISION.RISER_PLACED)
   })
 
-
   it('places one primary riser decision per eligible group and covers other eligible members', () => {
     const decisions = decideRiserStrategyPerToiletRoom([
       group('g1', [member('a-low', 101, true), member('a-high', 102, true)]),
@@ -56,6 +55,25 @@ describe('decideRiserStrategyPerToiletRoom', () => {
     const weakDecision = decisions.find((d) => d.groupId === 'g-weak' && d.areaId === 'a-base')
     expect(weakDecision?.decision).toBe(RISER_STRATEGY_DECISION.COVERED_BY_EXISTING_RISER_GROUP)
     expect(weakDecision?.coveredByGroupId).toBe('g-strong')
+  })
+
+  it('does not self-cover non-primary members when the primary is served by a stronger group', () => {
+    const decisions = decideRiserStrategyPerToiletRoom([
+      group('g-main', [member('shared-primary', 101, true), member('main-upper', 102, true)], 0.95),
+      group('g-sub', [member('shared-primary', 101, true), member('sub-upper', 103, true)], 0.7),
+    ])
+
+    const subPrimary = decisions.find((d) => d.groupId === 'g-sub' && d.areaId === 'shared-primary')
+    const subUpper = decisions.find((d) => d.groupId === 'g-sub' && d.areaId === 'sub-upper')
+    const subPlaced = decisions.filter((d) => d.groupId === 'g-sub' && d.decision === RISER_STRATEGY_DECISION.RISER_PLACED)
+
+    expect(subPlaced).toHaveLength(0)
+    expect(subPrimary?.decision).toBe(RISER_STRATEGY_DECISION.COVERED_BY_EXISTING_RISER_GROUP)
+    expect(subPrimary?.coveredByGroupId).toBe('g-main')
+    expect(subUpper?.decision).toBe(RISER_STRATEGY_DECISION.COVERED_BY_EXISTING_RISER_GROUP)
+    expect(subUpper?.coveredByGroupId).toBe('g-main')
+    expect(subUpper?.coveredByGroupId).not.toBe('g-sub')
+    expect(subUpper?.reasons.join(' ')).toContain('inherits coverage from the stronger group')
   })
 
   it('group with only ineligible members is EXCLUDED_FLOOR for all members', () => {
@@ -116,7 +134,6 @@ describe('decideRiserStrategyPerToiletRoom', () => {
     expect(loser?.decision).toBe(RISER_STRATEGY_DECISION.COVERED_BY_EXISTING_RISER_GROUP)
   })
 
-
   it('flags coordination required when two stronger overlaps are exactly equal strength', () => {
     const decisions = decideRiserStrategyPerToiletRoom([
       group('g-a', [member('overlap', 101, true), member('a2', 102, true)], 0.9),
@@ -128,18 +145,19 @@ describe('decideRiserStrategyPerToiletRoom', () => {
     expect(candidate?.decision).toBe(RISER_STRATEGY_DECISION.COORDINATION_REQUIRED)
   })
 
-  it('uses deterministic groupId tie-break when strength metrics are equal', () => {
+  it('uses deterministic groupId tie-break when competing group strength metrics are equal', () => {
     const decisions = decideRiserStrategyPerToiletRoom([
-      group('g-a', [member('overlap', 101, true), member('a2', 102, true)], 0.95),
       group('g-b', [member('overlap', 101, true), member('b2', 102, true)], 0.9),
-      group('g-candidate', [member('overlap', 101, true)], 0.9),
+      group('g-a', [member('overlap', 101, true), member('a2', 102, true)], 0.9),
     ])
 
-    const candidate = decisions.find((d) => d.groupId === 'g-candidate' && d.areaId === 'overlap')
-    expect(candidate?.decision).toBe(RISER_STRATEGY_DECISION.COVERED_BY_EXISTING_RISER_GROUP)
-    expect(candidate?.coveredByGroupId).toBe('g-a')
-  })
+    const groupAOverlap = decisions.find((d) => d.groupId === 'g-a' && d.areaId === 'overlap')
+    const groupBOverlap = decisions.find((d) => d.groupId === 'g-b' && d.areaId === 'overlap')
 
+    expect(groupAOverlap?.decision).toBe(RISER_STRATEGY_DECISION.RISER_PLACED)
+    expect(groupBOverlap?.decision).toBe(RISER_STRATEGY_DECISION.COVERED_BY_EXISTING_RISER_GROUP)
+    expect(groupBOverlap?.coveredByGroupId).toBe('g-a')
+  })
 
   it('covers by strongest overlap instead of lexicographic group order', () => {
     const decisions = decideRiserStrategyPerToiletRoom([
