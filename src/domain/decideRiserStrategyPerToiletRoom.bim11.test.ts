@@ -74,6 +74,22 @@ describe('decideRiserStrategyPerToiletRoom BIM-11 exception coverage', () => {
     expect(decisions[0].reasons[0]).toContain('manual review found an existing riser')
   })
 
+  it('ignores selector-less exception rules instead of matching every room', () => {
+    const exceptionRules: RiserCoverageExceptionRule[] = [{
+      ruleId: 'empty-rule',
+      reason: 'this should not suppress placement without a selector',
+    }]
+
+    const decisions = decideRiserStrategyPerToiletRoom([
+      group('g-empty-rule', [member('toilet-room-101', 101, true)]),
+    ], { storeys: STOREYS, exceptionRules })
+
+    expect(decisions[0]).toMatchObject({
+      decision: RISER_STRATEGY_DECISION.RISER_PLACED,
+    })
+    expect(decisions[0].coveredByExceptionRuleId).toBeUndefined()
+  })
+
   it('supports storey-scoped exception rules for eligible standard-floor rooms', () => {
     const exceptionRules: RiserCoverageExceptionRule[] = [{
       ruleId: 'existing-riser-on-storey-102',
@@ -173,6 +189,31 @@ describe('decideRiserStrategyPerToiletRoom BIM-11 exception coverage', () => {
     expect(candidate?.coveredByGroupId).toBeUndefined()
   })
 
+  it('applies area-scoped exception only to a non-primary eligible member when primary remains uncovered', () => {
+    const exceptionRules: RiserCoverageExceptionRule[] = [{
+      ruleId: 'upper-room-only-exception',
+      areaIds: ['upper-toilet-room'],
+    }]
+
+    const decisions = decideRiserStrategyPerToiletRoom([
+      group('g-partial-area-rule', [
+        member('primary-toilet-room', 101, true),
+        member('upper-toilet-room', 102, true),
+      ]),
+    ], { storeys: STOREYS, exceptionRules })
+
+    const primary = decisions.find((decision) => decision.areaId === 'primary-toilet-room')
+    const upper = decisions.find((decision) => decision.areaId === 'upper-toilet-room')
+
+    expect(primary).toMatchObject({
+      decision: RISER_STRATEGY_DECISION.RISER_PLACED,
+    })
+    expect(upper).toMatchObject({
+      decision: RISER_STRATEGY_DECISION.COVERED_BY_EXCEPTION_RULE,
+      coveredByExceptionRuleId: 'upper-room-only-exception',
+    })
+  })
+
   it('inherits exception coverage from the primary eligible room instead of creating duplicate risers for the same vertical group', () => {
     const exceptionRules: RiserCoverageExceptionRule[] = [{
       ruleId: 'existing-shaft-through-primary-room',
@@ -201,6 +242,33 @@ describe('decideRiserStrategyPerToiletRoom BIM-11 exception coverage', () => {
       coveredByExceptionRuleId: 'existing-shaft-through-primary-room',
     })
     expect(upper?.reasons[0]).toBe('primary room is already served by an existing shaft')
+  })
+
+  it('preserves inherited exception coverage precedence over stronger overlapping group coverage', () => {
+    const exceptionRules: RiserCoverageExceptionRule[] = [{
+      ruleId: 'primary-exception-overlap-rule',
+      areaIds: ['shared-primary-room'],
+    }]
+
+    const decisions = decideRiserStrategyPerToiletRoom([
+      group('g-strong', [
+        member('upper-toilet-room', 102, true),
+        member('strong-extra-room', 103, true),
+      ], 0.95),
+      group('g-candidate', [
+        member('shared-primary-room', 101, true),
+        member('upper-toilet-room', 102, true),
+      ], 0.7),
+    ], { storeys: STOREYS, exceptionRules })
+
+    const candidateUpper = decisions.find((decision) =>
+      decision.groupId === 'g-candidate' && decision.areaId === 'upper-toilet-room')
+
+    expect(candidateUpper).toMatchObject({
+      decision: RISER_STRATEGY_DECISION.COVERED_BY_EXCEPTION_RULE,
+      coveredByExceptionRuleId: 'primary-exception-overlap-rule',
+    })
+    expect(candidateUpper?.coveredByGroupId).toBeUndefined()
   })
 
   it('preserves existing group coverage precedence and still avoids duplicates', () => {
