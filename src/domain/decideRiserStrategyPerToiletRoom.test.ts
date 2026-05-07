@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { decideRiserStrategyPerToiletRoom, RISER_STRATEGY_DECISION } from './decideRiserStrategyPerToiletRoom'
 import type { VerticalWetGroup } from './groupWetAreasVertically'
+import type { Storey } from './types'
 
 const group = (groupId: string, members: VerticalWetGroup['members'], confidence = 0.9): VerticalWetGroup => ({
   groupId,
@@ -16,6 +17,13 @@ const member = (areaId: string, storeyId: number, eligibleForNewRisers: boolean,
   centroidDistanceMeters: 0,
   planBounds: { minX: 0, maxX: 1, minZ: 0, maxZ: 1 },
   debug: { confidence, reasons: [] },
+})
+
+const storey = (id: number, elevation: number): Storey => ({
+  id,
+  elevation,
+  modelId: 'm1',
+  name: `S${id}`,
 })
 
 describe('decideRiserStrategyPerToiletRoom', () => {
@@ -58,13 +66,24 @@ describe('decideRiserStrategyPerToiletRoom', () => {
   })
 
   it('marks non-eligible top member as penthouse served by placed lower group', () => {
-    const decisions = decideRiserStrategyPerToiletRoom([
-      group('g1', [member('l2', 102, true), member('ph', 103, false)]),
-    ])
+    const decisions = decideRiserStrategyPerToiletRoom(
+      [group('g1', [member('l2', 102, true), member('ph', 103, false)])],
+      { storeys: [storey(102, 3), storey(103, 6)] },
+    )
 
     const penthouse = decisions.find((d) => d.areaId === 'ph')
     expect(penthouse?.decision).toBe(RISER_STRATEGY_DECISION.PENTHOUSE_SERVED_BY_EXISTING_RISER)
     expect(penthouse?.servedByGroupId).toBe('g1')
+  })
+
+  it('uses storey elevation order instead of express id order for penthouse classification', () => {
+    const decisions = decideRiserStrategyPerToiletRoom(
+      [group('g1', [member('eligible-high-id', 300, true), member('ph-low-id', 100, false)])],
+      { storeys: [storey(100, 10), storey(300, 3)] },
+    )
+
+    const penthouse = decisions.find((d) => d.areaId === 'ph-low-id')
+    expect(penthouse?.decision).toBe(RISER_STRATEGY_DECISION.PENTHOUSE_SERVED_BY_EXISTING_RISER)
   })
 
   it('ineligible member below eligible storey is EXCLUDED_FLOOR', () => {
@@ -132,6 +151,20 @@ describe('decideRiserStrategyPerToiletRoom', () => {
     const candidate = decisions.find((d) => d.groupId === 'g-candidate' && d.areaId === 'overlap')
     expect(candidate?.decision).toBe(RISER_STRATEGY_DECISION.COVERED_BY_EXISTING_RISER_GROUP)
     expect(candidate?.coveredByGroupId).toBe('g-z')
+  })
+
+  it('resolves penthouse servedByGroupId to stronger overlapping winner when parent group is covered', () => {
+    const decisions = decideRiserStrategyPerToiletRoom(
+      [
+        group('g-strong', [member('core', 10, true), member('upper-strong', 20, true)], 0.95),
+        group('g-loser', [member('core', 10, true), member('ph', 30, false)], 0.7),
+      ],
+      { storeys: [storey(10, 0), storey(20, 3), storey(30, 6)] },
+    )
+
+    const penthouse = decisions.find((d) => d.groupId === 'g-loser' && d.areaId === 'ph')
+    expect(penthouse?.decision).toBe(RISER_STRATEGY_DECISION.PENTHOUSE_SERVED_BY_EXISTING_RISER)
+    expect(penthouse?.servedByGroupId).toBe('g-strong')
   })
 
   it('returns stable decision IDs independent of input group order', () => {
