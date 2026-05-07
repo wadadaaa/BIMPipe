@@ -100,6 +100,7 @@ export function decideRiserStrategyPerToiletRoom(
 
       let decision: RiserStrategyDecision
 
+      // Explicit exception rules intentionally take precedence over group-strength coverage.
       if (member.eligibleForNewRisers && exceptionRule) {
         reasons.push(exceptionRule.reason ?? `covered by exception rule ${exceptionRule.ruleId}`)
         decision = createDecision(group, member, RISER_STRATEGY_DECISION.COVERED_BY_EXCEPTION_RULE, reasons, overlaps, {
@@ -128,7 +129,10 @@ export function decideRiserStrategyPerToiletRoom(
           decision = createDecision(group, member, RISER_STRATEGY_DECISION.EXCLUDED_FLOOR, reasons, overlaps)
         }
       } else if (primaryEligibleAreaId !== member.areaId && primaryExceptionRule) {
-        reasons.push(primaryExceptionRule.reason ?? `eligible non-primary member inherits exception coverage from primary member rule ${primaryExceptionRule.ruleId}`)
+        const inheritedReason = primaryExceptionRule.reason
+          ? `inherits exception coverage from primary member: ${primaryExceptionRule.reason}`
+          : `eligible non-primary member inherits exception coverage from primary member rule ${primaryExceptionRule.ruleId}`
+        reasons.push(inheritedReason)
         decision = createDecision(group, member, RISER_STRATEGY_DECISION.COVERED_BY_EXCEPTION_RULE, reasons, overlaps, {
           coveredByExceptionRuleId: primaryExceptionRule.ruleId,
         })
@@ -298,6 +302,7 @@ function findCoveringExceptionRule(
   member: VerticalWetGroupMember,
   rules: RiserCoverageExceptionRule[],
 ): RiserCoverageExceptionRule | undefined {
+  // Multiple matching rules are resolved deterministically by the caller's ruleId sort.
   return rules.find((rule) => exceptionRuleCoversMember(rule, group, member))
 }
 
