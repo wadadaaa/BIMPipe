@@ -49,10 +49,20 @@ describe('decideRiserStrategyPerToiletRoom', () => {
     expect(decisions[0].decision).toBe(RISER_STRATEGY_DECISION.RISER_PLACED)
   })
 
-  it('throws when elevation ordering is needed but storey metadata is omitted', () => {
-    expect(() => decideRiserStrategyPerToiletRoom([
+  it('uses deterministic numeric ordering when no storey metadata is provided', () => {
+    const decisions = decideRiserStrategyPerToiletRoom([
       group('g1', [member('a-low', 101, true), member('a-high', 102, true)]),
-    ])).toThrow('requires storey metadata')
+    ])
+
+    const placed = decisions.find((decision) => decision.decision === RISER_STRATEGY_DECISION.RISER_PLACED)
+    expect(placed?.areaId).toBe('a-low')
+  })
+
+  it('throws when partial storey metadata is provided', () => {
+    expect(() => decideRiserStrategyPerToiletRoom(
+      [group('g1', [member('a-low', 101, true), member('a-high', 102, true)])],
+      { storeys: [storey(101, 3)] },
+    )).toThrow('Missing storey metadata')
   })
 
   it('places one primary riser decision per eligible group and covers other eligible members', () => {
