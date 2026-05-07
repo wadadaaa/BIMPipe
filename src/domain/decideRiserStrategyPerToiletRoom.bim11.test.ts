@@ -99,6 +99,39 @@ describe('decideRiserStrategyPerToiletRoom BIM-11 exception coverage', () => {
     })
   })
 
+  it('supports group-scoped exception rules for eligible standard-floor rooms', () => {
+    const exceptionRules: RiserCoverageExceptionRule[] = [{
+      ruleId: 'existing-riser-for-group',
+      groupIds: ['g-group-rule'],
+    }]
+
+    const decisions = decideRiserStrategyPerToiletRoom([
+      group('g-group-rule', [member('toilet-room-101', 101, true)]),
+    ], { storeys: STOREYS, exceptionRules })
+
+    expect(decisions[0]).toMatchObject({
+      decision: RISER_STRATEGY_DECISION.COVERED_BY_EXCEPTION_RULE,
+      coveredByExceptionRuleId: 'existing-riser-for-group',
+    })
+  })
+
+  it('requires all non-empty exception selectors to match', () => {
+    const exceptionRules: RiserCoverageExceptionRule[] = [{
+      ruleId: 'group-and-storey-rule',
+      groupIds: ['g-and-rule'],
+      storeyIds: [102],
+    }]
+
+    const decisions = decideRiserStrategyPerToiletRoom([
+      group('g-and-rule', [member('toilet-room-101', 101, true)]),
+    ], { storeys: STOREYS, exceptionRules })
+
+    expect(decisions[0]).toMatchObject({
+      decision: RISER_STRATEGY_DECISION.RISER_PLACED,
+    })
+    expect(decisions[0].coveredByExceptionRuleId).toBeUndefined()
+  })
+
   it('keeps ineligible non-penthouse floors excluded even when a broad exception rule matches them', () => {
     const exceptionRules: RiserCoverageExceptionRule[] = [{
       ruleId: 'broad-basement-rule-should-not-relabel-excluded-floor',
@@ -120,10 +153,31 @@ describe('decideRiserStrategyPerToiletRoom BIM-11 exception coverage', () => {
     expect(basement?.coveredByExceptionRuleId).toBeUndefined()
   })
 
+  it('uses exception coverage before stronger overlapping group coverage for explicitly covered eligible rooms', () => {
+    const exceptionRules: RiserCoverageExceptionRule[] = [{
+      ruleId: 'manual-exception-for-shared-room',
+      areaIds: ['shared-toilet-room'],
+    }]
+
+    const decisions = decideRiserStrategyPerToiletRoom([
+      group('g-existing', [member('shared-toilet-room', 101, true), member('upper-room', 102, true)], 0.95),
+      group('g-candidate', [member('shared-toilet-room', 101, true)], 0.7),
+    ], { storeys: STOREYS, exceptionRules })
+
+    const candidate = decisions.find((decision) => decision.groupId === 'g-candidate')
+
+    expect(candidate).toMatchObject({
+      decision: RISER_STRATEGY_DECISION.COVERED_BY_EXCEPTION_RULE,
+      coveredByExceptionRuleId: 'manual-exception-for-shared-room',
+    })
+    expect(candidate?.coveredByGroupId).toBeUndefined()
+  })
+
   it('inherits exception coverage from the primary eligible room instead of creating duplicate risers for the same vertical group', () => {
     const exceptionRules: RiserCoverageExceptionRule[] = [{
       ruleId: 'existing-shaft-through-primary-room',
       areaIds: ['primary-toilet-room'],
+      reason: 'primary room is already served by an existing shaft',
     }]
 
     const decisions = decideRiserStrategyPerToiletRoom([
@@ -146,6 +200,7 @@ describe('decideRiserStrategyPerToiletRoom BIM-11 exception coverage', () => {
       decision: RISER_STRATEGY_DECISION.COVERED_BY_EXCEPTION_RULE,
       coveredByExceptionRuleId: 'existing-shaft-through-primary-room',
     })
+    expect(upper?.reasons[0]).toBe('primary room is already served by an existing shaft')
   })
 
   it('preserves existing group coverage precedence and still avoids duplicates', () => {
@@ -168,6 +223,7 @@ describe('decideRiserStrategyPerToiletRoom BIM-11 exception coverage', () => {
     const exceptionRules: RiserCoverageExceptionRule[] = [{
       ruleId: 'existing-shaft-serves-penthouse-stack',
       areaIds: ['standard-room'],
+      reason: 'existing shaft continues through the penthouse stack',
     }]
 
     const decisions = decideRiserStrategyPerToiletRoom([
@@ -185,5 +241,6 @@ describe('decideRiserStrategyPerToiletRoom BIM-11 exception coverage', () => {
       decision: RISER_STRATEGY_DECISION.COVERED_BY_EXCEPTION_RULE,
       coveredByExceptionRuleId: 'existing-shaft-serves-penthouse-stack',
     })
+    expect(penthouse?.reasons[0]).toBe('existing shaft continues through the penthouse stack')
   })
 })
