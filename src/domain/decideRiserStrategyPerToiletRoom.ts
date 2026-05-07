@@ -32,6 +32,11 @@ export interface RiserStrategyDecision {
   }
 }
 
+/**
+ * Explicitly suppresses new riser generation for matching toilet-room members.
+ * Selector fields use AND semantics: when more than one selector is present,
+ * groupIds, areaIds, and storeyIds must all match for the rule to apply.
+ */
 export interface RiserCoverageExceptionRule {
   ruleId: string
   groupIds?: string[]
@@ -104,7 +109,7 @@ export function decideRiserStrategyPerToiletRoom(
           const penthouseExceptionRule = exceptionRule ?? primaryExceptionRule
 
           if (penthouseExceptionRule) {
-            reasons.push(`penthouse is served by exception rule ${penthouseExceptionRule.ruleId}`)
+            reasons.push(penthouseExceptionRule.reason ?? `penthouse is served by exception rule ${penthouseExceptionRule.ruleId}`)
             decision = createDecision(group, member, RISER_STRATEGY_DECISION.COVERED_BY_EXCEPTION_RULE, reasons, overlaps, {
               coveredByExceptionRuleId: penthouseExceptionRule.ruleId,
             })
@@ -133,7 +138,7 @@ export function decideRiserStrategyPerToiletRoom(
         reasons.push('eligible primary member receives riser placement for this group')
         decision = createDecision(group, member, RISER_STRATEGY_DECISION.RISER_PLACED, reasons, overlaps)
       } else if (primaryExceptionRule) {
-        reasons.push(`eligible non-primary member inherits exception coverage from primary member rule ${primaryExceptionRule.ruleId}`)
+        reasons.push(primaryExceptionRule.reason ?? `eligible non-primary member inherits exception coverage from primary member rule ${primaryExceptionRule.ruleId}`)
         decision = createDecision(group, member, RISER_STRATEGY_DECISION.COVERED_BY_EXCEPTION_RULE, reasons, overlaps, {
           coveredByExceptionRuleId: primaryExceptionRule.ruleId,
         })
