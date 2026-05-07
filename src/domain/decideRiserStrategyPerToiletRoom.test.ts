@@ -121,6 +121,19 @@ describe('decideRiserStrategyPerToiletRoom', () => {
     expect(candidate?.coveredByGroupId).toBe('g-a')
   })
 
+
+  it('covers by strongest overlap instead of lexicographic group order', () => {
+    const decisions = decideRiserStrategyPerToiletRoom([
+      group('g-a', [member('overlap', 101, true)], 0.6),
+      group('g-z', [member('overlap', 101, true), member('z2', 102, true)], 0.95),
+      group('g-candidate', [member('overlap', 101, true)], 0.5),
+    ])
+
+    const candidate = decisions.find((d) => d.groupId === 'g-candidate' && d.areaId === 'overlap')
+    expect(candidate?.decision).toBe(RISER_STRATEGY_DECISION.COVERED_BY_EXISTING_RISER_GROUP)
+    expect(candidate?.coveredByGroupId).toBe('g-z')
+  })
+
   it('returns stable decision IDs independent of input group order', () => {
     const groups = [group('g1', [member('a1', 101, true)]), group('g2', [member('a2', 102, true)])]
     const idsA = decideRiserStrategyPerToiletRoom(groups).map((d) => d.decisionId)

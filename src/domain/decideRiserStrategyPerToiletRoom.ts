@@ -46,7 +46,9 @@ export function decideRiserStrategyPerToiletRoom(groups: VerticalWetGroup[]): Ri
 
     for (const member of sortMembers(group.members)) {
       const overlaps = (overlappingByArea.get(member.areaId) ?? []).sort((a, b) => a.groupId.localeCompare(b.groupId))
-      const strongerGroups = overlaps.filter((candidate) => isStrongerGroup(candidate, group, profiles))
+      const strongerGroups = overlaps
+        .filter((candidate) => isStrongerGroup(candidate, group, profiles))
+        .sort((a, b) => compareGroupStrength(a, b, profiles))
       const topStronger = strongerGroups[0]
       const secondStronger = strongerGroups[1]
       const reasons: string[] = []
@@ -145,14 +147,7 @@ function sortMembers(members: VerticalWetGroupMember[]): VerticalWetGroupMember[
 
 function isStrongerGroup(a: VerticalWetGroup, b: VerticalWetGroup, profiles: Map<string, GroupProfile>): boolean {
   if (a.groupId === b.groupId) return false
-  const pa = profiles.get(a.groupId)
-  const pb = profiles.get(b.groupId)
-  if (!pa || !pb) return false
-  if (pa.eligibleCount !== pb.eligibleCount) return pa.eligibleCount > pb.eligibleCount
-  if (pa.group.members.length !== pb.group.members.length) return pa.group.members.length > pb.group.members.length
-  if (pa.confidence !== pb.confidence) return pa.confidence > pb.confidence
-  // Deterministic tie-break to avoid spurious coordination flags.
-  return a.groupId.localeCompare(b.groupId) < 0
+  return compareGroupStrength(a, b, profiles) < 0
 }
 
 
@@ -163,6 +158,19 @@ function hasEqualStrength(a: VerticalWetGroup, b: VerticalWetGroup, profiles: Ma
   return pa.eligibleCount === pb.eligibleCount
     && pa.group.members.length === pb.group.members.length
     && pa.confidence === pb.confidence
+}
+
+function compareGroupStrength(a: VerticalWetGroup, b: VerticalWetGroup, profiles: Map<string, GroupProfile>): number {
+  const pa = profiles.get(a.groupId)
+  const pb = profiles.get(b.groupId)
+  if (!pa || !pb) return a.groupId.localeCompare(b.groupId)
+
+  if (pa.eligibleCount !== pb.eligibleCount) return pb.eligibleCount - pa.eligibleCount
+  if (pa.group.members.length !== pb.group.members.length) return pb.group.members.length - pa.group.members.length
+  if (pa.confidence !== pb.confidence) return pb.confidence - pa.confidence
+
+  // Deterministic tie-break to avoid spurious coordination flags.
+  return a.groupId.localeCompare(b.groupId)
 }
 
 function buildDecisionId(groupId: string, member: VerticalWetGroupMember): string {
