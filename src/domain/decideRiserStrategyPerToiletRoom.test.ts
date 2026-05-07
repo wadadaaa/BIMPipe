@@ -26,6 +26,19 @@ const storey = (id: number, elevation: number): Storey => ({
   name: `S${id}`,
 })
 
+const DEFAULT_STOREYS = [
+  storey(1, -3),
+  storey(10, 0),
+  storey(20, 3),
+  storey(30, 6),
+  storey(99, 99),
+  storey(100, 0),
+  storey(101, 3),
+  storey(102, 6),
+  storey(103, 9),
+  storey(300, 12),
+]
+
 describe('decideRiserStrategyPerToiletRoom', () => {
   it('returns empty decisions for empty input', () => {
     expect(decideRiserStrategyPerToiletRoom([])).toEqual([])
@@ -36,10 +49,17 @@ describe('decideRiserStrategyPerToiletRoom', () => {
     expect(decisions[0].decision).toBe(RISER_STRATEGY_DECISION.RISER_PLACED)
   })
 
-  it('places one primary riser decision per eligible group and covers other eligible members', () => {
-    const decisions = decideRiserStrategyPerToiletRoom([
+  it('throws when elevation ordering is needed but storey metadata is omitted', () => {
+    expect(() => decideRiserStrategyPerToiletRoom([
       group('g1', [member('a-low', 101, true), member('a-high', 102, true)]),
-    ])
+    ])).toThrow('requires storey metadata')
+  })
+
+  it('places one primary riser decision per eligible group and covers other eligible members', () => {
+    const decisions = decideRiserStrategyPerToiletRoom(
+      [group('g1', [member('a-low', 101, true), member('a-high', 102, true)])],
+      { storeys: DEFAULT_STOREYS },
+    )
 
     const placed = decisions.filter((d) => d.groupId === 'g1' && d.decision === RISER_STRATEGY_DECISION.RISER_PLACED)
     const covered = decisions.find((d) => d.groupId === 'g1' && d.areaId === 'a-high')
@@ -51,10 +71,13 @@ describe('decideRiserStrategyPerToiletRoom', () => {
   })
 
   it('marks eligible overlaps as covered by stronger group', () => {
-    const decisions = decideRiserStrategyPerToiletRoom([
-      group('g-strong', [member('a-base', 101, true), member('a-top', 102, true)], 0.95),
-      group('g-weak', [member('a-base', 101, true)], 0.7),
-    ])
+    const decisions = decideRiserStrategyPerToiletRoom(
+      [
+        group('g-strong', [member('a-base', 101, true), member('a-top', 102, true)], 0.95),
+        group('g-weak', [member('a-base', 101, true)], 0.7),
+      ],
+      { storeys: DEFAULT_STOREYS },
+    )
 
     const weakDecision = decisions.find((d) => d.groupId === 'g-weak' && d.areaId === 'a-base')
     expect(weakDecision?.decision).toBe(RISER_STRATEGY_DECISION.COVERED_BY_EXISTING_RISER_GROUP)
@@ -62,10 +85,13 @@ describe('decideRiserStrategyPerToiletRoom', () => {
   })
 
   it('does not self-cover non-primary members when the primary is served by a stronger group', () => {
-    const decisions = decideRiserStrategyPerToiletRoom([
-      group('g-main', [member('shared-primary', 101, true), member('main-upper', 102, true)], 0.95),
-      group('g-sub', [member('shared-primary', 101, true), member('sub-upper', 103, true)], 0.7),
-    ])
+    const decisions = decideRiserStrategyPerToiletRoom(
+      [
+        group('g-main', [member('shared-primary', 101, true), member('main-upper', 102, true)], 0.95),
+        group('g-sub', [member('shared-primary', 101, true), member('sub-upper', 103, true)], 0.7),
+      ],
+      { storeys: DEFAULT_STOREYS },
+    )
 
     const subPrimary = decisions.find((d) => d.groupId === 'g-sub' && d.areaId === 'shared-primary')
     const subUpper = decisions.find((d) => d.groupId === 'g-sub' && d.areaId === 'sub-upper')
@@ -80,9 +106,10 @@ describe('decideRiserStrategyPerToiletRoom', () => {
   })
 
   it('group with only ineligible members is EXCLUDED_FLOOR for all members', () => {
-    const decisions = decideRiserStrategyPerToiletRoom([
-      group('g1', [member('b1', 1, false), member('r1', 99, false)]),
-    ])
+    const decisions = decideRiserStrategyPerToiletRoom(
+      [group('g1', [member('b1', 1, false), member('r1', 99, false)])],
+      { storeys: DEFAULT_STOREYS },
+    )
     expect(decisions.every((d) => d.decision === RISER_STRATEGY_DECISION.EXCLUDED_FLOOR)).toBe(true)
   })
 
@@ -140,28 +167,33 @@ describe('decideRiserStrategyPerToiletRoom', () => {
   })
 
   it('ineligible member below eligible storey is EXCLUDED_FLOOR', () => {
-    const decisions = decideRiserStrategyPerToiletRoom([
-      group('g1', [member('below', 100, false), member('eligible', 101, true)]),
-    ])
+    const decisions = decideRiserStrategyPerToiletRoom(
+      [group('g1', [member('below', 100, false), member('eligible', 101, true)])],
+      { storeys: DEFAULT_STOREYS },
+    )
 
     const below = decisions.find((d) => d.areaId === 'below')
     expect(below?.decision).toBe(RISER_STRATEGY_DECISION.EXCLUDED_FLOOR)
   })
 
   it('ineligible middle member is not penthouse-served', () => {
-    const decisions = decideRiserStrategyPerToiletRoom([
-      group('g1', [member('lower', 101, true), member('middle', 102, false), member('upper', 103, true)]),
-    ])
+    const decisions = decideRiserStrategyPerToiletRoom(
+      [group('g1', [member('lower', 101, true), member('middle', 102, false), member('upper', 103, true)])],
+      { storeys: DEFAULT_STOREYS },
+    )
 
     const middle = decisions.find((d) => d.areaId === 'middle')
     expect(middle?.decision).toBe(RISER_STRATEGY_DECISION.EXCLUDED_FLOOR)
   })
 
   it('prevents duplicate RISER_PLACED for losing same-storey single-member overlap', () => {
-    const decisions = decideRiserStrategyPerToiletRoom([
-      group('g-main', [member('a1', 101, true), member('a2', 102, true)]),
-      group('g-loser', [member('a2', 102, true)]),
-    ])
+    const decisions = decideRiserStrategyPerToiletRoom(
+      [
+        group('g-main', [member('a1', 101, true), member('a2', 102, true)]),
+        group('g-loser', [member('a2', 102, true)]),
+      ],
+      { storeys: DEFAULT_STOREYS },
+    )
 
     const placedInLoser = decisions.filter((d) => d.groupId === 'g-loser' && d.decision === RISER_STRATEGY_DECISION.RISER_PLACED)
     const loser = decisions.find((d) => d.groupId === 'g-loser')
@@ -170,32 +202,41 @@ describe('decideRiserStrategyPerToiletRoom', () => {
   })
 
   it('flags coordination required when two stronger overlaps are exactly equal strength', () => {
-    const decisions = decideRiserStrategyPerToiletRoom([
-      group('g-a', [member('overlap', 101, true), member('a2', 102, true)], 0.9),
-      group('g-b', [member('overlap', 101, true), member('b2', 103, true)], 0.9),
-      group('g-candidate', [member('overlap', 101, true)], 0.7),
-    ])
+    const decisions = decideRiserStrategyPerToiletRoom(
+      [
+        group('g-a', [member('overlap', 101, true), member('a2', 102, true)], 0.9),
+        group('g-b', [member('overlap', 101, true), member('b2', 103, true)], 0.9),
+        group('g-candidate', [member('overlap', 101, true)], 0.7),
+      ],
+      { storeys: DEFAULT_STOREYS },
+    )
 
     const candidate = decisions.find((d) => d.groupId === 'g-candidate' && d.areaId === 'overlap')
     expect(candidate?.decision).toBe(RISER_STRATEGY_DECISION.COORDINATION_REQUIRED)
   })
 
   it('uses epsilon confidence comparison for equal-strength ambiguity', () => {
-    const decisions = decideRiserStrategyPerToiletRoom([
-      group('g-a', [member('overlap', 101, true), member('a2', 102, true)], 0.9000000001),
-      group('g-b', [member('overlap', 101, true), member('b2', 103, true)], 0.9),
-      group('g-candidate', [member('overlap', 101, true)], 0.7),
-    ])
+    const decisions = decideRiserStrategyPerToiletRoom(
+      [
+        group('g-a', [member('overlap', 101, true), member('a2', 102, true)], 0.9000000001),
+        group('g-b', [member('overlap', 101, true), member('b2', 103, true)], 0.9),
+        group('g-candidate', [member('overlap', 101, true)], 0.7),
+      ],
+      { storeys: DEFAULT_STOREYS },
+    )
 
     const candidate = decisions.find((d) => d.groupId === 'g-candidate' && d.areaId === 'overlap')
     expect(candidate?.decision).toBe(RISER_STRATEGY_DECISION.COORDINATION_REQUIRED)
   })
 
   it('uses deterministic groupId tie-break when competing group strength metrics are equal', () => {
-    const decisions = decideRiserStrategyPerToiletRoom([
-      group('g-b', [member('overlap', 101, true), member('b2', 102, true)], 0.9),
-      group('g-a', [member('overlap', 101, true), member('a2', 102, true)], 0.9),
-    ])
+    const decisions = decideRiserStrategyPerToiletRoom(
+      [
+        group('g-b', [member('overlap', 101, true), member('b2', 102, true)], 0.9),
+        group('g-a', [member('overlap', 101, true), member('a2', 102, true)], 0.9),
+      ],
+      { storeys: DEFAULT_STOREYS },
+    )
 
     const groupAOverlap = decisions.find((d) => d.groupId === 'g-a' && d.areaId === 'overlap')
     const groupBOverlap = decisions.find((d) => d.groupId === 'g-b' && d.areaId === 'overlap')
@@ -206,11 +247,14 @@ describe('decideRiserStrategyPerToiletRoom', () => {
   })
 
   it('covers by strongest overlap instead of lexicographic group order', () => {
-    const decisions = decideRiserStrategyPerToiletRoom([
-      group('g-a', [member('overlap', 101, true)], 0.6),
-      group('g-z', [member('overlap', 101, true), member('z2', 102, true)], 0.95),
-      group('g-candidate', [member('overlap', 101, true)], 0.5),
-    ])
+    const decisions = decideRiserStrategyPerToiletRoom(
+      [
+        group('g-a', [member('overlap', 101, true)], 0.6),
+        group('g-z', [member('overlap', 101, true), member('z2', 102, true)], 0.95),
+        group('g-candidate', [member('overlap', 101, true)], 0.5),
+      ],
+      { storeys: DEFAULT_STOREYS },
+    )
 
     const candidate = decisions.find((d) => d.groupId === 'g-candidate' && d.areaId === 'overlap')
     expect(candidate?.decision).toBe(RISER_STRATEGY_DECISION.COVERED_BY_EXISTING_RISER_GROUP)
@@ -238,14 +282,25 @@ describe('decideRiserStrategyPerToiletRoom', () => {
     expect(idsA).toEqual(idsB)
   })
 
+  it('uses collision-resistant decision IDs when source ids contain colon characters', () => {
+    const decisions = decideRiserStrategyPerToiletRoom([
+      group('g:1', [member('3', 2, true)]),
+      group('g', [member('2:3', 1, true)]),
+    ])
+
+    const ids = decisions.map((decision) => decision.decisionId)
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(ids.every((id) => id.startsWith('riser-decision|'))).toBe(true)
+  })
+
   it('keeps competing overlap outcomes stable when input order is reversed', () => {
     const groups = [
       group('g-a', [member('shared', 101, true), member('a-only', 102, true)], 0.9),
       group('g-b', [member('shared', 101, true)], 0.7),
     ]
 
-    const decisionsA = decideRiserStrategyPerToiletRoom(groups)
-    const decisionsB = decideRiserStrategyPerToiletRoom([...groups].reverse())
+    const decisionsA = decideRiserStrategyPerToiletRoom(groups, { storeys: DEFAULT_STOREYS })
+    const decisionsB = decideRiserStrategyPerToiletRoom([...groups].reverse(), { storeys: DEFAULT_STOREYS })
 
     const normalize = (decisions: ReturnType<typeof decideRiserStrategyPerToiletRoom>) =>
       [...decisions]
