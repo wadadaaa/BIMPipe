@@ -27,6 +27,10 @@ const storey = (id: number, elevation: number): Storey => ({
 })
 
 describe('decideRiserStrategyPerToiletRoom', () => {
+  it('returns empty decisions for empty input', () => {
+    expect(decideRiserStrategyPerToiletRoom([])).toEqual([])
+  })
+
   it('places one riser for an eligible anchor group', () => {
     const decisions = decideRiserStrategyPerToiletRoom([group('g1', [member('a1', 101, true)])])
     expect(decisions[0].decision).toBe(RISER_STRATEGY_DECISION.RISER_PLACED)
