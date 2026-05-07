@@ -73,7 +73,7 @@ describe('decideRiserStrategyPerToiletRoom', () => {
     expect(subUpper?.decision).toBe(RISER_STRATEGY_DECISION.COVERED_BY_EXISTING_RISER_GROUP)
     expect(subUpper?.coveredByGroupId).toBe('g-main')
     expect(subUpper?.coveredByGroupId).not.toBe('g-sub')
-    expect(subUpper?.reasons.join(' ')).toContain('inherits coverage from the stronger group')
+    expect(subUpper?.reasons.join(' ')).toContain('inherits coverage from stronger group g-main')
   })
 
   it('group with only ineligible members is EXCLUDED_FLOOR for all members', () => {
@@ -92,6 +92,22 @@ describe('decideRiserStrategyPerToiletRoom', () => {
     const penthouse = decisions.find((d) => d.areaId === 'ph')
     expect(penthouse?.decision).toBe(RISER_STRATEGY_DECISION.PENTHOUSE_SERVED_BY_EXISTING_RISER)
     expect(penthouse?.servedByGroupId).toBe('g1')
+  })
+
+  it('marks penthouse as coordination required when the serving group is ambiguous', () => {
+    const decisions = decideRiserStrategyPerToiletRoom(
+      [
+        group('g-a', [member('core', 10, true), member('a-upper', 20, true)], 0.9),
+        group('g-b', [member('core', 10, true), member('b-upper', 20, true)], 0.9),
+        group('g-c', [member('core', 10, true), member('ph', 30, false)], 0.7),
+      ],
+      { storeys: [storey(10, 0), storey(20, 3), storey(30, 6)] },
+    )
+
+    const penthouse = decisions.find((d) => d.groupId === 'g-c' && d.areaId === 'ph')
+    expect(penthouse?.decision).toBe(RISER_STRATEGY_DECISION.COORDINATION_REQUIRED)
+    expect(penthouse?.servedByGroupId).toBeUndefined()
+    expect(penthouse?.reasons.join(' ')).toContain('penthouse serving group is ambiguous')
   })
 
   it('uses storey elevation order instead of express id order for penthouse classification', () => {
@@ -137,6 +153,17 @@ describe('decideRiserStrategyPerToiletRoom', () => {
   it('flags coordination required when two stronger overlaps are exactly equal strength', () => {
     const decisions = decideRiserStrategyPerToiletRoom([
       group('g-a', [member('overlap', 101, true), member('a2', 102, true)], 0.9),
+      group('g-b', [member('overlap', 101, true), member('b2', 103, true)], 0.9),
+      group('g-candidate', [member('overlap', 101, true)], 0.7),
+    ])
+
+    const candidate = decisions.find((d) => d.groupId === 'g-candidate' && d.areaId === 'overlap')
+    expect(candidate?.decision).toBe(RISER_STRATEGY_DECISION.COORDINATION_REQUIRED)
+  })
+
+  it('uses epsilon confidence comparison for equal-strength ambiguity', () => {
+    const decisions = decideRiserStrategyPerToiletRoom([
+      group('g-a', [member('overlap', 101, true), member('a2', 102, true)], 0.9000000001),
       group('g-b', [member('overlap', 101, true), member('b2', 103, true)], 0.9),
       group('g-candidate', [member('overlap', 101, true)], 0.7),
     ])
