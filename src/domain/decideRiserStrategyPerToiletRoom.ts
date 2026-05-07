@@ -18,7 +18,9 @@ export interface RiserStrategyDecision {
   areaId: string
   storeyId: StoreyId
   decision: RiserStrategyDecisionType
+  /** Group whose riser covers this area. It may not have an explicit member for this area/storey when coverage is inherited through the base group's primary member. */
   coveredByGroupId?: string
+  /** Group whose riser serves this penthouse area through the vertical shaft. */
   servedByGroupId?: string
   reasons: string[]
   debug: {
@@ -216,7 +218,9 @@ function resolveServingGroupForArea(
 }
 
 function compareStoreysByElevation(a: StoreyId, b: StoreyId, storeyById: Map<StoreyId, Storey>): number {
-  if (storeyById.size === 0) return a - b
+  if (storeyById.size === 0) {
+    throw new Error('compareStoreysByElevation requires storey metadata; pass options.storeys to decideRiserStrategyPerToiletRoom')
+  }
   const sa = storeyById.get(a)
   const sb = storeyById.get(b)
   if (!sa || !sb) {
@@ -250,5 +254,5 @@ function getProfile(groupId: string, profiles: Map<string, GroupProfile>): Group
 }
 
 function buildDecisionId(groupId: string, member: VerticalWetGroupMember): string {
-  return `riser-decision:${groupId}:${member.storeyId}:${member.areaId}`
+  return `riser-decision|${groupId}|${member.storeyId}|${member.areaId}`
 }
