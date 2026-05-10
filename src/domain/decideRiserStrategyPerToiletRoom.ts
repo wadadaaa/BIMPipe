@@ -4,6 +4,7 @@ import type { Storey, StoreyId } from './types'
 export const RISER_STRATEGY_DECISION = {
   RISER_PLACED: 'RISER_PLACED',
   COVERED_BY_EXISTING_RISER_GROUP: 'COVERED_BY_EXISTING_RISER_GROUP',
+  COVERED_BY_EXCEPTION_RULE: 'COVERED_BY_EXCEPTION_RULE',
   PENTHOUSE_SERVED_BY_EXISTING_RISER: 'PENTHOUSE_SERVED_BY_EXISTING_RISER',
   EXCLUDED_FLOOR: 'EXCLUDED_FLOOR',
   COORDINATION_REQUIRED: 'COORDINATION_REQUIRED',
@@ -20,6 +21,8 @@ export interface RiserStrategyDecision {
   decision: RiserStrategyDecisionType
   /** Group whose riser covers this area. It may not have an explicit member for this area/storey when coverage is inherited through the base group's primary member. */
   coveredByGroupId?: string
+  /** Exception rule that explicitly says this area should not receive a newly generated riser. */
+  coveredByExceptionRuleId?: string
   /** Group whose riser serves this penthouse area through the vertical shaft. */
   servedByGroupId?: string
   reasons: string[]
@@ -27,6 +30,20 @@ export interface RiserStrategyDecision {
     confidence: number
     overlapGroupIds: string[]
   }
+}
+
+/**
+ * Explicitly suppresses new riser generation for matching toilet-room members.
+ * Selector fields use AND semantics: when more than one selector is present,
+ * groupIds, areaIds, and storeyIds must all match for the rule to apply.
+ * Rules with no selectors, including empty selector arrays, match nothing.
+ */
+export interface RiserCoverageExceptionRule {
+  ruleId: string
+  groupIds?: string[]
+  areaIds?: string[]
+  storeyIds?: StoreyId[]
+  reason?: string
 }
 
 interface GroupProfile {
@@ -42,6 +59,7 @@ interface ServingGroupResolution {
 
 export interface DecideRiserStrategyOptions {
   storeys?: Storey[]
+  exceptionRules?: RiserCoverageExceptionRule[]
 }
 
 const CONFIDENCE_EPSILON = 1e-9
@@ -51,6 +69,7 @@ export function decideRiserStrategyPerToiletRoom(
   options: DecideRiserStrategyOptions = {},
 ): RiserStrategyDecision[] {
   const storeyById = buildStoreyById(options.storeys)
+  const sortedExceptionRules = [...(options.exceptionRules ?? [])].sort((a, b) => a.ruleId.localeCompare(b.ruleId))
   const sortedGroups = [...groups].sort((a, b) => a.groupId.localeCompare(b.groupId))
   const profiles = buildProfiles(sortedGroups)
   const overlappingByArea = buildOverlappingByArea(sortedGroups)
@@ -60,9 +79,13 @@ export function decideRiserStrategyPerToiletRoom(
     const sortedMembers = sortMembers(group.members, storeyById)
     const eligibleMembers = sortedMembers.filter((member) => member.eligibleForNewRisers)
     const highestEligibleStoreyId = eligibleMembers.length > 0 ? maxEligibleStoreyId(group, storeyById) : null
-    const primaryEligibleAreaId = eligibleMembers[0]?.areaId
+    const primaryEligibleMember = eligibleMembers[0]
+    const primaryEligibleAreaId = primaryEligibleMember?.areaId
     const primaryServingGroup = primaryEligibleAreaId
       ? resolveServingGroupForArea(primaryEligibleAreaId, group, overlappingByArea, profiles)
+      : undefined
+    const primaryExceptionRule = primaryEligibleMember
+      ? findCoveringExceptionRule(group, primaryEligibleMember, sortedExceptionRules)
       : undefined
 
     for (const member of sortedMembers) {
@@ -72,13 +95,30 @@ export function decideRiserStrategyPerToiletRoom(
         .sort((a, b) => compareGroupStrength(a, b, profiles))
       const topStronger = strongerGroups[0]
       const secondStronger = strongerGroups[1]
+      const exceptionRule = findCoveringExceptionRule(group, member, sortedExceptionRules)
       const reasons: string[] = []
 
       let decision: RiserStrategyDecision
 
-      if (!member.eligibleForNewRisers) {
+      // Explicit exception rules intentionally take precedence over group-strength coverage.
+      if (member.eligibleForNewRisers && exceptionRule) {
+        reasons.push(exceptionRule.reason ?? `covered by exception rule ${exceptionRule.ruleId}`)
+        decision = createDecision(group, member, RISER_STRATEGY_DECISION.COVERED_BY_EXCEPTION_RULE, reasons, overlaps, {
+          coveredByExceptionRuleId: exceptionRule.ruleId,
+        })
+      } else if (!member.eligibleForNewRisers) {
         if (highestEligibleStoreyId !== null && compareStoreysByElevation(member.storeyId, highestEligibleStoreyId, storeyById) > 0) {
-          if (primaryServingGroup?.kind === 'ambiguous' || !primaryServingGroup?.groupId) {
+          const penthouseExceptionRule = exceptionRule ?? primaryExceptionRule
+
+          if (penthouseExceptionRule) {
+            const penthouseReason = penthouseExceptionRule.reason
+              ? `inherits exception coverage from primary member: ${penthouseExceptionRule.reason}`
+              : `penthouse is served by exception rule ${penthouseExceptionRule.ruleId}`
+            reasons.push(penthouseReason)
+            decision = createDecision(group, member, RISER_STRATEGY_DECISION.COVERED_BY_EXCEPTION_RULE, reasons, overlaps, {
+              coveredByExceptionRuleId: penthouseExceptionRule.ruleId,
+            })
+          } else if (primaryServingGroup?.kind === 'ambiguous' || !primaryServingGroup?.groupId) {
             reasons.push('penthouse serving group is ambiguous; coordination required')
             decision = createDecision(group, member, RISER_STRATEGY_DECISION.COORDINATION_REQUIRED, reasons, overlaps)
           } else {
@@ -91,6 +131,14 @@ export function decideRiserStrategyPerToiletRoom(
           reasons.push('storey is not eligible for new risers')
           decision = createDecision(group, member, RISER_STRATEGY_DECISION.EXCLUDED_FLOOR, reasons, overlaps)
         }
+      } else if (primaryEligibleAreaId !== member.areaId && primaryExceptionRule) {
+        const inheritedReason = primaryExceptionRule.reason
+          ? `inherits exception coverage from primary member: ${primaryExceptionRule.reason}`
+          : `eligible non-primary member inherits exception coverage from primary member rule ${primaryExceptionRule.ruleId}`
+        reasons.push(inheritedReason)
+        decision = createDecision(group, member, RISER_STRATEGY_DECISION.COVERED_BY_EXCEPTION_RULE, reasons, overlaps, {
+          coveredByExceptionRuleId: primaryExceptionRule.ruleId,
+        })
       } else if (topStronger && secondStronger && hasEqualStrength(topStronger, secondStronger, profiles)) {
         reasons.push('multiple stronger overlapping groups have equal strength; coordination required')
         decision = createDecision(group, member, RISER_STRATEGY_DECISION.COORDINATION_REQUIRED, reasons, overlaps)
@@ -130,7 +178,7 @@ function createDecision(
   type: RiserStrategyDecisionType,
   reasons: string[],
   overlaps: VerticalWetGroup[],
-  refs?: { coveredByGroupId?: string, servedByGroupId?: string },
+  refs?: { coveredByGroupId?: string, coveredByExceptionRuleId?: string, servedByGroupId?: string },
 ): RiserStrategyDecision {
   return {
     decisionId: buildDecisionId(group.groupId, member),
@@ -139,6 +187,7 @@ function createDecision(
     storeyId: member.storeyId,
     decision: type,
     coveredByGroupId: refs?.coveredByGroupId,
+    coveredByExceptionRuleId: refs?.coveredByExceptionRuleId,
     servedByGroupId: refs?.servedByGroupId,
     reasons,
     debug: {
@@ -249,6 +298,30 @@ function getProfile(groupId: string, profiles: Map<string, GroupProfile>): Group
   const profile = profiles.get(groupId)
   if (!profile) throw new Error(`Missing group profile for ${groupId}`)
   return profile
+}
+
+function findCoveringExceptionRule(
+  group: VerticalWetGroup,
+  member: VerticalWetGroupMember,
+  rules: RiserCoverageExceptionRule[],
+): RiserCoverageExceptionRule | undefined {
+  // Multiple matching rules are resolved deterministically by the caller's ruleId sort.
+  return rules.find((rule) => exceptionRuleCoversMember(rule, group, member))
+}
+
+function exceptionRuleCoversMember(
+  rule: RiserCoverageExceptionRule,
+  group: VerticalWetGroup,
+  member: VerticalWetGroupMember,
+): boolean {
+  const hasSelector = Boolean(rule.groupIds?.length || rule.areaIds?.length || rule.storeyIds?.length)
+  if (!hasSelector) return false
+
+  const groupMatches = !rule.groupIds?.length || rule.groupIds.includes(group.groupId)
+  const areaMatches = !rule.areaIds?.length || rule.areaIds.includes(member.areaId)
+  const storeyMatches = !rule.storeyIds?.length || rule.storeyIds.includes(member.storeyId)
+
+  return groupMatches && areaMatches && storeyMatches
 }
 
 function buildDecisionId(groupId: string, member: VerticalWetGroupMember): string {
