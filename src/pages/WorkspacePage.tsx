@@ -16,6 +16,7 @@ import { buildRiserStack, removeRiserStack } from '@/shared/routes/buildRiserSta
 import { classifyFloors, getEligibleStoreyIdsForAutoRisers } from '@/shared/routes/floorClassification'
 import { suggestRiserPositions } from '@/shared/routes/suggestRisers'
 import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE } from '@/shared/routes/riserPlacementProfile'
+import { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
 
 let floorViewerModulePromise: Promise<typeof import('@/viewer/FloorViewer')> | null = null
 let model3DViewerModulePromise: Promise<typeof import('@/viewer/Model3DViewer')> | null = null
@@ -393,11 +394,21 @@ export function WorkspacePage({
         fullExport.ifcBytes,
         buildExportFileName(modelFileName, selectedStorey?.name ?? null),
       )
+      const floorClassification = classifyFloors(storeys)
       downloadJson(
         {
           ...fullExport.debugMapping,
           placementRuleProfile: DEFAULT_RISER_PLACEMENT_RULE_PROFILE,
-          floorClassification: classifyFloors(storeys),
+          floorClassification,
+          validationReport: buildRiserValidationReport({
+            exportRunId,
+            timestamp,
+            sourceIfcName: modelFileName,
+            storeys,
+            floorClassifications: floorClassification,
+            detectionAggregation: detectionDebugRef.current,
+            risers,
+          }),
         },
         buildExportDebugFileName(modelFileName, selectedStorey?.name ?? null),
       )
