@@ -8,6 +8,7 @@ interface RisersPanelProps {
   isAddingRiser: boolean
   onToggleAddMode: () => void
   onSuggestRisers: () => void
+  isSuggestingRisers?: boolean
   onRemove: (id: RiserId) => void
   canDownloadIfc?: boolean
   downloadMode?: 'full' | null
@@ -22,6 +23,7 @@ export function RisersPanel({
   isAddingRiser,
   onToggleAddMode,
   onSuggestRisers,
+  isSuggestingRisers = false,
   onRemove,
   canDownloadIfc = false,
   downloadMode = null,
@@ -50,14 +52,14 @@ export function RisersPanel({
         <button
           className="risers-panel__btn risers-panel__btn--ghost"
           onClick={onSuggestRisers}
-          disabled={!canSuggest}
+          disabled={!canSuggest || isSuggestingRisers}
           title={
             canSuggest
               ? 'Auto-place one riser per toilet and one outer-corner riser per kitchen.'
               : 'Open a floor with fixtures or kitchens first'
           }
         >
-          {risers.length > 0 ? 'Re-suggest' : 'Suggest'}
+          {isSuggestingRisers ? 'Suggesting…' : risers.length > 0 ? 'Re-suggest' : 'Suggest'}
         </button>
       </div>
 
