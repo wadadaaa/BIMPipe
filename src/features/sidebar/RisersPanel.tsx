@@ -12,6 +12,7 @@ interface RisersPanelProps {
   onRemove: (id: RiserId) => void
   canDownloadIfc?: boolean
   downloadMode?: 'full' | null
+  suggestError?: string | null
   downloadError?: string | null
   onDownloadFullIfc?: () => void
 }
@@ -27,6 +28,7 @@ export function RisersPanel({
   onRemove,
   canDownloadIfc = false,
   downloadMode = null,
+  suggestError = null,
   downloadError = null,
   onDownloadFullIfc = () => {},
 }: RisersPanelProps) {
@@ -77,6 +79,12 @@ export function RisersPanel({
           <span>{isDownloadingFullIfc ? 'Preparing IFC' : 'Download IFC'}</span>
         </button>
       </div>
+
+      {suggestError && (
+        <p className="risers-panel__error" role="alert">
+          {suggestError}
+        </p>
+      )}
 
       {downloadError && (
         <p className="risers-panel__error" role="alert">

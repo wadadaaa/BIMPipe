@@ -49,6 +49,12 @@ describe('buildRuntimePlacementStrategy', () => {
     expect(out.placementDecisions.every((d) => d.decision !== RISER_STRATEGY_DECISION.RISER_PLACED)).toBe(true)
   })
 
+
+  it('uses stable proxy half-width bounds for positioned toilets', () => {
+    const out = buildRuntimePlacementStrategy(STOREYS, [fixture(51, 2, { x: 10, y: 0, z: -2 })], [{ id: 2, eligibleForNewRisers: true }])
+    expect(out.wetAreas[0].planBounds).toEqual({ minX: 9.4, maxX: 10.6, minZ: -2.6, maxZ: -1.4 })
+  })
+
   it('is deterministic for same input', () => {
     const fixtures = [fixture(41, 2, { x: 2, y: 0, z: 2 }), fixture(42, 3, { x: 2, y: 0, z: 2 })]
     const floors = [{ id: 2, eligibleForNewRisers: true }, { id: 3, eligibleForNewRisers: true }]

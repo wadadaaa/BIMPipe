@@ -25,6 +25,7 @@ interface SidebarProps {
   onRemoveRiser?: (id: RiserId) => void
   canDownloadIfc?: boolean
   downloadMode?: 'full' | null
+  suggestError?: string | null
   downloadError?: string | null
   onDownloadFullIfc?: () => void
   validationReport?: ReturnType<typeof buildRiserValidationReport> | null
@@ -69,6 +70,7 @@ export function Sidebar({
   onRemoveRiser = () => {},
   canDownloadIfc = false,
   downloadMode = null,
+  suggestError = null,
   downloadError = null,
   onDownloadFullIfc = () => {},
   validationReport = null,
@@ -187,6 +189,7 @@ export function Sidebar({
                 onRemove={onRemoveRiser}
                 canDownloadIfc={canDownloadIfc}
                 downloadMode={downloadMode}
+                suggestError={suggestError}
                 downloadError={downloadError}
                 onDownloadFullIfc={onDownloadFullIfc}
               />

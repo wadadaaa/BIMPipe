@@ -8,6 +8,8 @@ export interface RuntimePlacementStrategy {
   placementDecisions: RiserStrategyDecision[]
 }
 
+const TOILET_ROOM_PROXY_HALF_WIDTH_M = 0.6
+
 export function buildRuntimePlacementStrategy(
   storeys: Storey[],
   fixtures: Fixture[],
@@ -20,7 +22,8 @@ export function buildRuntimePlacementStrategy(
         return null
       }
 
-      const radius = 0.35
+      // Approximate toilet-room footprint proxy around fixture centroid for vertical overlap grouping.
+      const radius = TOILET_ROOM_PROXY_HALF_WIDTH_M
       return {
         areaId: `fixture:${fixture.expressId}`,
         storeyId: fixture.storeyId,

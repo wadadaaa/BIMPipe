@@ -343,16 +343,15 @@ export function WorkspacePage({
       .catch(() => {
         // Keep suggest flow non-fatal even when full-building detection aggregation fails.
       })
-      .finally(() => {
-        setIsSuggestingRisers(false)
-      })
 
     startTransition(() => {
       nextRiserLabelRef.current = 1
+      const allDetectedFixtures = flattenToiletFixturesFromAggregation(detectionDebugRef.current) ?? fixtures
       const { suggestedRisers, runtimeStrategy } = buildSuggestedRisers(
         storeys,
         selectedStoreyId,
         fixtures,
+        allDetectedFixtures,
         kitchens,
         floorMeshes,
         nextRiserLabelRef,
@@ -361,6 +360,7 @@ export function WorkspacePage({
       setRuntimePlacementStrategy(runtimeStrategy)
       setIsAddingRiser(false)
       setActiveTab('risers')
+      setIsSuggestingRisers(false)
     })
   }
 
@@ -424,6 +424,8 @@ export function WorkspacePage({
             storeys,
             floorClassifications: floorClassification,
             detectionAggregation: detectionDebugRef.current,
+            placementDecisions: runtimePlacementStrategy?.placementDecisions,
+            verticalWetRoomGroups: runtimePlacementStrategy?.verticalGroups,
             risers,
           }),
         },
@@ -575,7 +577,8 @@ export function WorkspacePage({
       onRemoveRiser={handleRemoveRiser}
       canDownloadIfc={risers.length > 0}
       downloadMode={downloadMode}
-      downloadError={suggestError ?? downloadError}
+      suggestError={suggestError}
+      downloadError={downloadError}
       onDownloadFullIfc={() => void handleDownloadIfc()}
       validationReport={validationReport}
       detectionAggregation={detectionDebugRef.current}
@@ -609,6 +612,7 @@ function buildSuggestedRisers(
   storeys: Storey[],
   sourceStoreyId: StoreyId,
   fixtures: Fixture[],
+  strategyFixtures: Fixture[],
   kitchens: KitchenArea[],
   floorMeshes: FloorMeshes | null,
   nextRiserLabelRef: MutableRefObject<number>,
@@ -626,7 +630,7 @@ function buildSuggestedRisers(
   const positions = suggestRiserPositions(fixtures, kitchens, floorPlanBounds, ruleProfile)
   const eligibleStoreyIds = new Set(getEligibleStoreyIdsForAutoRisers(storeys, ruleProfile))
   const floors = storeys.map((storey) => ({ id: storey.id, eligibleForNewRisers: eligibleStoreyIds.has(storey.id) }))
-  const runtimeStrategy = buildRuntimePlacementStrategy(storeys, fixtures, floors)
+  const runtimeStrategy = buildRuntimePlacementStrategy(storeys, strategyFixtures, floors)
 
   const suggestedRisers = positions.flatMap((position) =>
     buildRiserStack(
@@ -638,6 +642,14 @@ function buildSuggestedRisers(
   )
 
   return { suggestedRisers, runtimeStrategy }
+}
+
+
+function flattenToiletFixturesFromAggregation(
+  aggregation: Awaited<ReturnType<typeof aggregateStoreyDetections>> | null,
+): Fixture[] | null {
+  if (!aggregation) return null
+  return Object.values(aggregation.fixturesByStoreyId).flat()
 }
 
 function takeNextRiserLabel(nextRiserLabelRef: MutableRefObject<number>): string {
