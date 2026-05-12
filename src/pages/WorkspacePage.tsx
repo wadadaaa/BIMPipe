@@ -335,7 +335,7 @@ export function WorkspacePage({
 
         startTransition(() => {
           nextRiserLabelRef.current = 1
-          setRisers(buildSuggestedRisers(storeys, result, strategy.placementDecisions, nextRiserLabelRef))
+          setRisers(buildSuggestedRisers(selectedStoreyId, result, strategy.placementDecisions, nextRiserLabelRef))
           setIsAddingRiser(false)
           setActiveTab('risers')
         })
@@ -615,7 +615,7 @@ function buildRuntimePlacementStrategy(
 }
 
 function buildSuggestedRisers(
-  storeys: Storey[],
+  selectedStoreyId: StoreyId,
   detectionAggregation: Awaited<ReturnType<typeof aggregateStoreyDetections>>,
   placementDecisions: RiserStrategyDecision[],
   nextRiserLabelRef: MutableRefObject<number>,
@@ -627,13 +627,31 @@ function buildSuggestedRisers(
       .map((fixture) => [`toilet-room:${fixture.storeyId}:${fixture.expressId}`, fixture] as const),
   )
 
-  return placementDecisions
-    .filter((decision) => decision.decision === RISER_STRATEGY_DECISION.RISER_PLACED)
+  const toiletRisers = placementDecisions
+    .filter((decision) => decision.decision === RISER_STRATEGY_DECISION.RISER_PLACED && decision.storeyId === selectedStoreyId)
     .flatMap((decision) => {
       const fixture = toiletFixtureByAreaId.get(decision.areaId)
       if (!fixture?.position) return []
-      return buildRiserStack(storeys, fixture.storeyId, fixture.position, takeNextRiserLabel(nextRiserLabelRef))
+      return [{
+        id: crypto.randomUUID(),
+        stackId: `stack:${decision.groupId}`,
+        stackLabel: takeNextRiserLabel(nextRiserLabelRef),
+        storeyId: fixture.storeyId,
+        position: fixture.position,
+      } satisfies Riser]
     })
+
+  const kitchenRisers = (detectionAggregation.kitchensByStoreyId[selectedStoreyId] ?? [])
+    .filter((kitchen) => kitchen.position)
+    .map((kitchen) => ({
+      id: crypto.randomUUID(),
+      stackId: `kitchen:${selectedStoreyId}:${kitchen.expressId}`,
+      stackLabel: takeNextRiserLabel(nextRiserLabelRef),
+      storeyId: selectedStoreyId,
+      position: kitchen.position!,
+    } satisfies Riser))
+
+  return [...toiletRisers, ...kitchenRisers]
 }
 
 function takeNextRiserLabel(nextRiserLabelRef: MutableRefObject<number>): string {
