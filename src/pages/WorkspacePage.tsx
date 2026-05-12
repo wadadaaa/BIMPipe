@@ -175,6 +175,7 @@ export function WorkspacePage({
       setIsAddingRiser(false)
       setActiveTab('fixtures')
       setDownloadError(null)
+      setSuggestError(null)
       setViewMode('2d')
       setWebIfcModelId(null)
     })
@@ -328,11 +329,15 @@ export function WorkspacePage({
   function handleSuggestRisers() {
     if (!selectedStoreyId || (fixtures.length === 0 && kitchens.length === 0)) return
 
+    const modelId = webIfcModelIdRef.current
+    if (modelId === null) {
+      setSuggestError('IFC model is not available. Reload the model and try again.')
+      startTransition(() => setActiveTab('risers'))
+      return
+    }
+
     setIsSuggestingRisers(true)
     setSuggestError(null)
-    setSuggestError(null)
-    const modelId = webIfcModelIdRef.current
-    if (modelId === null) return
 
     void getIfcApi()
       .then((api) => {
