@@ -439,6 +439,19 @@ export function WorkspacePage({
   const viewerKitchens = isExtractingGeometry ? [] : kitchens
   const viewerRisers = isExtractingGeometry ? [] : currentFloorRisers
 
+
+  const validationReport =
+    modelFileName === null
+      ? null
+      : buildRiserValidationReport({
+          exportRunId: 'workspace-preview',
+          timestamp: new Date(0).toISOString(),
+          sourceIfcName: modelFileName,
+          storeys,
+          detectionAggregation: detectionDebugRef.current,
+          risers,
+        })
+
   const currentStep: 1 | 2 | 3 | 4 = !modelFileName
     ? 1
     : selectedStoreyId === null
@@ -544,6 +557,8 @@ export function WorkspacePage({
       downloadMode={downloadMode}
       downloadError={downloadError}
       onDownloadFullIfc={() => void handleDownloadIfc()}
+      validationReport={validationReport}
+      detectionAggregation={detectionDebugRef.current}
     />
   )
 

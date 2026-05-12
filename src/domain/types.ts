@@ -13,7 +13,7 @@ export interface Storey {
   modelId: IfcModelId
 }
 
-export type SidebarTab = 'fixtures' | 'risers'
+export type SidebarTab = 'fixtures' | 'risers' | 'validation'
 
 export type RiserId = string
 
