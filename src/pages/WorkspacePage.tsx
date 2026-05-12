@@ -16,7 +16,7 @@ import { buildRiserStack, removeRiserStack } from '@/shared/routes/buildRiserSta
 import { classifyFloors, getEligibleStoreyIdsForAutoRisers } from '@/shared/routes/floorClassification'
 import { suggestRiserPositions } from '@/shared/routes/suggestRisers'
 import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE } from '@/shared/routes/riserPlacementProfile'
-import { buildRuntimePlacementStrategy } from '@/shared/routes/buildRuntimePlacementStrategy'
+import { buildRuntimePlacementStrategy, type RuntimePlacementStrategy } from '@/shared/routes/buildRuntimePlacementStrategy'
 import { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
 
 let floorViewerModulePromise: Promise<typeof import('@/viewer/FloorViewer')> | null = null
@@ -116,6 +116,7 @@ export function WorkspacePage({
   const [downloadError, setDownloadError] = useState<string | null>(null)
   const [suggestError, setSuggestError] = useState<string | null>(null)
   const [isSuggestingRisers, setIsSuggestingRisers] = useState(false)
+  const [runtimePlacementStrategy, setRuntimePlacementStrategy] = useState<RuntimePlacementStrategy | null>(null)
 
   // --- sidebar ---
   const [activeTab, setActiveTab] = useState<SidebarTab>('fixtures')
@@ -169,6 +170,7 @@ export function WorkspacePage({
       setViewMode('2d')
       setWebIfcModelId(null)
       setSuggestError(null)
+      setRuntimePlacementStrategy(null)
     })
 
     try {
@@ -347,16 +349,16 @@ export function WorkspacePage({
 
     startTransition(() => {
       nextRiserLabelRef.current = 1
-      setRisers(
-        buildSuggestedRisers(
-          storeys,
-          selectedStoreyId,
-          fixtures,
-          kitchens,
-          floorMeshes,
-          nextRiserLabelRef,
-        ),
+      const { suggestedRisers, runtimeStrategy } = buildSuggestedRisers(
+        storeys,
+        selectedStoreyId,
+        fixtures,
+        kitchens,
+        floorMeshes,
+        nextRiserLabelRef,
       )
+      setRisers(suggestedRisers)
+      setRuntimePlacementStrategy(runtimeStrategy)
       setIsAddingRiser(false)
       setActiveTab('risers')
     })
@@ -464,6 +466,8 @@ export function WorkspacePage({
           sourceIfcName: modelFileName,
           storeys,
           detectionAggregation: detectionDebugRef.current,
+          placementDecisions: runtimePlacementStrategy?.placementDecisions,
+          verticalWetRoomGroups: runtimePlacementStrategy?.verticalGroups,
           risers,
         })
 
@@ -608,7 +612,7 @@ function buildSuggestedRisers(
   kitchens: KitchenArea[],
   floorMeshes: FloorMeshes | null,
   nextRiserLabelRef: MutableRefObject<number>,
-): Riser[] {
+): { suggestedRisers: Riser[]; runtimeStrategy: RuntimePlacementStrategy } {
   const ruleProfile = DEFAULT_RISER_PLACEMENT_RULE_PROFILE
   const floorPlanBounds = floorMeshes
     ? {
@@ -622,9 +626,9 @@ function buildSuggestedRisers(
   const positions = suggestRiserPositions(fixtures, kitchens, floorPlanBounds, ruleProfile)
   const eligibleStoreyIds = new Set(getEligibleStoreyIdsForAutoRisers(storeys, ruleProfile))
   const floors = storeys.map((storey) => ({ id: storey.id, eligibleForNewRisers: eligibleStoreyIds.has(storey.id) }))
-  void buildRuntimePlacementStrategy(storeys, fixtures, floors)
+  const runtimeStrategy = buildRuntimePlacementStrategy(storeys, fixtures, floors)
 
-  return positions.flatMap((position) =>
+  const suggestedRisers = positions.flatMap((position) =>
     buildRiserStack(
       storeys,
       sourceStoreyId,
@@ -632,6 +636,8 @@ function buildSuggestedRisers(
       takeNextRiserLabel(nextRiserLabelRef),
     ).filter((riser) => eligibleStoreyIds.has(riser.storeyId)),
   )
+
+  return { suggestedRisers, runtimeStrategy }
 }
 
 function takeNextRiserLabel(nextRiserLabelRef: MutableRefObject<number>): string {
