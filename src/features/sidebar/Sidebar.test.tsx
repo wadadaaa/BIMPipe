@@ -4,10 +4,11 @@ import userEvent from '@testing-library/user-event'
 import { Sidebar } from './Sidebar'
 
 describe('Sidebar', () => {
-  it('renders the two MVP tabs', () => {
+  it('renders the MVP tabs including decisions', () => {
     render(<Sidebar activeTab="fixtures" onTabChange={vi.fn()} />)
     expect(screen.getByRole('tab', { name: /toilets/i })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /risers/i })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /decisions/i })).toBeInTheDocument()
   })
 
   it('marks the active tab as selected', () => {

@@ -1,8 +1,11 @@
 import { startTransition } from 'react'
 import type { Fixture, KitchenArea, Riser, RiserId, SidebarTab } from '@/domain/types'
+import type { StoreyDetectionAggregation } from '@/shared/ifc/aggregateStoreyDetections'
+import type { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
 import { ViewTransition } from '@/shared/reactViewTransition'
 import { FixturesPanel } from './FixturesPanel'
 import { RisersPanel } from './RisersPanel'
+import { PlacementValidationPanel } from './PlacementValidationPanel'
 import './Sidebar.css'
 
 interface SidebarProps {
@@ -23,6 +26,8 @@ interface SidebarProps {
   downloadMode?: 'full' | null
   downloadError?: string | null
   onDownloadFullIfc?: () => void
+  validationReport?: ReturnType<typeof buildRiserValidationReport> | null
+  detectionAggregation?: StoreyDetectionAggregation | null
 }
 
 const TABS: { id: SidebarTab; label: string; focus: string; hint: string }[] = [
@@ -37,6 +42,12 @@ const TABS: { id: SidebarTab; label: string; focus: string; hint: string }[] = [
     label: 'Risers',
     focus: 'Riser layout',
     hint: 'Blue pins are suggested risers. One is proposed per toilet and one in an outer kitchen corner. Drag pins on the plan before downloading the IFC.',
+  },
+  {
+    id: 'validation',
+    label: 'Decisions',
+    focus: 'Validation and decisions',
+    hint: 'Review processed/skipped floors, riser reuse counts, and any placement warnings before demo export.',
   },
 ]
 
@@ -58,6 +69,8 @@ export function Sidebar({
   downloadMode = null,
   downloadError = null,
   onDownloadFullIfc = () => {},
+  validationReport = null,
+  detectionAggregation = null,
 }: SidebarProps) {
   const activeTabMeta = TABS.find((tab) => tab.id === activeTab)!
   const riserPanelKey = risers.map((riser) => riser.id).join(':') || 'empty'
@@ -159,7 +172,7 @@ export function Sidebar({
                 hasRisers={risers.length > 0}
                 onPlaceRisers={onSuggestRisers}
               />
-            ) : (
+            ) : activeTab === 'risers' ? (
               <RisersPanel
                 key={riserPanelKey}
                 risers={risers}
@@ -173,6 +186,11 @@ export function Sidebar({
                 downloadMode={downloadMode}
                 downloadError={downloadError}
                 onDownloadFullIfc={onDownloadFullIfc}
+              />
+            ) : (
+              <PlacementValidationPanel
+                report={validationReport}
+                detectionAggregation={detectionAggregation}
               />
             )}
           </section>
