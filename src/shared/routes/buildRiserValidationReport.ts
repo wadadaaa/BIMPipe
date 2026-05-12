@@ -84,6 +84,15 @@ export function buildRiserValidationReport(input: BuildRiserValidationReportInpu
 
   const coordinationIssues: RiserCoordinationIssue[] = buildRiserCoordinationIssues(placementDecisions)
 
+  const unresolvedToiletRooms = placementDecisions
+    .filter((decision) => decision.decision === RISER_STRATEGY_DECISION.COORDINATION_REQUIRED)
+    .map((decision) => ({
+      toiletRoomId: decision.areaId,
+      storeyId: decision.storeyId,
+      groupId: decision.groupId,
+      reasons: decision.reasons,
+    }))
+
   const newlyAddedRisers = [...input.risers]
     .sort((a, b) => a.stackLabel.localeCompare(b.stackLabel) || a.storeyId - b.storeyId || a.id.localeCompare(b.id))
     .map((riser) => ({
@@ -118,6 +127,7 @@ export function buildRiserValidationReport(input: BuildRiserValidationReportInpu
     reusedRiserGroups,
     placementDecisions,
     coordinationIssues,
+    unresolvedToiletRooms,
     validationIssues,
     summary: {
       processedFloorCount: processedFloors.length,
@@ -130,6 +140,7 @@ export function buildRiserValidationReport(input: BuildRiserValidationReportInpu
       reusedRiserGroupCount: reusedRiserGroups.length,
       placementDecisionCount: placementDecisions.length,
       coordinationIssueCount: coordinationIssues.length,
+      unresolvedToiletRoomCount: unresolvedToiletRooms.length,
       validationIssueCount: validationIssues.length,
     },
   }

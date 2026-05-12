@@ -13,10 +13,11 @@ import { aggregateStoreyDetections } from '@/shared/ifc/aggregateStoreyDetection
 import { parseStoreys } from '@/shared/ifc/parseStoreys'
 import type { Fixture, KitchenArea, Riser, RiserId, Storey, StoreyId, SidebarTab } from '@/domain/types'
 import { buildRiserStack, removeRiserStack } from '@/shared/routes/buildRiserStacks'
-import { classifyFloors, getEligibleStoreyIdsForAutoRisers } from '@/shared/routes/floorClassification'
-import { suggestRiserPositions } from '@/shared/routes/suggestRisers'
+import { classifyFloors } from '@/shared/routes/floorClassification'
 import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE } from '@/shared/routes/riserPlacementProfile'
 import { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
+import { buildStoreyEligibilityById, groupWetAreasVertically, type DetectedWetArea } from '@/domain/groupWetAreasVertically'
+import { decideRiserStrategyPerToiletRoom, RISER_STRATEGY_DECISION, type RiserStrategyDecision } from '@/domain/decideRiserStrategyPerToiletRoom'
 
 let floorViewerModulePromise: Promise<typeof import('@/viewer/FloorViewer')> | null = null
 let model3DViewerModulePromise: Promise<typeof import('@/viewer/Model3DViewer')> | null = null
@@ -107,6 +108,8 @@ export function WorkspacePage({
   const [kitchens, setKitchens] = useState<KitchenArea[]>([])
   const [isDetectingFixtures, setIsDetectingFixtures] = useState(false)
   const detectionDebugRef = useRef<Awaited<ReturnType<typeof aggregateStoreyDetections>> | null>(null)
+  const verticalWetRoomGroupsRef = useRef<ReturnType<typeof groupWetAreasVertically>>([])
+  const placementDecisionsRef = useRef<RiserStrategyDecision[]>([])
 
   // --- risers ---
   const [risers, setRisers] = useState<Riser[]>([])
@@ -317,34 +320,29 @@ export function WorkspacePage({
     if (!selectedStoreyId || (fixtures.length === 0 && kitchens.length === 0)) return
 
     const modelId = webIfcModelIdRef.current
-    if (modelId !== null) {
-      void getIfcApi()
-        .then((api) => {
-          const profile = DEFAULT_RISER_PLACEMENT_RULE_PROFILE
-          return aggregateStoreyDetections(api, modelId, storeys, profile)
+    if (modelId === null) return
+
+    void getIfcApi()
+      .then((api) => {
+        const profile = DEFAULT_RISER_PLACEMENT_RULE_PROFILE
+        return aggregateStoreyDetections(api, modelId, storeys, profile)
+      })
+      .then((result) => {
+        const strategy = buildRuntimePlacementStrategy(storeys, result)
+        detectionDebugRef.current = result
+        verticalWetRoomGroupsRef.current = strategy.verticalWetRoomGroups
+        placementDecisionsRef.current = strategy.placementDecisions
+
+        startTransition(() => {
+          nextRiserLabelRef.current = 1
+          setRisers(buildSuggestedRisers(storeys, result, strategy.placementDecisions, nextRiserLabelRef))
+          setIsAddingRiser(false)
+          setActiveTab('risers')
         })
-        .then((result) => {
-          detectionDebugRef.current = result
-        })
-        .catch(() => {
-          // Keep suggest flow non-fatal even when full-building detection aggregation fails.
-        })
-    }
-    startTransition(() => {
-      nextRiserLabelRef.current = 1
-      setRisers(
-        buildSuggestedRisers(
-          storeys,
-          selectedStoreyId,
-          fixtures,
-          kitchens,
-          floorMeshes,
-          nextRiserLabelRef,
-        ),
-      )
-      setIsAddingRiser(false)
-      setActiveTab('risers')
-    })
+      })
+      .catch(() => {
+        // Keep suggest flow non-fatal even when full-building detection aggregation fails.
+      })
   }
 
   async function handleDownloadIfc() {
@@ -407,6 +405,8 @@ export function WorkspacePage({
             storeys,
             floorClassifications: floorClassification,
             detectionAggregation: detectionDebugRef.current,
+            verticalWetRoomGroups: verticalWetRoomGroupsRef.current,
+            placementDecisions: placementDecisionsRef.current,
             risers,
           }),
         },
@@ -449,6 +449,8 @@ export function WorkspacePage({
           sourceIfcName: modelFileName,
           storeys,
           detectionAggregation: detectionDebugRef.current,
+          verticalWetRoomGroups: verticalWetRoomGroupsRef.current,
+          placementDecisions: placementDecisionsRef.current,
           risers,
         })
 
@@ -585,35 +587,53 @@ export function WorkspacePage({
  * vertical offset from its storey elevation.
  * All entries for the same physical pipe share a `stackId`.
  */
+function buildRuntimePlacementStrategy(
+  storeys: Storey[],
+  detectionAggregation: Awaited<ReturnType<typeof aggregateStoreyDetections>>,
+): { verticalWetRoomGroups: ReturnType<typeof groupWetAreasVertically>, placementDecisions: RiserStrategyDecision[] } {
+  const wetAreas: DetectedWetArea[] = Object.values(detectionAggregation.fixturesByStoreyId)
+    .flat()
+    .filter((fixture) => fixture.kind === 'TOILETPAN' && fixture.position)
+    .map((fixture) => ({
+      areaId: `toilet-room:${fixture.storeyId}:${fixture.expressId}`,
+      storeyId: fixture.storeyId,
+      planBounds: {
+        minX: fixture.position!.x - 0.35,
+        maxX: fixture.position!.x + 0.35,
+        minZ: fixture.position!.z - 0.35,
+        maxZ: fixture.position!.z + 0.35,
+      },
+    }))
+
+  const eligibilityByStoreyId = buildStoreyEligibilityById(
+    detectionAggregation.floors.map((floor) => ({ id: floor.storeyId, eligibleForNewRisers: floor.eligibleForNewRisers })),
+  )
+  const verticalWetRoomGroups = groupWetAreasVertically(wetAreas, storeys, eligibilityByStoreyId)
+  const placementDecisions = decideRiserStrategyPerToiletRoom(verticalWetRoomGroups, { storeys })
+
+  return { verticalWetRoomGroups, placementDecisions }
+}
+
 function buildSuggestedRisers(
   storeys: Storey[],
-  sourceStoreyId: StoreyId,
-  fixtures: Fixture[],
-  kitchens: KitchenArea[],
-  floorMeshes: FloorMeshes | null,
+  detectionAggregation: Awaited<ReturnType<typeof aggregateStoreyDetections>>,
+  placementDecisions: RiserStrategyDecision[],
   nextRiserLabelRef: MutableRefObject<number>,
 ): Riser[] {
-  const ruleProfile = DEFAULT_RISER_PLACEMENT_RULE_PROFILE
-  const floorPlanBounds = floorMeshes
-    ? {
-        minX: floorMeshes.boundingBox.min.x,
-        maxX: floorMeshes.boundingBox.max.x,
-        minZ: floorMeshes.boundingBox.min.z,
-        maxZ: floorMeshes.boundingBox.max.z,
-      }
-    : null
-
-  const positions = suggestRiserPositions(fixtures, kitchens, floorPlanBounds, ruleProfile)
-  const eligibleStoreyIds = new Set(getEligibleStoreyIdsForAutoRisers(storeys, ruleProfile))
-
-  return positions.flatMap((position) =>
-    buildRiserStack(
-      storeys,
-      sourceStoreyId,
-      position,
-      takeNextRiserLabel(nextRiserLabelRef),
-    ).filter((riser) => eligibleStoreyIds.has(riser.storeyId)),
+  const toiletFixtureByAreaId = new Map<string, (typeof detectionAggregation.fixturesByStoreyId)[number][number]>(
+    Object.values(detectionAggregation.fixturesByStoreyId)
+      .flat()
+      .filter((fixture) => fixture.kind === 'TOILETPAN' && fixture.position)
+      .map((fixture) => [`toilet-room:${fixture.storeyId}:${fixture.expressId}`, fixture] as const),
   )
+
+  return placementDecisions
+    .filter((decision) => decision.decision === RISER_STRATEGY_DECISION.RISER_PLACED)
+    .flatMap((decision) => {
+      const fixture = toiletFixtureByAreaId.get(decision.areaId)
+      if (!fixture?.position) return []
+      return buildRiserStack(storeys, fixture.storeyId, fixture.position, takeNextRiserLabel(nextRiserLabelRef))
+    })
 }
 
 function takeNextRiserLabel(nextRiserLabelRef: MutableRefObject<number>): string {
