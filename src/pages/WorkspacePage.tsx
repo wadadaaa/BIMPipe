@@ -121,6 +121,7 @@ export function WorkspacePage({
   const [isAddingRiser, setIsAddingRiser] = useState(false)
   const [downloadMode, setDownloadMode] = useState<'full' | null>(null)
   const [downloadError, setDownloadError] = useState<string | null>(null)
+  const [suggestError, setSuggestError] = useState<string | null>(null)
   const [isSuggestingRisers, setIsSuggestingRisers] = useState(false)
 
   // --- sidebar ---
@@ -136,9 +137,14 @@ export function WorkspacePage({
   // captures a snapshot from the render that defined them. A ref keeps the
   // current value visible across awaits and after queued state updates.
   const risersRef = useRef(risers)
+  const selectedStoreyIdRef = useRef<StoreyId | null>(selectedStoreyId)
   useEffect(() => {
     risersRef.current = risers
   }, [risers])
+
+  useEffect(() => {
+    selectedStoreyIdRef.current = selectedStoreyId
+  }, [selectedStoreyId])
 
   useEffect(() => {
     const normalized = ensureRiserStackLabels(risers, nextRiserLabelRef)
@@ -172,6 +178,7 @@ export function WorkspacePage({
       setIsAddingRiser(false)
       setActiveTab('fixtures')
       setDownloadError(null)
+    setSuggestError(null)
       setViewMode('2d')
       setWebIfcModelId(null)
     })
@@ -214,10 +221,7 @@ export function WorkspacePage({
 
   async function openStorey(id: StoreyId) {
     const modelId = webIfcModelIdRef.current
-    if (modelId === null) {
-      setIsSuggestingRisers(false)
-      return
-    }
+    if (modelId === null) return
 
     // Keep the "opening floor" feedback urgent so the loader paints before IFC work begins.
     setSelectedStoreyId(id)
@@ -233,6 +237,7 @@ export function WorkspacePage({
     setIsAddingRiser(false)
     setActiveTab(risersRef.current.length > 0 ? 'risers' : 'fixtures')
     setDownloadError(null)
+    setSuggestError(null)
 
     await waitForNextPaint()
 
@@ -329,12 +334,10 @@ export function WorkspacePage({
     if (!selectedStoreyId || (fixtures.length === 0 && kitchens.length === 0)) return
 
     setIsSuggestingRisers(true)
-    setDownloadError(null)
+    setSuggestError(null)
+    setSuggestError(null)
     const modelId = webIfcModelIdRef.current
-    if (modelId === null) {
-      setIsSuggestingRisers(false)
-      return
-    }
+    if (modelId === null) return
 
     void getIfcApi()
       .then((api) => {
@@ -349,14 +352,19 @@ export function WorkspacePage({
 
         startTransition(() => {
           nextRiserLabelRef.current = 1
-          setRisers(buildSuggestedRisers(selectedStoreyId, storeys, result, strategy.placementDecisions, nextRiserLabelRef))
+          const latestSelectedStoreyId = selectedStoreyIdRef.current ?? selectedStoreyId
+          if (latestSelectedStoreyId === null) {
+            setSuggestError('No floor is selected for suggestion output.')
+            return
+          }
+          setRisers(buildSuggestedRisers(latestSelectedStoreyId, storeys, result, strategy.placementDecisions, nextRiserLabelRef))
           setIsAddingRiser(false)
           setActiveTab('risers')
         })
       })
       .catch((err) => {
         const message = err instanceof Error ? err.message : 'Failed to suggest risers from building detections.'
-        setDownloadError(message)
+        setSuggestError(message)
         startTransition(() => setActiveTab('risers'))
       })
       .finally(() => {
@@ -376,6 +384,7 @@ export function WorkspacePage({
 
     setDownloadMode('full')
     setDownloadError(null)
+    setSuggestError(null)
 
     try {
       const api = await getIfcApi()
@@ -578,6 +587,7 @@ export function WorkspacePage({
       canDownloadIfc={risers.length > 0}
       downloadMode={downloadMode}
       downloadError={downloadError}
+      suggestError={suggestError}
       onDownloadFullIfc={() => void handleDownloadIfc()}
       validationReport={validationReport}
       detectionAggregation={detectionDebugRef.current}

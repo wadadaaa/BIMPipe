@@ -13,6 +13,7 @@ interface RisersPanelProps {
   canDownloadIfc?: boolean
   downloadMode?: 'full' | null
   downloadError?: string | null
+  suggestError?: string | null
   onDownloadFullIfc?: () => void
 }
 
@@ -28,6 +29,7 @@ export function RisersPanel({
   canDownloadIfc = false,
   downloadMode = null,
   downloadError = null,
+  suggestError = null,
   onDownloadFullIfc = () => {},
 }: RisersPanelProps) {
   const canSuggest =
@@ -77,6 +79,12 @@ export function RisersPanel({
           <span>{isDownloadingFullIfc ? 'Preparing IFC' : 'Download IFC'}</span>
         </button>
       </div>
+
+      {suggestError && (
+        <p className="risers-panel__error" role="alert">
+          {suggestError}
+        </p>
+      )}
 
       {downloadError && (
         <p className="risers-panel__error" role="alert">

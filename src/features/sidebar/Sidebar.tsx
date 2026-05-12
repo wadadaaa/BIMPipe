@@ -26,6 +26,7 @@ interface SidebarProps {
   canDownloadIfc?: boolean
   downloadMode?: 'full' | null
   downloadError?: string | null
+  suggestError?: string | null
   onDownloadFullIfc?: () => void
   validationReport?: ReturnType<typeof buildRiserValidationReport> | null
   detectionAggregation?: StoreyDetectionAggregation | null
@@ -70,6 +71,7 @@ export function Sidebar({
   canDownloadIfc = false,
   downloadMode = null,
   downloadError = null,
+  suggestError = null,
   onDownloadFullIfc = () => {},
   validationReport = null,
   detectionAggregation = null,
@@ -188,6 +190,7 @@ export function Sidebar({
                 canDownloadIfc={canDownloadIfc}
                 downloadMode={downloadMode}
                 downloadError={downloadError}
+                suggestError={suggestError}
                 onDownloadFullIfc={onDownloadFullIfc}
               />
             ) : (
