@@ -57,10 +57,6 @@ export function buildRiserValidationReport(input: BuildRiserValidationReportInpu
       .sort((a, b) => a.storeyId - b.storeyId || a.expressId - b.expressId)
     : []
 
-  for (const fixture of detectedFixtures) {
-    if (fixture.kind !== 'TOILETPAN') continue
-    sourceFixtureByToiletRoomId.set(buildToiletRoomAreaId(fixture.storeyId, fixture.expressId), { hasPosition: false })
-  }
 
   if (input.detectionAggregation) {
     for (const fixture of Object.values(input.detectionAggregation.fixturesByStoreyId).flat()) {

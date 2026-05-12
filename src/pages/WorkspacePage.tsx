@@ -20,7 +20,9 @@ import { buildStoreyEligibilityById, groupWetAreasVertically, type DetectedWetAr
 import { decideRiserStrategyPerToiletRoom, RISER_STRATEGY_DECISION, type RiserStrategyDecision } from '@/domain/decideRiserStrategyPerToiletRoom'
 import { buildToiletRoomAreaId } from '@/domain/buildToiletRoomAreaId'
 
-const TOILET_WET_AREA_HALF_WIDTH_M = Math.max(0.2, (DEFAULT_RISER_PLACEMENT_RULE_PROFILE.fixtureOffsetToleranceMm / 1000) * 0.5)
+// Geometric proxy for toilet-room footprint around fixture centroids used only for vertical grouping.
+// This is not a placement tolerance; we use an explicit room-scale assumption for overlap checks.
+const TOILET_ROOM_PROXY_HALF_WIDTH_M = 0.6
 
 let floorViewerModulePromise: Promise<typeof import('@/viewer/FloorViewer')> | null = null
 let model3DViewerModulePromise: Promise<typeof import('@/viewer/Model3DViewer')> | null = null
@@ -119,6 +121,7 @@ export function WorkspacePage({
   const [isAddingRiser, setIsAddingRiser] = useState(false)
   const [downloadMode, setDownloadMode] = useState<'full' | null>(null)
   const [downloadError, setDownloadError] = useState<string | null>(null)
+  const [isSuggestingRisers, setIsSuggestingRisers] = useState(false)
 
   // --- sidebar ---
   const [activeTab, setActiveTab] = useState<SidebarTab>('fixtures')
@@ -211,7 +214,10 @@ export function WorkspacePage({
 
   async function openStorey(id: StoreyId) {
     const modelId = webIfcModelIdRef.current
-    if (modelId === null) return
+    if (modelId === null) {
+      setIsSuggestingRisers(false)
+      return
+    }
 
     // Keep the "opening floor" feedback urgent so the loader paints before IFC work begins.
     setSelectedStoreyId(id)
@@ -322,8 +328,13 @@ export function WorkspacePage({
   function handleSuggestRisers() {
     if (!selectedStoreyId || (fixtures.length === 0 && kitchens.length === 0)) return
 
+    setIsSuggestingRisers(true)
+    setDownloadError(null)
     const modelId = webIfcModelIdRef.current
-    if (modelId === null) return
+    if (modelId === null) {
+      setIsSuggestingRisers(false)
+      return
+    }
 
     void getIfcApi()
       .then((api) => {
@@ -347,6 +358,9 @@ export function WorkspacePage({
         const message = err instanceof Error ? err.message : 'Failed to suggest risers from building detections.'
         setDownloadError(message)
         startTransition(() => setActiveTab('risers'))
+      })
+      .finally(() => {
+        setIsSuggestingRisers(false)
       })
   }
 
@@ -559,6 +573,7 @@ export function WorkspacePage({
       isAddingRiser={isAddingRiser}
       onToggleAddRiser={handleToggleAddRiser}
       onSuggestRisers={handleSuggestRisers}
+      isSuggestingRisers={isSuggestingRisers}
       onRemoveRiser={handleRemoveRiser}
       canDownloadIfc={risers.length > 0}
       downloadMode={downloadMode}
@@ -605,10 +620,10 @@ function buildRuntimePlacementStrategy(
       planBounds: {
         // Approximation: derive a toilet-room proxy envelope from fixture location
         // using half of the fixture offset tolerance from the placement profile.
-        minX: fixture.position!.x - TOILET_WET_AREA_HALF_WIDTH_M,
-        maxX: fixture.position!.x + TOILET_WET_AREA_HALF_WIDTH_M,
-        minZ: fixture.position!.z - TOILET_WET_AREA_HALF_WIDTH_M,
-        maxZ: fixture.position!.z + TOILET_WET_AREA_HALF_WIDTH_M,
+        minX: fixture.position!.x - TOILET_ROOM_PROXY_HALF_WIDTH_M,
+        maxX: fixture.position!.x + TOILET_ROOM_PROXY_HALF_WIDTH_M,
+        minZ: fixture.position!.z - TOILET_ROOM_PROXY_HALF_WIDTH_M,
+        maxZ: fixture.position!.z + TOILET_ROOM_PROXY_HALF_WIDTH_M,
       },
     }))
 
@@ -677,13 +692,12 @@ function buildSuggestedRisers(
 
   const kitchenRisers = (detectionAggregation.kitchensByStoreyId[selectedStoreyId] ?? [])
     .filter((kitchen) => kitchen.position)
-    .map((kitchen) => ({
-      id: crypto.randomUUID(),
-      stackId: `kitchen:${selectedStoreyId}:${kitchen.expressId}`,
-      stackLabel: takeNextRiserLabel(nextRiserLabelRef),
-      storeyId: selectedStoreyId,
-      position: kitchen.position!,
-    } satisfies Riser))
+    .flatMap((kitchen) => buildRiserStack(
+      storeys,
+      selectedStoreyId,
+      kitchen.position!,
+      takeNextRiserLabel(nextRiserLabelRef),
+    ).filter((riser) => eligibleStoreyIds.has(riser.storeyId)))
 
   return [...toiletRisers, ...kitchenRisers]
 }

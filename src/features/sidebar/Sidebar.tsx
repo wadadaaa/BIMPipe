@@ -21,6 +21,7 @@ interface SidebarProps {
   isAddingRiser?: boolean
   onToggleAddRiser?: () => void
   onSuggestRisers?: () => void
+  isSuggestingRisers?: boolean
   onRemoveRiser?: (id: RiserId) => void
   canDownloadIfc?: boolean
   downloadMode?: 'full' | null
@@ -64,6 +65,7 @@ export function Sidebar({
   isAddingRiser = false,
   onToggleAddRiser = () => {},
   onSuggestRisers = () => {},
+  isSuggestingRisers = false,
   onRemoveRiser = () => {},
   canDownloadIfc = false,
   downloadMode = null,
@@ -181,6 +183,7 @@ export function Sidebar({
                 isAddingRiser={isAddingRiser}
                 onToggleAddMode={onToggleAddRiser}
                 onSuggestRisers={onSuggestRisers}
+                isSuggestingRisers={isSuggestingRisers}
                 onRemove={onRemoveRiser}
                 canDownloadIfc={canDownloadIfc}
                 downloadMode={downloadMode}
