@@ -16,13 +16,10 @@ import { buildRiserStack, removeRiserStack } from '@/shared/routes/buildRiserSta
 import { classifyFloors } from '@/shared/routes/floorClassification'
 import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE } from '@/shared/routes/riserPlacementProfile'
 import { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
-import { buildStoreyEligibilityById, groupWetAreasVertically, type DetectedWetArea } from '@/domain/groupWetAreasVertically'
-import { decideRiserStrategyPerToiletRoom, RISER_STRATEGY_DECISION, type RiserStrategyDecision } from '@/domain/decideRiserStrategyPerToiletRoom'
+import { groupWetAreasVertically } from '@/domain/groupWetAreasVertically'
+import { RISER_STRATEGY_DECISION, type RiserStrategyDecision } from '@/domain/decideRiserStrategyPerToiletRoom'
 import { buildToiletRoomAreaId } from '@/domain/buildToiletRoomAreaId'
-
-// Geometric proxy for toilet-room footprint around fixture centroids used only for vertical grouping.
-// This is not a placement tolerance; we use an explicit room-scale assumption for overlap checks.
-const TOILET_ROOM_PROXY_HALF_WIDTH_M = 0.6
+import { buildRuntimePlacementStrategy } from '@/shared/routes/buildRuntimePlacementStrategy'
 
 let floorViewerModulePromise: Promise<typeof import('@/viewer/FloorViewer')> | null = null
 let model3DViewerModulePromise: Promise<typeof import('@/viewer/Model3DViewer')> | null = null
@@ -178,7 +175,6 @@ export function WorkspacePage({
       setIsAddingRiser(false)
       setActiveTab('fixtures')
       setDownloadError(null)
-    setSuggestError(null)
       setViewMode('2d')
       setWebIfcModelId(null)
     })
@@ -237,7 +233,6 @@ export function WorkspacePage({
     setIsAddingRiser(false)
     setActiveTab(risersRef.current.length > 0 ? 'risers' : 'fixtures')
     setDownloadError(null)
-    setSuggestError(null)
 
     await waitForNextPaint()
 
@@ -384,7 +379,6 @@ export function WorkspacePage({
 
     setDownloadMode('full')
     setDownloadError(null)
-    setSuggestError(null)
 
     try {
       const api = await getIfcApi()
@@ -617,56 +611,6 @@ export function WorkspacePage({
  * vertical offset from its storey elevation.
  * All entries for the same physical pipe share a `stackId`.
  */
-function buildRuntimePlacementStrategy(
-  storeys: Storey[],
-  detectionAggregation: Awaited<ReturnType<typeof aggregateStoreyDetections>>,
-): { verticalWetRoomGroups: ReturnType<typeof groupWetAreasVertically>, placementDecisions: RiserStrategyDecision[] } {
-  const wetAreas: DetectedWetArea[] = Object.values(detectionAggregation.fixturesByStoreyId)
-    .flat()
-    .filter((fixture) => fixture.kind === 'TOILETPAN' && fixture.position)
-    .map((fixture) => ({
-      areaId: buildToiletRoomAreaId(fixture.storeyId, fixture.expressId),
-      storeyId: fixture.storeyId,
-      planBounds: {
-        // Approximation: derive a toilet-room proxy envelope from fixture location
-        // using half of the fixture offset tolerance from the placement profile.
-        minX: fixture.position!.x - TOILET_ROOM_PROXY_HALF_WIDTH_M,
-        maxX: fixture.position!.x + TOILET_ROOM_PROXY_HALF_WIDTH_M,
-        minZ: fixture.position!.z - TOILET_ROOM_PROXY_HALF_WIDTH_M,
-        maxZ: fixture.position!.z + TOILET_ROOM_PROXY_HALF_WIDTH_M,
-      },
-    }))
-
-  const eligibilityByStoreyId = buildStoreyEligibilityById(
-    detectionAggregation.floors.map((floor) => ({ id: floor.storeyId, eligibleForNewRisers: floor.eligibleForNewRisers })),
-  )
-  const verticalWetRoomGroups = groupWetAreasVertically(wetAreas, storeys, eligibilityByStoreyId)
-  const placementDecisions = decideRiserStrategyPerToiletRoom(verticalWetRoomGroups, { storeys })
-  const decisionByAreaId = new Map(placementDecisions.map((decision) => [decision.areaId, decision]))
-
-  for (const fixture of Object.values(detectionAggregation.fixturesByStoreyId).flat()) {
-    if (fixture.kind !== 'TOILETPAN') continue
-    const areaId = buildToiletRoomAreaId(fixture.storeyId, fixture.expressId)
-    if (decisionByAreaId.has(areaId)) continue
-    placementDecisions.push({
-      decisionId: `runtime-fallback:${areaId}`,
-      groupId: `ungrouped:${areaId}`,
-      areaId,
-      storeyId: fixture.storeyId,
-      decision: RISER_STRATEGY_DECISION.COORDINATION_REQUIRED,
-      reasons: fixture.position
-        ? ['detected toilet room is not represented in vertical wet-room groups; coordination required']
-        : ['detected toilet room is missing position geometry; coordination required'],
-      debug: { confidence: 0, overlapGroupIds: [] },
-    })
-  }
-
-  return {
-    verticalWetRoomGroups,
-    placementDecisions: placementDecisions.sort((a, b) => a.decisionId.localeCompare(b.decisionId)),
-  }
-}
-
 function buildSuggestedRisers(
   selectedStoreyId: StoreyId,
   storeys: Storey[],
