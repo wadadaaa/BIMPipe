@@ -18,6 +18,9 @@ import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE } from '@/shared/routes/riserPlace
 import { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
 import { buildStoreyEligibilityById, groupWetAreasVertically, type DetectedWetArea } from '@/domain/groupWetAreasVertically'
 import { decideRiserStrategyPerToiletRoom, RISER_STRATEGY_DECISION, type RiserStrategyDecision } from '@/domain/decideRiserStrategyPerToiletRoom'
+import { buildToiletRoomAreaId } from '@/domain/buildToiletRoomAreaId'
+
+const TOILET_WET_AREA_HALF_WIDTH_M = Math.max(0.2, (DEFAULT_RISER_PLACEMENT_RULE_PROFILE.fixtureOffsetToleranceMm / 1000) * 0.5)
 
 let floorViewerModulePromise: Promise<typeof import('@/viewer/FloorViewer')> | null = null
 let model3DViewerModulePromise: Promise<typeof import('@/viewer/Model3DViewer')> | null = null
@@ -335,13 +338,15 @@ export function WorkspacePage({
 
         startTransition(() => {
           nextRiserLabelRef.current = 1
-          setRisers(buildSuggestedRisers(selectedStoreyId, result, strategy.placementDecisions, nextRiserLabelRef))
+          setRisers(buildSuggestedRisers(selectedStoreyId, storeys, result, strategy.placementDecisions, nextRiserLabelRef))
           setIsAddingRiser(false)
           setActiveTab('risers')
         })
       })
-      .catch(() => {
-        // Keep suggest flow non-fatal even when full-building detection aggregation fails.
+      .catch((err) => {
+        const message = err instanceof Error ? err.message : 'Failed to suggest risers from building detections.'
+        setDownloadError(message)
+        startTransition(() => setActiveTab('risers'))
       })
   }
 
@@ -595,13 +600,15 @@ function buildRuntimePlacementStrategy(
     .flat()
     .filter((fixture) => fixture.kind === 'TOILETPAN' && fixture.position)
     .map((fixture) => ({
-      areaId: `toilet-room:${fixture.storeyId}:${fixture.expressId}`,
+      areaId: buildToiletRoomAreaId(fixture.storeyId, fixture.expressId),
       storeyId: fixture.storeyId,
       planBounds: {
-        minX: fixture.position!.x - 0.35,
-        maxX: fixture.position!.x + 0.35,
-        minZ: fixture.position!.z - 0.35,
-        maxZ: fixture.position!.z + 0.35,
+        // Approximation: derive a toilet-room proxy envelope from fixture location
+        // using half of the fixture offset tolerance from the placement profile.
+        minX: fixture.position!.x - TOILET_WET_AREA_HALF_WIDTH_M,
+        maxX: fixture.position!.x + TOILET_WET_AREA_HALF_WIDTH_M,
+        minZ: fixture.position!.z - TOILET_WET_AREA_HALF_WIDTH_M,
+        maxZ: fixture.position!.z + TOILET_WET_AREA_HALF_WIDTH_M,
       },
     }))
 
@@ -614,7 +621,7 @@ function buildRuntimePlacementStrategy(
 
   for (const fixture of Object.values(detectionAggregation.fixturesByStoreyId).flat()) {
     if (fixture.kind !== 'TOILETPAN') continue
-    const areaId = `toilet-room:${fixture.storeyId}:${fixture.expressId}`
+    const areaId = buildToiletRoomAreaId(fixture.storeyId, fixture.expressId)
     if (decisionByAreaId.has(areaId)) continue
     placementDecisions.push({
       decisionId: `runtime-fallback:${areaId}`,
@@ -637,29 +644,35 @@ function buildRuntimePlacementStrategy(
 
 function buildSuggestedRisers(
   selectedStoreyId: StoreyId,
+  storeys: Storey[],
   detectionAggregation: Awaited<ReturnType<typeof aggregateStoreyDetections>>,
   placementDecisions: RiserStrategyDecision[],
   nextRiserLabelRef: MutableRefObject<number>,
 ): Riser[] {
+  const eligibleStoreyIds = new Set(
+    detectionAggregation.floors
+      .filter((floor) => floor.eligibleForNewRisers)
+      .map((floor) => floor.storeyId),
+  )
+
   const toiletFixtureByAreaId = new Map<string, (typeof detectionAggregation.fixturesByStoreyId)[number][number]>(
     Object.values(detectionAggregation.fixturesByStoreyId)
       .flat()
       .filter((fixture) => fixture.kind === 'TOILETPAN' && fixture.position)
-      .map((fixture) => [`toilet-room:${fixture.storeyId}:${fixture.expressId}`, fixture] as const),
+      .map((fixture) => [buildToiletRoomAreaId(fixture.storeyId, fixture.expressId), fixture] as const),
   )
 
   const toiletRisers = placementDecisions
-    .filter((decision) => decision.decision === RISER_STRATEGY_DECISION.RISER_PLACED && decision.storeyId === selectedStoreyId)
+    .filter((decision) => decision.decision === RISER_STRATEGY_DECISION.RISER_PLACED)
     .flatMap((decision) => {
       const fixture = toiletFixtureByAreaId.get(decision.areaId)
       if (!fixture?.position) return []
-      return [{
-        id: crypto.randomUUID(),
-        stackId: `stack:${decision.groupId}`,
-        stackLabel: takeNextRiserLabel(nextRiserLabelRef),
-        storeyId: fixture.storeyId,
-        position: fixture.position,
-      } satisfies Riser]
+      return buildRiserStack(
+        storeys,
+        fixture.storeyId,
+        fixture.position,
+        takeNextRiserLabel(nextRiserLabelRef),
+      ).filter((riser) => eligibleStoreyIds.has(riser.storeyId))
     })
 
   const kitchenRisers = (detectionAggregation.kitchensByStoreyId[selectedStoreyId] ?? [])

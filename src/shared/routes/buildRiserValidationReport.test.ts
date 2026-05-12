@@ -167,7 +167,7 @@ describe('buildRiserValidationReport', () => {
         toiletRoomId: 'toilet-room:20:2002',
         storeyId: 20,
         groupId: null,
-        reasons: ['detected toilet room has no placement decision'],
+        reasons: ['toilet room has no position data; excluded from placement strategy'],
       },
     ])
   })

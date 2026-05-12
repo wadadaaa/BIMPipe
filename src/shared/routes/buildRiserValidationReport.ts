@@ -2,6 +2,7 @@ import { buildRiserCoordinationIssues, type RiserCoordinationIssue } from '@/dom
 import { RISER_STRATEGY_DECISION, type RiserStrategyDecision } from '@/domain/decideRiserStrategyPerToiletRoom'
 import type { VerticalWetGroup } from '@/domain/groupWetAreasVertically'
 import type { Riser, Storey } from '@/domain/types'
+import { buildToiletRoomAreaId } from '@/domain/buildToiletRoomAreaId'
 import { classifyFloors, type ClassifiedFloor } from './floorClassification'
 import type { StoreyDetectionAggregation } from '@/shared/ifc/aggregateStoreyDetections'
 
@@ -42,6 +43,8 @@ export function buildRiserValidationReport(input: BuildRiserValidationReportInpu
   const skippedFloors = processedFloors.filter((floor) => ['basement', 'roof', 'penthouse'].includes(floor.floorClass))
   const penthouseExceptionFloors = processedFloors.filter((floor) => floor.floorClass === 'penthouse')
 
+  const sourceFixtureByToiletRoomId = new Map<string, { hasPosition: boolean }>()
+
   const detectedFixtures = input.detectionAggregation
     ? Object.values(input.detectionAggregation.fixturesByStoreyId)
       .flat()
@@ -54,10 +57,22 @@ export function buildRiserValidationReport(input: BuildRiserValidationReportInpu
       .sort((a, b) => a.storeyId - b.storeyId || a.expressId - b.expressId)
     : []
 
+  for (const fixture of detectedFixtures) {
+    if (fixture.kind !== 'TOILETPAN') continue
+    sourceFixtureByToiletRoomId.set(buildToiletRoomAreaId(fixture.storeyId, fixture.expressId), { hasPosition: false })
+  }
+
+  if (input.detectionAggregation) {
+    for (const fixture of Object.values(input.detectionAggregation.fixturesByStoreyId).flat()) {
+      if (fixture.kind !== 'TOILETPAN') continue
+      sourceFixtureByToiletRoomId.set(buildToiletRoomAreaId(fixture.storeyId, fixture.expressId), { hasPosition: fixture.position !== null })
+    }
+  }
+
   const detectedToiletRooms = detectedFixtures
     .filter((fixture) => fixture.kind === 'TOILETPAN')
     .map((fixture) => ({
-      toiletRoomId: `toilet-room:${fixture.storeyId}:${fixture.expressId}`,
+      toiletRoomId: buildToiletRoomAreaId(fixture.storeyId, fixture.expressId),
       storeyId: fixture.storeyId,
       sourceFixtureExpressId: fixture.expressId,
       sourceFixtureName: fixture.name,
@@ -95,7 +110,9 @@ export function buildRiserValidationReport(input: BuildRiserValidationReportInpu
         toiletRoomId: toiletRoom.toiletRoomId,
         storeyId: toiletRoom.storeyId,
         groupId: null,
-        reasons: ['detected toilet room has no placement decision'],
+        reasons: [sourceFixtureByToiletRoomId.get(toiletRoom.toiletRoomId)?.hasPosition
+          ? 'detected toilet room has no placement decision'
+          : 'toilet room has no position data; excluded from placement strategy'],
       })
       continue
     }
