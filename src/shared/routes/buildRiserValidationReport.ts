@@ -84,14 +84,28 @@ export function buildRiserValidationReport(input: BuildRiserValidationReportInpu
 
   const coordinationIssues: RiserCoordinationIssue[] = buildRiserCoordinationIssues(placementDecisions)
 
-  const unresolvedToiletRooms = placementDecisions
-    .filter((decision) => decision.decision === RISER_STRATEGY_DECISION.COORDINATION_REQUIRED)
-    .map((decision) => ({
-      toiletRoomId: decision.areaId,
-      storeyId: decision.storeyId,
+  const decisionByToiletRoomId = new Map(placementDecisions.map((decision) => [decision.areaId, decision]))
+
+  const unresolvedToiletRooms: Array<{ toiletRoomId: string, storeyId: number, groupId: string | null, reasons: string[] }> = []
+  for (const toiletRoom of detectedToiletRooms) {
+    const decision = decisionByToiletRoomId.get(toiletRoom.toiletRoomId)
+    if (!decision) {
+      unresolvedToiletRooms.push({
+        toiletRoomId: toiletRoom.toiletRoomId,
+        storeyId: toiletRoom.storeyId,
+        groupId: null,
+        reasons: ['detected toilet room has no placement decision'],
+      })
+      continue
+    }
+    if (decision.decision !== RISER_STRATEGY_DECISION.COORDINATION_REQUIRED) continue
+    unresolvedToiletRooms.push({
+      toiletRoomId: toiletRoom.toiletRoomId,
+      storeyId: toiletRoom.storeyId,
       groupId: decision.groupId,
       reasons: decision.reasons,
-    }))
+    })
+  }
 
   const newlyAddedRisers = [...input.risers]
     .sort((a, b) => a.stackLabel.localeCompare(b.stackLabel) || a.storeyId - b.storeyId || a.id.localeCompare(b.id))

@@ -107,6 +107,50 @@ describe('buildRiserValidationReport', () => {
     expect(report.coordinationIssues[0]?.decisionId).toBe('d-4')
   })
 
+
+  it('marks coordination-required and uncovered detected toilet rooms as unresolved', () => {
+    const report = buildRiserValidationReport({
+      exportRunId: 'run-1',
+      timestamp: '2026-05-12T00:00:00.000Z',
+      sourceIfcName: 'a.ifc',
+      storeys: STOREYS,
+      risers: RISERS,
+      detectionAggregation: {
+        floors: [],
+        kitchensByStoreyId: {},
+        fixturesByStoreyId: {
+          20: [
+            { expressId: 2001, name: 'WC-A', kind: 'TOILETPAN', storeyId: 20, position: null },
+            { expressId: 2002, name: 'WC-B', kind: 'TOILETPAN', storeyId: 20, position: null },
+          ],
+        },
+      },
+      placementDecisions: [
+        decision({
+          decisionId: 'd-7',
+          areaId: 'toilet-room:20:2001',
+          decision: RISER_STRATEGY_DECISION.COORDINATION_REQUIRED,
+          reasons: ['coordination required'],
+        }),
+      ],
+    })
+
+    expect(report.unresolvedToiletRooms).toEqual([
+      {
+        toiletRoomId: 'toilet-room:20:2001',
+        storeyId: 20,
+        groupId: 'g-1',
+        reasons: ['coordination required'],
+      },
+      {
+        toiletRoomId: 'toilet-room:20:2002',
+        storeyId: 20,
+        groupId: null,
+        reasons: ['detected toilet room has no placement decision'],
+      },
+    ])
+  })
+
   it('emits missing detection aggregation warning without blocking report', () => {
     const report = buildRiserValidationReport({
       exportRunId: 'run-1',
