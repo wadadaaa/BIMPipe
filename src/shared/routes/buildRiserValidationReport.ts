@@ -40,6 +40,7 @@ export function buildRiserValidationReport(input: BuildRiserValidationReportInpu
     .sort((a, b) => a.elevation - b.elevation || a.storeyId - b.storeyId)
 
   const skippedFloors = processedFloors.filter((floor) => ['basement', 'roof', 'penthouse'].includes(floor.floorClass))
+  const penthouseExceptionFloors = processedFloors.filter((floor) => floor.floorClass === 'penthouse')
 
   const detectedFixtures = input.detectionAggregation
     ? Object.values(input.detectionAggregation.fixturesByStoreyId)
@@ -132,6 +133,7 @@ export function buildRiserValidationReport(input: BuildRiserValidationReportInpu
     sourceIfcName: input.sourceIfcName,
     processedFloors,
     skippedFloors,
+    penthouseExceptionFloors,
     floorClassifications,
     detectedToiletRooms,
     detectedFixtures,
@@ -146,6 +148,7 @@ export function buildRiserValidationReport(input: BuildRiserValidationReportInpu
     summary: {
       processedFloorCount: processedFloors.length,
       skippedFloorCount: skippedFloors.length,
+      penthouseExceptionFloorCount: penthouseExceptionFloors.length,
       detectedToiletRoomCount: detectedToiletRooms.length,
       detectedFixtureCount: detectedFixtures.length,
       verticalWetRoomGroupCount: verticalWetRoomGroups.length,

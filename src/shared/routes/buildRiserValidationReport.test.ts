@@ -40,6 +40,27 @@ describe('buildRiserValidationReport', () => {
 
     expect(report.processedFloors.map((f) => f.storeyId)).toEqual([10, 20, 30, 40])
     expect(report.skippedFloors.map((f) => f.storeyId)).toEqual([10, 30, 40])
+    expect(report.penthouseExceptionFloors.map((f) => f.storeyId)).toEqual([30])
+  })
+
+
+  it('exposes penthouse exception floors explicitly', () => {
+    const report = buildRiserValidationReport({
+      exportRunId: 'run-1',
+      timestamp: '2026-05-12T00:00:00.000Z',
+      sourceIfcName: 'a.ifc',
+      storeys: STOREYS,
+      floorClassifications: [
+        { storeyId: 10, class: 'basement', confidence: 1, reasons: [] },
+        { storeyId: 20, class: 'standard', confidence: 1, reasons: [] },
+        { storeyId: 30, class: 'penthouse', confidence: 1, reasons: [] },
+        { storeyId: 40, class: 'roof', confidence: 1, reasons: [] },
+      ],
+      risers: RISERS,
+    })
+
+    expect(report.penthouseExceptionFloors.map((f) => f.storeyId)).toEqual([30])
+    expect(report.summary.penthouseExceptionFloorCount).toBe(1)
   })
 
   it('includes detected toilet fixtures and toilet-room summaries', () => {

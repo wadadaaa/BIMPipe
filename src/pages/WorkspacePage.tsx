@@ -610,8 +610,29 @@ function buildRuntimePlacementStrategy(
   )
   const verticalWetRoomGroups = groupWetAreasVertically(wetAreas, storeys, eligibilityByStoreyId)
   const placementDecisions = decideRiserStrategyPerToiletRoom(verticalWetRoomGroups, { storeys })
+  const decisionByAreaId = new Map(placementDecisions.map((decision) => [decision.areaId, decision]))
 
-  return { verticalWetRoomGroups, placementDecisions }
+  for (const fixture of Object.values(detectionAggregation.fixturesByStoreyId).flat()) {
+    if (fixture.kind !== 'TOILETPAN') continue
+    const areaId = `toilet-room:${fixture.storeyId}:${fixture.expressId}`
+    if (decisionByAreaId.has(areaId)) continue
+    placementDecisions.push({
+      decisionId: `runtime-fallback:${areaId}`,
+      groupId: `ungrouped:${areaId}`,
+      areaId,
+      storeyId: fixture.storeyId,
+      decision: RISER_STRATEGY_DECISION.COORDINATION_REQUIRED,
+      reasons: fixture.position
+        ? ['detected toilet room is not represented in vertical wet-room groups; coordination required']
+        : ['detected toilet room is missing position geometry; coordination required'],
+      debug: { confidence: 0, overlapGroupIds: [] },
+    })
+  }
+
+  return {
+    verticalWetRoomGroups,
+    placementDecisions: placementDecisions.sort((a, b) => a.decisionId.localeCompare(b.decisionId)),
+  }
 }
 
 function buildSuggestedRisers(
