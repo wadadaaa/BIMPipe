@@ -651,16 +651,32 @@ function buildSuggestedRisers(
   const runtimeStrategy = buildRuntimePlacementStrategy(storeys, allToiletFixtures, floors)
 
   const fixtureByAreaId = new Map(allToiletFixtures.map((fixture) => [`fixture:${fixture.expressId}`, fixture]))
-  const toiletPositions = runtimeStrategy.placementDecisions
+  const groupById = new Map(runtimeStrategy.verticalGroups.map((group) => [group.groupId, group]))
+
+  const toiletRisers = runtimeStrategy.placementDecisions
     .filter((decision) => decision.decision === RISER_STRATEGY_DECISION.RISER_PLACED)
-    .map((decision) => fixtureByAreaId.get(decision.areaId)?.position)
-    .filter((position): position is NonNullable<Fixture['position']> => position !== null && position !== undefined)
+    .flatMap((decision) => {
+      const fixture = fixtureByAreaId.get(decision.areaId)
+      if (!fixture || fixture.position === null) return []
+
+      const coveredStoreyIds = new Set(
+        (groupById.get(decision.groupId)?.members ?? [])
+          .map((member) => member.storeyId)
+          .filter((storeyId) => eligibleStoreyIds.has(storeyId)),
+      )
+      if (coveredStoreyIds.size === 0) return []
+
+      return buildRiserStack(
+        storeys,
+        decision.storeyId,
+        fixture.position,
+        takeNextRiserLabel(nextRiserLabelRef),
+      ).filter((riser) => coveredStoreyIds.has(riser.storeyId))
+    })
 
   // Kitchens remain sourced from the currently selected floor in this BIM-40 scope.
   const kitchenPositions = suggestRiserPositions([], kitchens, floorPlanBounds, ruleProfile)
-  const allPositions = [...toiletPositions, ...kitchenPositions]
-
-  const suggestedRisers = allPositions.flatMap((position) =>
+  const kitchenRisers = kitchenPositions.flatMap((position) =>
     buildRiserStack(
       storeys,
       sourceStoreyId,
@@ -668,6 +684,8 @@ function buildSuggestedRisers(
       takeNextRiserLabel(nextRiserLabelRef),
     ).filter((riser) => eligibleStoreyIds.has(riser.storeyId)),
   )
+
+  const suggestedRisers = [...toiletRisers, ...kitchenRisers]
 
   return { suggestedRisers, runtimeStrategy }
 }
