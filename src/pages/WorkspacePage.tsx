@@ -172,10 +172,9 @@ export function WorkspacePage({
       setIsAddingRiser(false)
       setActiveTab('fixtures')
       setDownloadError(null)
-    setSuggestError(null)
+      setSuggestError(null)
       setViewMode('2d')
       setWebIfcModelId(null)
-      setSuggestError(null)
       setIsSuggestingRisers(false)
       setRuntimePlacementStrategy(null)
     })
@@ -327,7 +326,7 @@ export function WorkspacePage({
   }
 
   async function handleSuggestRisers() {
-    if (!selectedStoreyId || (fixtures.length === 0 && kitchens.length === 0)) return
+    if (!selectedStoreyId) return
 
     const modelId = webIfcModelIdRef.current
     if (modelId === null) {
@@ -349,11 +348,20 @@ export function WorkspacePage({
       detectionDebugRef.current = aggregation
       nextRiserLabelRef.current = 1
       const latestSelectedStoreyId = selectedStoreyIdRef.current ?? selectedStoreyId
+      const allToiletFixtures = getToiletFixturesFromAggregation(aggregation)
+      const selectedFloorKitchens = aggregation.kitchensByStoreyId[latestSelectedStoreyId] ?? []
+
+      if (allToiletFixtures.length === 0 && selectedFloorKitchens.length === 0) {
+        setSuggestError('No toilets or kitchens were detected for riser suggestion.')
+        startTransition(() => setActiveTab('risers'))
+        return
+      }
+
       const { suggestedRisers, runtimeStrategy } = buildSuggestedRisers(
         storeys,
         latestSelectedStoreyId,
         aggregation,
-        kitchens,
+        selectedFloorKitchens,
         floorMeshes,
         nextRiserLabelRef,
       )
