@@ -13,7 +13,7 @@ import { aggregateStoreyDetections } from '@/shared/ifc/aggregateStoreyDetection
 import { parseStoreys } from '@/shared/ifc/parseStoreys'
 import type { Fixture, KitchenArea, Riser, RiserId, Storey, StoreyId, SidebarTab } from '@/domain/types'
 import { buildRiserStack, removeRiserStack } from '@/shared/routes/buildRiserStacks'
-import { classifyFloors, getEligibleStoreyIdsForAutoRisers } from '@/shared/routes/floorClassification'
+import { classifyFloors } from '@/shared/routes/floorClassification'
 import { suggestRiserPositions } from '@/shared/routes/suggestRisers'
 import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE } from '@/shared/routes/riserPlacementProfile'
 import { buildRuntimePlacementStrategy, type RuntimePlacementStrategy } from '@/shared/routes/buildRuntimePlacementStrategy'
@@ -172,6 +172,7 @@ export function WorkspacePage({
       setIsAddingRiser(false)
       setActiveTab('fixtures')
       setDownloadError(null)
+    setSuggestError(null)
       setViewMode('2d')
       setWebIfcModelId(null)
       setSuggestError(null)
@@ -229,7 +230,6 @@ export function WorkspacePage({
     setFixtures([])
     setKitchens([])
     setIsDetectingFixtures(true)
-    setRuntimePlacementStrategy(null)
     // Risers are NOT cleared — they span all floors and persist across selection.
     setIsAddingRiser(false)
     setActiveTab(risersRef.current.length > 0 ? 'risers' : 'fixtures')
@@ -338,6 +338,7 @@ export function WorkspacePage({
 
     setIsSuggestingRisers(true)
     setSuggestError(null)
+    setRuntimePlacementStrategy(null)
     setDownloadError(null)
 
     try {
@@ -351,7 +352,6 @@ export function WorkspacePage({
       const { suggestedRisers, runtimeStrategy } = buildSuggestedRisers(
         storeys,
         latestSelectedStoreyId,
-        fixtures,
         aggregation,
         kitchens,
         floorMeshes,
@@ -367,6 +367,7 @@ export function WorkspacePage({
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to suggest risers from building detections.'
       setSuggestError(message)
+      setRuntimePlacementStrategy(null)
       startTransition(() => setActiveTab('risers'))
     } finally {
       setIsSuggestingRisers(false)
@@ -620,8 +621,7 @@ export function WorkspacePage({
 function buildSuggestedRisers(
   storeys: Storey[],
   sourceStoreyId: StoreyId,
-  fixtures: Fixture[],
-  aggregation: Awaited<ReturnType<typeof aggregateStoreyDetections>>, 
+  aggregation: Awaited<ReturnType<typeof aggregateStoreyDetections>>,
   kitchens: KitchenArea[],
   floorMeshes: FloorMeshes | null,
   nextRiserLabelRef: MutableRefObject<number>,
@@ -636,12 +636,26 @@ function buildSuggestedRisers(
       }
     : null
 
-  const positions = suggestRiserPositions(fixtures, kitchens, floorPlanBounds, ruleProfile)
-  const eligibleStoreyIds = new Set(getEligibleStoreyIdsForAutoRisers(storeys, ruleProfile))
-  const floors = storeys.map((storey) => ({ id: storey.id, eligibleForNewRisers: eligibleStoreyIds.has(storey.id) }))
-  const runtimeStrategy = buildRuntimePlacementStrategy(storeys, flattenToiletFixturesFromAggregation(aggregation), floors)
+  const allToiletFixtures = getToiletFixturesFromAggregation(aggregation)
+  const eligibleStoreyIds = new Set(
+    aggregation.floors
+      .filter((floor) => floor.eligibleForNewRisers)
+      .map((floor) => floor.storeyId),
+  )
+  const floors = aggregation.floors.map((floor) => ({ id: floor.storeyId, eligibleForNewRisers: floor.eligibleForNewRisers }))
+  const runtimeStrategy = buildRuntimePlacementStrategy(storeys, allToiletFixtures, floors)
 
-  const suggestedRisers = positions.flatMap((position) =>
+  const fixtureByAreaId = new Map(allToiletFixtures.map((fixture) => [`fixture:${fixture.expressId}`, fixture]))
+  const toiletPositions = runtimeStrategy.placementDecisions
+    .filter((decision) => decision.decision === 'RISER_PLACED')
+    .map((decision) => fixtureByAreaId.get(decision.areaId)?.position)
+    .filter((position): position is NonNullable<Fixture['position']> => position !== null && position !== undefined)
+
+  // Kitchens remain sourced from the currently selected floor in this BIM-40 scope.
+  const kitchenPositions = suggestRiserPositions([], kitchens, floorPlanBounds, ruleProfile)
+  const allPositions = [...toiletPositions, ...kitchenPositions]
+
+  const suggestedRisers = allPositions.flatMap((position) =>
     buildRiserStack(
       storeys,
       sourceStoreyId,
@@ -653,11 +667,12 @@ function buildSuggestedRisers(
   return { suggestedRisers, runtimeStrategy }
 }
 
-
-function flattenToiletFixturesFromAggregation(
+function getToiletFixturesFromAggregation(
   aggregation: Awaited<ReturnType<typeof aggregateStoreyDetections>>,
 ): Fixture[] {
-  return Object.values(aggregation.fixturesByStoreyId).flat()
+  return Object.values(aggregation.fixturesByStoreyId)
+    .flat()
+    .filter((fixture) => fixture.kind === 'TOILETPAN')
 }
 
 function takeNextRiserLabel(nextRiserLabelRef: MutableRefObject<number>): string {

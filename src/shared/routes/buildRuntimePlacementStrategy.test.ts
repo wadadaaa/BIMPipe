@@ -37,7 +37,8 @@ describe('buildRuntimePlacementStrategy', () => {
       [fixture(21, 2, { x: 0, y: 0, z: 0 }), fixture(22, 3, { x: 0.05, y: 0, z: 0.05 })],
       [{ id: 2, eligibleForNewRisers: true }, { id: 3, eligibleForNewRisers: true }],
     )
-    expect(out.placementDecisions.some((d) => d.decision === RISER_STRATEGY_DECISION.RISER_PLACED)).toBe(true)
+    const placed = out.placementDecisions.filter((d) => d.decision === RISER_STRATEGY_DECISION.RISER_PLACED)
+    expect(placed).toHaveLength(1)
   })
 
   it('keeps non-eligible floors excluded via eligibility input', () => {
