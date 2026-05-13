@@ -175,6 +175,7 @@ export function WorkspacePage({
       setViewMode('2d')
       setWebIfcModelId(null)
       setSuggestError(null)
+      setIsSuggestingRisers(false)
       setRuntimePlacementStrategy(null)
     })
 
