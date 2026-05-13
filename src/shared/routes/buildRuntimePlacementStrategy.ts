@@ -16,7 +16,6 @@ export function buildRuntimePlacementStrategy(
   floors: StoreyEligibilitySummary[],
 ): RuntimePlacementStrategy {
   const wetAreas = fixtures
-    .filter((fixture) => fixture.kind === 'TOILETPAN')
     .map((fixture) => {
       if (!fixture.position) {
         return null
@@ -42,7 +41,7 @@ export function buildRuntimePlacementStrategy(
   const placementDecisions = decideRiserStrategyPerToiletRoom(verticalGroups, { storeys })
 
   const fallbackDecisions = fixtures
-    .filter((fixture) => fixture.kind === 'TOILETPAN' && fixture.position === null)
+    .filter((fixture) => fixture.position === null)
     .map((fixture): RiserStrategyDecision => ({
       decisionId: `runtime:fallback:${fixture.expressId}`,
       groupId: `runtime:fallback-group:${fixture.expressId}`,

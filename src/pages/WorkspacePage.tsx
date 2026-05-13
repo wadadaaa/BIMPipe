@@ -95,7 +95,6 @@ export function WorkspacePage({
 
   // --- floor extraction ---
   const [selectedStoreyId, setSelectedStoreyId] = useState<StoreyId | null>(null)
-  const selectedStoreyIdRef = useRef<StoreyId | null>(null)
   const [floorMeshes, setFloorMeshes] = useState<FloorMeshes | null>(null)
   const [isExtractingGeometry, setIsExtractingGeometry] = useState(false)
   const [geometryError, setGeometryError] = useState<string | null>(null)
@@ -136,9 +135,6 @@ export function WorkspacePage({
     risersRef.current = risers
   }, [risers])
 
-  useEffect(() => {
-    selectedStoreyIdRef.current = selectedStoreyId
-  }, [selectedStoreyId])
 
   useEffect(() => {
     const normalized = ensureRiserStackLabels(risers, nextRiserLabelRef)
@@ -347,7 +343,7 @@ export function WorkspacePage({
 
       detectionDebugRef.current = aggregation
       nextRiserLabelRef.current = 1
-      const latestSelectedStoreyId = selectedStoreyIdRef.current ?? selectedStoreyId
+      const latestSelectedStoreyId = selectedStoreyId
       const allToiletFixtures = getToiletFixturesFromAggregation(aggregation)
       const selectedFloorKitchens = aggregation.kitchensByStoreyId[latestSelectedStoreyId] ?? []
 
@@ -678,9 +674,7 @@ function buildSuggestedRisers(
 function getToiletFixturesFromAggregation(
   aggregation: Awaited<ReturnType<typeof aggregateStoreyDetections>>,
 ): Fixture[] {
-  return Object.values(aggregation.fixturesByStoreyId)
-    .flat()
-    .filter((fixture) => fixture.kind === 'TOILETPAN')
+  return Object.values(aggregation.fixturesByStoreyId).flat()
 }
 
 function takeNextRiserLabel(nextRiserLabelRef: MutableRefObject<number>): string {

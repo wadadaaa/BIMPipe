@@ -241,7 +241,7 @@ describe('decideRiserStrategyPerToiletRoom BIM-11 exception coverage', () => {
       decision: RISER_STRATEGY_DECISION.COVERED_BY_EXCEPTION_RULE,
       coveredByExceptionRuleId: 'existing-shaft-through-primary-room',
     })
-    expect(upper?.reasons[0]).toBe('primary room is already served by an existing shaft')
+    expect(upper?.reasons[0]).toBe('inherits exception coverage from primary member: primary room is already served by an existing shaft')
   })
 
   it('preserves inherited exception coverage precedence over stronger overlapping group coverage', () => {
@@ -309,6 +309,6 @@ describe('decideRiserStrategyPerToiletRoom BIM-11 exception coverage', () => {
       decision: RISER_STRATEGY_DECISION.COVERED_BY_EXCEPTION_RULE,
       coveredByExceptionRuleId: 'existing-shaft-serves-penthouse-stack',
     })
-    expect(penthouse?.reasons[0]).toBe('existing shaft continues through the penthouse stack')
+    expect(penthouse?.reasons[0]).toBe('inherits exception coverage from primary member: existing shaft continues through the penthouse stack')
   })
 })
