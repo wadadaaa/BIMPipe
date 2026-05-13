@@ -675,7 +675,9 @@ function buildSuggestedRisers(
 function getToiletFixturesFromAggregation(
   aggregation: Awaited<ReturnType<typeof aggregateStoreyDetections>>,
 ): Fixture[] {
-  return Object.values(aggregation.fixturesByStoreyId).flat()
+  return Object.values(aggregation.fixturesByStoreyId)
+    .flat()
+    .filter((fixture) => fixture.kind === 'TOILETPAN')
 }
 
 function takeNextRiserLabel(nextRiserLabelRef: MutableRefObject<number>): string {
