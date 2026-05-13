@@ -11,6 +11,7 @@ import { getIfcApi } from '@/shared/ifc/ifcApi'
 import type { FloorMeshes } from '@/shared/ifc/extractFloorMeshes'
 import { aggregateStoreyDetections } from '@/shared/ifc/aggregateStoreyDetections'
 import { parseStoreys } from '@/shared/ifc/parseStoreys'
+import { RISER_STRATEGY_DECISION } from '@/domain/decideRiserStrategyPerToiletRoom'
 import type { Fixture, KitchenArea, Riser, RiserId, Storey, StoreyId, SidebarTab } from '@/domain/types'
 import { buildRiserStack, removeRiserStack } from '@/shared/routes/buildRiserStacks'
 import { classifyFloors } from '@/shared/routes/floorClassification'
@@ -651,7 +652,7 @@ function buildSuggestedRisers(
 
   const fixtureByAreaId = new Map(allToiletFixtures.map((fixture) => [`fixture:${fixture.expressId}`, fixture]))
   const toiletPositions = runtimeStrategy.placementDecisions
-    .filter((decision) => decision.decision === 'RISER_PLACED')
+    .filter((decision) => decision.decision === RISER_STRATEGY_DECISION.RISER_PLACED)
     .map((decision) => fixtureByAreaId.get(decision.areaId)?.position)
     .filter((position): position is NonNullable<Fixture['position']> => position !== null && position !== undefined)
 
