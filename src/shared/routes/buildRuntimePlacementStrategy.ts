@@ -17,7 +17,7 @@ export function buildRuntimePlacementStrategy(
 ): RuntimePlacementStrategy {
   const wetAreas = fixtures
     .map((fixture) => {
-      if (!fixture.position) {
+      if (fixture.position === null) {
         return null
       }
 

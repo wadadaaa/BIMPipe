@@ -345,7 +345,7 @@ export function WorkspacePage({
       detectionDebugRef.current = aggregation
       nextRiserLabelRef.current = 1
       const latestSelectedStoreyId = selectedStoreyId
-      const allToiletFixtures = getToiletFixturesFromAggregation(aggregation)
+      const allToiletFixtures = getAggregatedToiletFixtures(aggregation)
       const selectedFloorKitchens = aggregation.kitchensByStoreyId[latestSelectedStoreyId] ?? []
 
       if (allToiletFixtures.length === 0 && selectedFloorKitchens.length === 0) {
@@ -641,7 +641,7 @@ function buildSuggestedRisers(
       }
     : null
 
-  const allToiletFixtures = getToiletFixturesFromAggregation(aggregation)
+  const allToiletFixtures = getAggregatedToiletFixtures(aggregation)
   const eligibleStoreyIds = new Set(
     aggregation.floors
       .filter((floor) => floor.eligibleForNewRisers)
@@ -672,12 +672,10 @@ function buildSuggestedRisers(
   return { suggestedRisers, runtimeStrategy }
 }
 
-function getToiletFixturesFromAggregation(
+function getAggregatedToiletFixtures(
   aggregation: Awaited<ReturnType<typeof aggregateStoreyDetections>>,
 ): Fixture[] {
-  return Object.values(aggregation.fixturesByStoreyId)
-    .flat()
-    .filter((fixture) => fixture.kind === 'TOILETPAN')
+  return Object.values(aggregation.fixturesByStoreyId).flat()
 }
 
 function takeNextRiserLabel(nextRiserLabelRef: MutableRefObject<number>): string {
