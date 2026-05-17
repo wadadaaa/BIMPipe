@@ -27,9 +27,15 @@ __MACOSX/
 *.sln
 *.sw?
 
-# Local AI agent configs/state
-.claude/agents/
+# Shared Claude project config should be committed:
+# - .claude/agents/*.md
+# - .claude/settings.json
+
+# Local Claude config/state should not be committed
 .claude/settings.local.json
+.claude/agent-memory/
+
+# Local AI tool configs/state
 .codex/
 .opencode/
 
