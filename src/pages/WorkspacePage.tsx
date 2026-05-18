@@ -117,6 +117,8 @@ export function WorkspacePage({
   const [downloadError, setDownloadError] = useState<string | null>(null)
   const [suggestError, setSuggestError] = useState<string | null>(null)
   const [isSuggestingRisers, setIsSuggestingRisers] = useState(false)
+  // Full-building snapshot from the last successful Suggest run.
+  // Intentionally preserved across floor switches; reset on model reload or suggest failure.
   const [runtimePlacementStrategy, setRuntimePlacementStrategy] = useState<RuntimePlacementStrategy | null>(null)
 
   // --- sidebar ---
@@ -358,6 +360,7 @@ export function WorkspacePage({
         storeys,
         latestSelectedStoreyId,
         aggregation,
+        allToiletFixtures,
         selectedFloorKitchens,
         floorMeshes,
         nextRiserLabelRef,
@@ -627,6 +630,7 @@ function buildSuggestedRisers(
   storeys: Storey[],
   sourceStoreyId: StoreyId,
   aggregation: Awaited<ReturnType<typeof aggregateStoreyDetections>>,
+  allToiletFixtures: Fixture[],
   kitchens: KitchenArea[],
   floorMeshes: FloorMeshes | null,
   nextRiserLabelRef: MutableRefObject<number>,
@@ -641,7 +645,6 @@ function buildSuggestedRisers(
       }
     : null
 
-  const allToiletFixtures = getAggregatedToiletFixtures(aggregation)
   const eligibleStoreyIds = new Set(
     aggregation.floors
       .filter((floor) => floor.eligibleForNewRisers)
