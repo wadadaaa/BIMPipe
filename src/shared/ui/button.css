@@ -4,14 +4,11 @@
   justify-content: center;
   border-radius: var(--radius-btn, 10px);
   border: 1px solid transparent;
-  font-family: inherit;
   font-weight: inherit;
   cursor: pointer;
+  font-family: inherit;
   transition: background 120ms, border-color 120ms, color 120ms, transform 120ms;
 }
-
-.bp-btn:disabled {
-  opacity: 0.6;
   cursor: not-allowed;
 }
 
