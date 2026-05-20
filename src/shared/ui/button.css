@@ -1,0 +1,48 @@
+.bp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms, color 120ms, transform 120ms;
+}
+
+.bp-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.bp-btn:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.bp-btn--sm { height: 30px; padding: 0 10px; font-size: 12px; }
+.bp-btn--md { height: 36px; padding: 0 12px; font-size: 13px; }
+.bp-btn--icon { width: 32px; height: 32px; padding: 0; }
+
+.bp-btn--default {
+  background: var(--accent);
+  color: #fff;
+}
+.bp-btn--default:hover { filter: brightness(0.95); transform: translateY(-1px); }
+
+.bp-btn--outline {
+  border-color: var(--border);
+  background: var(--surface-soft);
+  color: var(--text-h);
+}
+.bp-btn--outline:hover {
+  background: var(--surface-strong);
+  border-color: var(--accent-border);
+  color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.bp-btn--ghost {
+  background: transparent;
+  color: var(--text);
+}
+.bp-btn--ghost:hover { background: var(--hover-bg); }

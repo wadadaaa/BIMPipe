@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import type { ThemeMode } from '@/app/App'
 import { BrandMark } from '@/shared/BrandMark'
+import { Button } from '@/shared/ui/button'
 import './TopBar.css'
 
 interface TopBarProps {
@@ -55,15 +56,17 @@ export function TopBar({
             <span className="topbar__file-name">{modelFileName}</span>
           </span>
         )}
-        <button
+        <Button
           className="topbar__theme-toggle"
+          variant="outline"
+          size="icon"
           type="button"
           onClick={onToggleTheme}
           aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
           title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
         >
           <ThemeToggleIcon theme={theme} />
-        </button>
+        </Button>
       </div>
     </header>
   )
