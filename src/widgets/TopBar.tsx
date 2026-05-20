@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import type { ThemeMode } from '@/app/App'
 import { BrandMark } from '@/shared/BrandMark'
-import { Button } from '@/shared/ui/button'
+import { Button } from '@/shared/ui'
 import './TopBar.css'
 
 interface TopBarProps {
