@@ -1,0 +1,87 @@
+.bp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-h);
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: inherit;
+  white-space: nowrap;
+  transition:
+    background 120ms,
+    border-color 120ms,
+    color 120ms,
+    box-shadow 120ms,
+    transform 120ms;
+}
+
+.bp-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.bp-btn:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.bp-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.bp-btn--default {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.bp-btn--default:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+.bp-btn--outline {
+  background: var(--surface-soft);
+  border-color: var(--border);
+  color: var(--text-h);
+}
+
+.bp-btn--outline:hover:not(:disabled) {
+  background: var(--surface-strong);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.bp-btn--ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-soft);
+}
+
+.bp-btn--ghost:hover:not(:disabled) {
+  background: var(--surface-soft);
+  color: var(--text-h);
+}
+
+.bp-btn--sm {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.bp-btn--md {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.bp-btn--icon {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+}
