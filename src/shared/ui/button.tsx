@@ -22,14 +22,10 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
   size?: ButtonSize
 }
 
-export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant = 'default', size = 'md', type = 'button', ...props }, ref) => {
-    return (
       <button
-      <button
+        ref={ref}
         type={type}
         className={cn('bp-btn', variantClasses[variant], sizeClasses[size], className)}
-        ref={ref}
         {...props}
       />
     )
