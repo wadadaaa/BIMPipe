@@ -129,9 +129,6 @@
 
 .topbar__step--active .topbar__step-num {
   font-weight: 800;
-}
-
-.topbar__step--active .topbar__step-num {
   color: inherit;
 }
 
@@ -147,37 +144,6 @@
   justify-content: flex-end;
   gap: 10px;
   min-width: 0;
-}
-
-.topbar__theme-toggle {
-  display: inline-grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--surface-soft);
-  color: var(--text-h);
-  cursor: pointer;
-  transition:
-    background 120ms,
-    border-color 120ms,
-    color 120ms,
-    transform 120ms;
-}
-
-.topbar__theme-toggle:hover {
-  background: var(--surface-strong);
-  border-color: var(--accent-border);
-  color: var(--accent);
-  transform: translateY(-1px);
-}
-
-.topbar__theme-toggle:focus-visible {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
 .topbar__theme-icon {
