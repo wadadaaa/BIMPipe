@@ -7,6 +7,9 @@
   font-family: inherit;
   font-weight: inherit;
   cursor: pointer;
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: inherit;
   transition: background 120ms, border-color 120ms, color 120ms, transform 120ms;
 }
 
