@@ -129,9 +129,6 @@
 
 .topbar__step--active .topbar__step-num {
   font-weight: 800;
-}
-
-.topbar__step--active .topbar__step-num {
   color: inherit;
 }
 
