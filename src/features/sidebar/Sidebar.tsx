@@ -3,7 +3,6 @@ import type { Fixture, KitchenArea, Riser, RiserId, SidebarTab } from '@/domain/
 import type { StoreyDetectionAggregation } from '@/shared/ifc/aggregateStoreyDetections'
 import type { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
 import { ViewTransition } from '@/shared/reactViewTransition'
-import { Button } from '@/shared/ui'
 import { FixturesPanel } from './FixturesPanel'
 import { RisersPanel } from './RisersPanel'
 import { PlacementValidationPanel } from './PlacementValidationPanel'
@@ -132,10 +131,8 @@ export function Sidebar({
 
       <div className="sidebar__tabs" role="tablist">
         {TABS.map((tab) => (
-          <Button
+          <button
             key={tab.id}
-            variant="ghost"
-            size="sm"
             className={[
               'sidebar__tab',
               activeTab === tab.id ? 'sidebar__tab--active' : '',
@@ -151,7 +148,7 @@ export function Sidebar({
             }
           >
             {tab.label}
-          </Button>
+          </button>
         ))}
       </div>
 

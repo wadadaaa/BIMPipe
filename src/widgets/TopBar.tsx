@@ -57,7 +57,6 @@ export function TopBar({
           </span>
         )}
         <Button
-          className="topbar__theme-toggle"
           variant="outline"
           size="icon"
           type="button"
