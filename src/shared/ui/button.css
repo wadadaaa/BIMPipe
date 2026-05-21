@@ -80,7 +80,11 @@
   font-size: 13px;
 }
 
-.bp-btn--icon {
+.bp-btn--shape-default {
+  border-radius: 10px;
+}
+
+.bp-btn--shape-square {
   width: 32px;
   height: 32px;
   padding: 0;
