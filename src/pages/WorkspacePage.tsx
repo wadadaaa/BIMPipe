@@ -17,7 +17,7 @@ import { classifyFloors, getEligibleStoreyIdsForAutoRisers } from '@/shared/rout
 import { suggestRiserPositions } from '@/shared/routes/suggestRisers'
 import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE } from '@/shared/routes/riserPlacementProfile'
 import { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
-import { getDemoRuntimeConfig, isStoreyIncludedInDemoScope, validateDemoAssetPath } from '@/shared/demoConfig'
+import { buildDemoModeUploadError, getDemoRuntimeConfig, isStoreyIncludedInDemoScope } from '@/shared/demoConfig'
 
 let floorViewerModulePromise: Promise<typeof import('@/viewer/FloorViewer')> | null = null
 let model3DViewerModulePromise: Promise<typeof import('@/viewer/Model3DViewer')> | null = null
@@ -28,6 +28,7 @@ let floorSelectionModulesPromise: Promise<
     typeof import('@/shared/ifc/detectKitchens'),
   ]
 > | null = null
+const DEMO_RUNTIME = getDemoRuntimeConfig()
 
 function loadFloorViewerModule() {
   floorViewerModulePromise ??= import('@/viewer/FloorViewer')
@@ -144,21 +145,12 @@ export function WorkspacePage({
   }, [risers])
 
 
-  useEffect(() => {
-    const runtime = getDemoRuntimeConfig()
-    if (!runtime.enabled) {
-      setDemoError(null)
+  async function handleFileAccepted(file: File) {
+    const demoUploadError = buildDemoModeUploadError(file.name, DEMO_RUNTIME)
+    if (demoUploadError) {
+      setDemoError(demoUploadError)
       return
     }
-
-    void validateDemoAssetPath(runtime.config.model.assetPath)
-      .then(() => setDemoError(null))
-      .catch((error: unknown) => {
-        setDemoError(error instanceof Error ? error.message : 'Demo asset validation failed.')
-      })
-  }, [])
-
-  async function handleFileAccepted(file: File) {
     sourceIfcBytesRef.current = null
     nextRiserLabelRef.current = 1
     // Sync the ref alongside the state update so openStorey sees the cleared
@@ -358,7 +350,7 @@ export function WorkspacePage({
           kitchens,
           floorMeshes,
           nextRiserLabelRef,
-          getDemoRuntimeConfig(),
+          DEMO_RUNTIME,
         ),
       )
       setIsAddingRiser(false)

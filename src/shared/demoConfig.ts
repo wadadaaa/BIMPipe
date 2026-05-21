@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-const demoConfigSchema = z.object({
+export const demoConfigSchema = z.object({
   name: z.string().min(1),
   model: z.object({
     fileName: z.string().min(1),
@@ -30,7 +30,9 @@ export type DemoConfig = z.infer<typeof demoConfigSchema>
 
 declare const __BIMPIPE_DEMO_CONFIG__: unknown
 
-export function getDemoRuntimeConfig(): { enabled: false } | { enabled: true; config: DemoConfig } {
+export type DemoRuntimeConfig = { enabled: false } | { enabled: true; config: DemoConfig }
+
+export function getDemoRuntimeConfig(): DemoRuntimeConfig {
   if (!import.meta.env.DEMO_MODE) return { enabled: false }
 
   const parsed = demoConfigSchema.safeParse(__BIMPIPE_DEMO_CONFIG__)
@@ -42,13 +44,11 @@ export function getDemoRuntimeConfig(): { enabled: false } | { enabled: true; co
   return { enabled: true, config: parsed.data }
 }
 
-export async function validateDemoAssetPath(assetPath: string): Promise<void> {
-  const response = await fetch(`/${assetPath.replace(/^\/+/, '')}`, { method: 'HEAD' })
-  if (!response.ok) {
-    throw new Error(
-      `Demo model file was not found at '${assetPath}'. Place ADAM_10.ifc at this path and restart 'pnpm demo:adam10'.`,
-    )
-  }
+export function buildDemoModeUploadError(fileName: string, runtime: DemoRuntimeConfig): string | null {
+  if (!runtime.enabled) return null
+  if (fileName === runtime.config.model.fileName) return null
+
+  return `Demo mode expects '${runtime.config.model.fileName}'. Upload that model or run without DEMO_MODE.`
 }
 
 export function isStoreyIncludedInDemoScope(storeyName: string, config: DemoConfig): boolean {
