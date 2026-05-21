@@ -85,7 +85,15 @@
 }
 
 .bp-btn--shape-square {
+  padding: 0;
+}
+
+.bp-btn--shape-square.bp-btn--sm {
+  width: 28px;
+  height: 28px;
+}
+
+.bp-btn--shape-square.bp-btn--md {
   width: 32px;
   height: 32px;
-  padding: 0;
 }
