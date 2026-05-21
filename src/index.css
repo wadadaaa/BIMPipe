@@ -13,6 +13,7 @@
   --border-strong: rgba(255, 255, 255, 0.18);
   --code-bg: rgba(255, 255, 255, 0.06);
   --accent: #67ddff;
+  --accent-strong: #45d4ff;
   --accent-bg: rgba(103, 221, 255, 0.10);
   --accent-border: rgba(103, 221, 255, 0.28);
   --accent-glow: rgba(103, 221, 255, 0.15);
@@ -79,6 +80,7 @@
   --border-strong: rgba(10, 10, 10, 0.20);
   --code-bg: rgba(10, 10, 10, 0.06);
   --accent: #0e87bb;
+  --accent-strong: #0a79a7;
   --accent-bg: rgba(14, 135, 187, 0.10);
   --accent-border: rgba(14, 135, 187, 0.28);
   --accent-glow: rgba(14, 135, 187, 0.14);
