@@ -17,6 +17,7 @@ import { classifyFloors, getEligibleStoreyIdsForAutoRisers } from '@/shared/rout
 import { suggestRiserPositions } from '@/shared/routes/suggestRisers'
 import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE } from '@/shared/routes/riserPlacementProfile'
 import { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
+import { getDemoRuntimeConfig, isStoreyIncludedInDemoScope, validateDemoAssetPath } from '@/shared/demoConfig'
 
 let floorViewerModulePromise: Promise<typeof import('@/viewer/FloorViewer')> | null = null
 let model3DViewerModulePromise: Promise<typeof import('@/viewer/Model3DViewer')> | null = null
@@ -91,6 +92,7 @@ export function WorkspacePage({
   const [storeys, setStoreys] = useState<Storey[]>([])
   const [isParsingStoreys, setIsParsingStoreys] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [demoError, setDemoError] = useState<string | null>(null)
 
   // --- floor extraction ---
   const [selectedStoreyId, setSelectedStoreyId] = useState<StoreyId | null>(null)
@@ -141,6 +143,21 @@ export function WorkspacePage({
     nextRiserLabelRef.current = getNextRiserLabelNumber(risers)
   }, [risers])
 
+
+  useEffect(() => {
+    const runtime = getDemoRuntimeConfig()
+    if (!runtime.enabled) {
+      setDemoError(null)
+      return
+    }
+
+    void validateDemoAssetPath(runtime.config.model.assetPath)
+      .then(() => setDemoError(null))
+      .catch((error: unknown) => {
+        setDemoError(error instanceof Error ? error.message : 'Demo asset validation failed.')
+      })
+  }, [])
+
   async function handleFileAccepted(file: File) {
     sourceIfcBytesRef.current = null
     nextRiserLabelRef.current = 1
@@ -150,6 +167,7 @@ export function WorkspacePage({
     setIsParsingStoreys(true)
     setModelFileName(file.name)
     setUploadError(null)
+    setDemoError(null)
     startTransition(() => {
       setStoreys([])
       setSelectedStoreyId(null)
@@ -340,6 +358,7 @@ export function WorkspacePage({
           kitchens,
           floorMeshes,
           nextRiserLabelRef,
+          getDemoRuntimeConfig(),
         ),
       )
       setIsAddingRiser(false)
@@ -475,7 +494,7 @@ export function WorkspacePage({
       <IfcUpload
         onFileAccepted={handleFileAccepted}
         isLoading={isParsingStoreys}
-        error={uploadError}
+        error={demoError ?? uploadError}
         fileName={modelFileName}
         storeyCount={storeys.length}
       />
@@ -592,6 +611,7 @@ function buildSuggestedRisers(
   kitchens: KitchenArea[],
   floorMeshes: FloorMeshes | null,
   nextRiserLabelRef: MutableRefObject<number>,
+  demoRuntime: ReturnType<typeof getDemoRuntimeConfig>,
 ): Riser[] {
   const ruleProfile = DEFAULT_RISER_PLACEMENT_RULE_PROFILE
   const floorPlanBounds = floorMeshes
@@ -604,7 +624,10 @@ function buildSuggestedRisers(
     : null
 
   const positions = suggestRiserPositions(fixtures, kitchens, floorPlanBounds, ruleProfile)
-  const eligibleStoreyIds = new Set(getEligibleStoreyIdsForAutoRisers(storeys, ruleProfile))
+  const scopedStoreys = demoRuntime.enabled
+    ? storeys.filter((storey) => isStoreyIncludedInDemoScope(storey.name, demoRuntime.config))
+    : storeys
+  const eligibleStoreyIds = new Set(getEligibleStoreyIdsForAutoRisers(scopedStoreys, ruleProfile))
 
   return positions.flatMap((position) =>
     buildRiserStack(
