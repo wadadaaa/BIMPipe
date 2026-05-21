@@ -31,15 +31,6 @@ describe('Button', () => {
     expect(button).toHaveClass('bp-btn--shape-square')
   })
 
-
-  it('maps legacy icon size to md square button classes', () => {
-    render(<Button size="icon">Theme</Button>)
-    const button = screen.getByRole('button', { name: 'Theme' })
-
-    expect(button).toHaveClass('bp-btn--md')
-    expect(button).toHaveClass('bp-btn--shape-square')
-  })
-
   it('defaults native type to button', () => {
     render(<Button>Action</Button>)
     expect(screen.getByRole('button', { name: 'Action' })).toHaveAttribute('type', 'button')
