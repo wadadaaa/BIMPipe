@@ -20,11 +20,12 @@ const BUTTON_SHAPES = {
 
 type ButtonVariant = keyof typeof BUTTON_VARIANTS
 type ButtonSize = keyof typeof BUTTON_SIZES
+type LegacyButtonSize = ButtonSize | 'icon'
 type ButtonShape = keyof typeof BUTTON_SHAPES
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant
-  size?: ButtonSize
+  size?: LegacyButtonSize
   shape?: ButtonShape
 }
 
@@ -33,17 +34,26 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
     className,
     variant = 'default',
     size = 'md',
-    shape = 'default',
+    shape,
     type,
     ...props
   },
   ref,
 ) {
+  const normalizedSize: ButtonSize = size === 'icon' ? 'md' : size
+  const normalizedShape: ButtonShape = shape ?? (size === 'icon' ? 'square' : 'default')
+
   return (
     <button
       ref={ref}
       type={type ?? 'button'}
-      className={cn('bp-btn', BUTTON_VARIANTS[variant], BUTTON_SIZES[size], BUTTON_SHAPES[shape], className)}
+      className={cn(
+        'bp-btn',
+        BUTTON_VARIANTS[variant],
+        BUTTON_SIZES[normalizedSize],
+        BUTTON_SHAPES[normalizedShape],
+        className,
+      )}
       {...props}
     />
   )
