@@ -17,6 +17,7 @@ import { classifyFloors, getEligibleStoreyIdsForAutoRisers } from '@/shared/rout
 import { suggestRiserPositions } from '@/shared/routes/suggestRisers'
 import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE } from '@/shared/routes/riserPlacementProfile'
 import { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
+import { buildDemoModeUploadError, getDemoRuntimeConfig, isStoreyIncludedInDemoScope } from '@/shared/demoConfig'
 
 let floorViewerModulePromise: Promise<typeof import('@/viewer/FloorViewer')> | null = null
 let model3DViewerModulePromise: Promise<typeof import('@/viewer/Model3DViewer')> | null = null
@@ -91,6 +92,18 @@ export function WorkspacePage({
   const [storeys, setStoreys] = useState<Storey[]>([])
   const [isParsingStoreys, setIsParsingStoreys] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [demoUploadError, setDemoUploadError] = useState<string | null>(null)
+  const [demoAssetError, setDemoAssetError] = useState<string | null>(null)
+  const [{ demoRuntime, demoRuntimeConfigError }] = useState(() => {
+    try {
+      return { demoRuntime: getDemoRuntimeConfig(), demoRuntimeConfigError: null }
+    } catch (error) {
+      return {
+        demoRuntime: { enabled: false } as const,
+        demoRuntimeConfigError: error instanceof Error ? error.message : 'Demo mode config is invalid.',
+      }
+    }
+  })
 
   // --- floor extraction ---
   const [selectedStoreyId, setSelectedStoreyId] = useState<StoreyId | null>(null)
@@ -142,6 +155,12 @@ export function WorkspacePage({
   }, [risers])
 
   async function handleFileAccepted(file: File) {
+    const uploadDemoError = buildDemoModeUploadError(file.name, demoRuntime)
+    if (uploadDemoError) {
+      setDemoUploadError(uploadDemoError)
+      return
+    }
+    if (demoUploadError !== null) setDemoUploadError(null)
     sourceIfcBytesRef.current = null
     nextRiserLabelRef.current = 1
     // Sync the ref alongside the state update so openStorey sees the cleared
@@ -163,6 +182,7 @@ export function WorkspacePage({
       setIsAddingRiser(false)
       setActiveTab('fixtures')
       setDownloadError(null)
+      setDemoAssetError(null)
       setViewMode('2d')
       setWebIfcModelId(null)
     })
@@ -221,6 +241,7 @@ export function WorkspacePage({
     setIsAddingRiser(false)
     setActiveTab(risersRef.current.length > 0 ? 'risers' : 'fixtures')
     setDownloadError(null)
+    setDemoAssetError(null)
 
     await waitForNextPaint()
 
@@ -316,6 +337,23 @@ export function WorkspacePage({
   function handleSuggestRisers() {
     if (!selectedStoreyId || (fixtures.length === 0 && kitchens.length === 0)) return
 
+    if (demoRuntime.enabled) {
+      const scopedStoreyIds = new Set(
+        storeys.filter((storey) => isStoreyIncludedInDemoScope(storey.name, demoRuntime.config)).map((storey) => storey.id),
+      )
+      const excludedFixtureCount = fixtures.filter((fixture) => !scopedStoreyIds.has(fixture.storeyId)).length
+      const excludedKitchenCount = kitchens.filter((kitchen) => !scopedStoreyIds.has(kitchen.storeyId)).length
+      if (excludedFixtureCount > 0 || excludedKitchenCount > 0) {
+        setDemoAssetError(
+          `Demo scope excluded ${excludedFixtureCount} fixture(s) and ${excludedKitchenCount} kitchen area(s) outside included floors.`,
+        )
+      } else {
+        setDemoAssetError(null)
+      }
+    } else {
+      setDemoAssetError(null)
+    }
+
     const modelId = webIfcModelIdRef.current
     if (modelId !== null) {
       void getIfcApi()
@@ -340,6 +378,7 @@ export function WorkspacePage({
           kitchens,
           floorMeshes,
           nextRiserLabelRef,
+          demoRuntime,
         ),
       )
       setIsAddingRiser(false)
@@ -475,10 +514,15 @@ export function WorkspacePage({
       <IfcUpload
         onFileAccepted={handleFileAccepted}
         isLoading={isParsingStoreys}
-        error={uploadError}
+        error={uploadError ?? demoUploadError ?? demoRuntimeConfigError}
         fileName={modelFileName}
         storeyCount={storeys.length}
       />
+      {demoAssetError ? (
+        <p style={{ marginTop: 8, color: 'var(--color-warning, #f59e0b)', fontSize: 13 }} role="status">
+          {demoAssetError}
+        </p>
+      ) : null}
       <StoreyList
         storeys={storeys}
         selectedId={selectedStoreyId}
@@ -592,6 +636,7 @@ function buildSuggestedRisers(
   kitchens: KitchenArea[],
   floorMeshes: FloorMeshes | null,
   nextRiserLabelRef: MutableRefObject<number>,
+  demoRuntime: ReturnType<typeof getDemoRuntimeConfig>,
 ): Riser[] {
   const ruleProfile = DEFAULT_RISER_PLACEMENT_RULE_PROFILE
   const floorPlanBounds = floorMeshes
@@ -602,9 +647,17 @@ function buildSuggestedRisers(
         maxZ: floorMeshes.boundingBox.max.z,
       }
     : null
+  // TODO(BIM-56): derive plan bounds from scoped/target storeys instead of only the active viewer floor.
 
-  const positions = suggestRiserPositions(fixtures, kitchens, floorPlanBounds, ruleProfile)
-  const eligibleStoreyIds = new Set(getEligibleStoreyIdsForAutoRisers(storeys, ruleProfile))
+  const scopedStoreys = demoRuntime.enabled
+    ? storeys.filter((storey) => isStoreyIncludedInDemoScope(storey.name, demoRuntime.config))
+    : storeys
+  const scopedStoreyIds = new Set(scopedStoreys.map((storey) => storey.id))
+  const scopedFixtures = fixtures.filter((fixture) => scopedStoreyIds.has(fixture.storeyId))
+  const scopedKitchens = kitchens.filter((kitchen) => scopedStoreyIds.has(kitchen.storeyId))
+  const eligibleStoreyIdsFromFullModel = new Set(getEligibleStoreyIdsForAutoRisers(storeys, ruleProfile))
+  const eligibleStoreyIds = new Set([...eligibleStoreyIdsFromFullModel].filter((storeyId) => scopedStoreyIds.has(storeyId)))
+  const positions = suggestRiserPositions(scopedFixtures, scopedKitchens, floorPlanBounds, ruleProfile)
 
   return positions.flatMap((position) =>
     buildRiserStack(

@@ -1,0 +1,17 @@
+{
+  "name": "ADAM_10 investor demo",
+  "model": {
+    "fileName": "ADAM_10.ifc",
+    "schema": "IFC2X3",
+    "source": "Autodesk Revit 2024",
+    "assetPath": "external/demo-assets/ADAM_10.ifc"
+  },
+  "scope": {
+    "includedFloors": ["קומת קרקע", "קומה 1", "קומה 2"],
+    "excludedFloors": ["-2.5", "-2 מרתף", "-1 מרתף", "גג", "גג עליון"]
+  },
+  "routing": {
+    "mode": "demo",
+    "allowManualRiserSelection": true
+  }
+}
