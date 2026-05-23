@@ -623,11 +623,14 @@ function buildSuggestedRisers(
       }
     : null
 
-  const positions = suggestRiserPositions(fixtures, kitchens, floorPlanBounds, ruleProfile)
   const scopedStoreys = demoRuntime.enabled
     ? storeys.filter((storey) => isStoreyIncludedInDemoScope(storey.name, demoRuntime.config))
     : storeys
+  const scopedStoreyIds = new Set(scopedStoreys.map((storey) => storey.id))
+  const scopedFixtures = fixtures.filter((fixture) => scopedStoreyIds.has(fixture.storeyId))
+  const scopedKitchens = kitchens.filter((kitchen) => scopedStoreyIds.has(kitchen.storeyId))
   const eligibleStoreyIds = new Set(getEligibleStoreyIdsForAutoRisers(scopedStoreys, ruleProfile))
+  const positions = suggestRiserPositions(scopedFixtures, scopedKitchens, floorPlanBounds, ruleProfile)
 
   return positions.flatMap((position) =>
     buildRiserStack(

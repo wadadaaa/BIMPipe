@@ -27,13 +27,7 @@ export type DemoRuntimeConfig = { enabled: false } | { enabled: true; config: De
 export function getDemoRuntimeConfig(): DemoRuntimeConfig {
   if (!import.meta.env.DEMO_MODE) return { enabled: false }
 
-  const parsed = demoConfigSchema.safeParse(__BIMPIPE_DEMO_CONFIG__)
-  if (!parsed.success) {
-    const message = parsed.error.issues.map((issue) => `${issue.path.join('.') || 'root'}: ${issue.message}`).join('; ')
-    throw new Error(`Demo mode config is invalid: ${message}`)
-  }
-
-  return { enabled: true, config: parsed.data }
+  return parseDemoRuntimeConfig(__BIMPIPE_DEMO_CONFIG__)
 }
 
 export function buildDemoModeUploadError(fileName: string, runtime: DemoRuntimeConfig): string | null {
@@ -54,4 +48,14 @@ export function isStoreyIncludedInDemoScope(storeyName: string, config: DemoConf
 
 export function normalizeDemoFloorName(value: string): string {
   return value.replace(/\u00a0/g, ' ').trim().normalize('NFC').toLocaleLowerCase()
+}
+
+export function parseDemoRuntimeConfig(rawConfig: unknown): { enabled: true; config: DemoConfig } {
+  const parsed = demoConfigSchema.safeParse(rawConfig)
+  if (!parsed.success) {
+    const message = parsed.error.issues.map((issue) => `${issue.path.join('.') || 'root'}: ${issue.message}`).join('; ')
+    throw new Error(`Demo mode config is invalid: ${message}`)
+  }
+
+  return { enabled: true, config: parsed.data }
 }
