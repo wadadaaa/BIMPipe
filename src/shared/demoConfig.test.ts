@@ -43,6 +43,16 @@ describe('buildDemoModeUploadError', () => {
     expect(buildDemoModeUploadError('ADAM_10.ifc', runtime)).toBeNull()
   })
 
+  it('compares file names case-insensitively with trimmed whitespace', () => {
+    const runtime = parseDemoRuntimeConfig({
+      name: 'demo',
+      model: { fileName: 'ADAM_10.ifc', schema: 'IFC2X3', source: 'Autodesk Revit 2024', assetPath: 'external/demo-assets/ADAM_10.ifc' },
+      scope: { includedFloors: ['קומה 1'], excludedFloors: [] },
+      routing: { mode: 'demo', allowManualRiserSelection: true },
+    })
+    expect(buildDemoModeUploadError('  adam_10.IFC  ', runtime)).toBeNull()
+  })
+
   it('returns an error for the wrong upload file in demo mode', () => {
     const runtime = parseDemoRuntimeConfig({
       name: 'demo',

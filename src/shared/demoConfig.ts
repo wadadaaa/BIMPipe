@@ -25,14 +25,14 @@ declare const __BIMPIPE_DEMO_CONFIG__: unknown
 export type DemoRuntimeConfig = { enabled: false } | { enabled: true; config: DemoConfig }
 
 export function getDemoRuntimeConfig(): DemoRuntimeConfig {
-  if (!import.meta.env.DEMO_MODE) return { enabled: false }
+  if (import.meta.env.DEMO_MODE !== true) return { enabled: false }
 
   return parseDemoRuntimeConfig(__BIMPIPE_DEMO_CONFIG__)
 }
 
 export function buildDemoModeUploadError(fileName: string, runtime: DemoRuntimeConfig): string | null {
   if (!runtime.enabled) return null
-  if (fileName === runtime.config.model.fileName) return null
+  if (normalizeFileName(fileName) === normalizeFileName(runtime.config.model.fileName)) return null
 
   return `Demo mode expects '${runtime.config.model.fileName}'. Upload that model or run without DEMO_MODE.`
 }
@@ -58,4 +58,8 @@ export function parseDemoRuntimeConfig(rawConfig: unknown): { enabled: true; con
   }
 
   return { enabled: true, config: parsed.data }
+}
+
+function normalizeFileName(name: string): string {
+  return name.trim().toLowerCase()
 }

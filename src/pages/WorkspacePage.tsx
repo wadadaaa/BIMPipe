@@ -241,6 +241,7 @@ export function WorkspacePage({
     setIsAddingRiser(false)
     setActiveTab(risersRef.current.length > 0 ? 'risers' : 'fixtures')
     setDownloadError(null)
+    setDemoAssetError(null)
 
     await waitForNextPaint()
 
@@ -340,8 +341,16 @@ export function WorkspacePage({
       const scopedStoreyIds = new Set(
         storeys.filter((storey) => isStoreyIncludedInDemoScope(storey.name, demoRuntime.config)).map((storey) => storey.id),
       )
-      const excludedFixtureCount = fixtures.filter((fixture) => !scopedStoreyIds.has(fixture.storeyId)).length
-      const excludedKitchenCount = kitchens.filter((kitchen) => !scopedStoreyIds.has(kitchen.storeyId)).length
+      const allDetectedFixtures =
+        detectionDebugRef.current === null
+          ? fixtures
+          : Object.values(detectionDebugRef.current.fixturesByStoreyId).flat()
+      const allDetectedKitchens =
+        detectionDebugRef.current === null
+          ? kitchens
+          : Object.values(detectionDebugRef.current.kitchensByStoreyId).flat()
+      const excludedFixtureCount = allDetectedFixtures.filter((fixture) => !scopedStoreyIds.has(fixture.storeyId)).length
+      const excludedKitchenCount = allDetectedKitchens.filter((kitchen) => !scopedStoreyIds.has(kitchen.storeyId)).length
       if (excludedFixtureCount > 0 || excludedKitchenCount > 0) {
         setDemoAssetError(
           `Demo scope excluded ${excludedFixtureCount} fixture(s) and ${excludedKitchenCount} kitchen area(s) outside included floors.`,
@@ -513,7 +522,7 @@ export function WorkspacePage({
       <IfcUpload
         onFileAccepted={handleFileAccepted}
         isLoading={isParsingStoreys}
-        error={uploadError ?? demoRuntimeConfigError ?? demoAssetError ?? demoUploadError}
+        error={uploadError ?? demoUploadError ?? demoRuntimeConfigError ?? demoAssetError}
         fileName={modelFileName}
         storeyCount={storeys.length}
       />
