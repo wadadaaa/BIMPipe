@@ -28,7 +28,6 @@ let floorSelectionModulesPromise: Promise<
     typeof import('@/shared/ifc/detectKitchens'),
   ]
 > | null = null
-const DEMO_RUNTIME = getDemoRuntimeConfig()
 
 function loadFloorViewerModule() {
   floorViewerModulePromise ??= import('@/viewer/FloorViewer')
@@ -94,6 +93,16 @@ export function WorkspacePage({
   const [isParsingStoreys, setIsParsingStoreys] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [demoError, setDemoError] = useState<string | null>(null)
+  const [{ demoRuntime, demoRuntimeConfigError }] = useState(() => {
+    try {
+      return { demoRuntime: getDemoRuntimeConfig(), demoRuntimeConfigError: null }
+    } catch (error) {
+      return {
+        demoRuntime: { enabled: false } as const,
+        demoRuntimeConfigError: error instanceof Error ? error.message : 'Demo mode config is invalid.',
+      }
+    }
+  })
 
   // --- floor extraction ---
   const [selectedStoreyId, setSelectedStoreyId] = useState<StoreyId | null>(null)
@@ -144,9 +153,8 @@ export function WorkspacePage({
     nextRiserLabelRef.current = getNextRiserLabelNumber(risers)
   }, [risers])
 
-
   async function handleFileAccepted(file: File) {
-    const demoUploadError = buildDemoModeUploadError(file.name, DEMO_RUNTIME)
+    const demoUploadError = buildDemoModeUploadError(file.name, demoRuntime)
     if (demoUploadError) {
       setDemoError(demoUploadError)
       return
@@ -159,7 +167,7 @@ export function WorkspacePage({
     setIsParsingStoreys(true)
     setModelFileName(file.name)
     setUploadError(null)
-    setDemoError(null)
+    if (demoError !== null) setDemoError(null)
     startTransition(() => {
       setStoreys([])
       setSelectedStoreyId(null)
@@ -350,7 +358,7 @@ export function WorkspacePage({
           kitchens,
           floorMeshes,
           nextRiserLabelRef,
-          DEMO_RUNTIME,
+          demoRuntime,
         ),
       )
       setIsAddingRiser(false)
@@ -486,7 +494,7 @@ export function WorkspacePage({
       <IfcUpload
         onFileAccepted={handleFileAccepted}
         isLoading={isParsingStoreys}
-        error={demoError ?? uploadError}
+        error={demoRuntimeConfigError ?? demoError ?? uploadError}
         fileName={modelFileName}
         storeyCount={storeys.length}
       />

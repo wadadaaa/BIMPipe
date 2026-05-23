@@ -1,6 +1,8 @@
-import { defineConfig, loadEnv } from 'vite'
+import path from 'node:path'
 import react from '@vitejs/plugin-react'
 import fs from 'node:fs'
+import { defineConfig } from 'vitest/config'
+import { loadEnv } from 'vite'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
@@ -38,13 +40,19 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    resolve: {
+      alias: {
+        '@': path.resolve(__dirname, 'src'),
+      },
+    },
     define: {
       'import.meta.env.DEMO_MODE': JSON.stringify(demoMode),
       __BIMPIPE_DEMO_CONFIG__: JSON.stringify(demoConfig),
     },
     test: {
       environment: 'jsdom',
-      setupFiles: './src/test/setup.ts',
+      globals: true,
+      setupFiles: ['./src/test/setup.ts'],
     },
   }
 })

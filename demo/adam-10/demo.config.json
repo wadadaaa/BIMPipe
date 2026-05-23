@@ -12,14 +12,6 @@
   },
   "routing": {
     "mode": "demo",
-    "allowManualRiserSelection": true,
-    "generateMissingRoutes": true,
-    "createRevitElements": true,
-    "showDebugOverlay": true
-  },
-  "presentation": {
-    "showBeforeAfter": true,
-    "highlightGeneratedRoutes": true,
-    "limitToDemoArea": true
+    "allowManualRiserSelection": true
   }
 }

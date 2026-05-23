@@ -15,14 +15,6 @@ export const demoConfigSchema = z.object({
   routing: z.object({
     mode: z.string().min(1),
     allowManualRiserSelection: z.boolean(),
-    generateMissingRoutes: z.boolean(),
-    createRevitElements: z.boolean(),
-    showDebugOverlay: z.boolean(),
-  }),
-  presentation: z.object({
-    showBeforeAfter: z.boolean(),
-    highlightGeneratedRoutes: z.boolean(),
-    limitToDemoArea: z.boolean(),
   }),
 })
 
@@ -52,7 +44,14 @@ export function buildDemoModeUploadError(fileName: string, runtime: DemoRuntimeC
 }
 
 export function isStoreyIncludedInDemoScope(storeyName: string, config: DemoConfig): boolean {
-  const normalized = storeyName.trim()
-  if (config.scope.excludedFloors.includes(normalized)) return false
-  return config.scope.includedFloors.includes(normalized)
+  const normalizedStoreyName = normalizeDemoFloorName(storeyName)
+  const excluded = new Set(config.scope.excludedFloors.map(normalizeDemoFloorName))
+  if (excluded.has(normalizedStoreyName)) return false
+
+  const included = new Set(config.scope.includedFloors.map(normalizeDemoFloorName))
+  return included.has(normalizedStoreyName)
+}
+
+export function normalizeDemoFloorName(value: string): string {
+  return value.replace(/\u00a0/g, ' ').trim().normalize('NFC').toLocaleLowerCase()
 }
