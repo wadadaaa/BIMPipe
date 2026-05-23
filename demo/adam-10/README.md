@@ -30,6 +30,7 @@ external/demo-assets/ADAM_10.ifc
 ```bash
 pnpm demo:adam10
 ```
+> Note: the script currently uses POSIX-style inline env vars and may require adaptation for Windows shells.
 
 This command enables:
 

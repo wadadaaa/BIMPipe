@@ -47,7 +47,7 @@ export function isStoreyIncludedInDemoScope(storeyName: string, config: DemoConf
 }
 
 export function normalizeDemoFloorName(value: string): string {
-  return value.replace(/\u00a0/g, ' ').trim().normalize('NFC').toLocaleLowerCase()
+  return value.replace(/\u00a0/g, ' ').trim().normalize('NFC').toLowerCase()
 }
 
 export function parseDemoRuntimeConfig(rawConfig: unknown): { enabled: true; config: DemoConfig } {
