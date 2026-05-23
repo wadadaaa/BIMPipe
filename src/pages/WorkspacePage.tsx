@@ -341,16 +341,8 @@ export function WorkspacePage({
       const scopedStoreyIds = new Set(
         storeys.filter((storey) => isStoreyIncludedInDemoScope(storey.name, demoRuntime.config)).map((storey) => storey.id),
       )
-      const allDetectedFixtures =
-        detectionDebugRef.current === null
-          ? fixtures
-          : Object.values(detectionDebugRef.current.fixturesByStoreyId).flat()
-      const allDetectedKitchens =
-        detectionDebugRef.current === null
-          ? kitchens
-          : Object.values(detectionDebugRef.current.kitchensByStoreyId).flat()
-      const excludedFixtureCount = allDetectedFixtures.filter((fixture) => !scopedStoreyIds.has(fixture.storeyId)).length
-      const excludedKitchenCount = allDetectedKitchens.filter((kitchen) => !scopedStoreyIds.has(kitchen.storeyId)).length
+      const excludedFixtureCount = fixtures.filter((fixture) => !scopedStoreyIds.has(fixture.storeyId)).length
+      const excludedKitchenCount = kitchens.filter((kitchen) => !scopedStoreyIds.has(kitchen.storeyId)).length
       if (excludedFixtureCount > 0 || excludedKitchenCount > 0) {
         setDemoAssetError(
           `Demo scope excluded ${excludedFixtureCount} fixture(s) and ${excludedKitchenCount} kitchen area(s) outside included floors.`,
@@ -522,10 +514,15 @@ export function WorkspacePage({
       <IfcUpload
         onFileAccepted={handleFileAccepted}
         isLoading={isParsingStoreys}
-        error={uploadError ?? demoUploadError ?? demoRuntimeConfigError ?? demoAssetError}
+        error={uploadError ?? demoUploadError ?? demoRuntimeConfigError}
         fileName={modelFileName}
         storeyCount={storeys.length}
       />
+      {demoAssetError ? (
+        <p style={{ marginTop: 8, color: 'var(--color-warning, #f59e0b)', fontSize: 13 }} role="status">
+          {demoAssetError}
+        </p>
+      ) : null}
       <StoreyList
         storeys={storeys}
         selectedId={selectedStoreyId}
