@@ -92,7 +92,7 @@ export function WorkspacePage({
   const [storeys, setStoreys] = useState<Storey[]>([])
   const [isParsingStoreys, setIsParsingStoreys] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
-  const [demoError, setDemoError] = useState<string | null>(null)
+  const [demoUploadError, setDemoUploadError] = useState<string | null>(null)
   const [{ demoRuntime, demoRuntimeConfigError }] = useState(() => {
     try {
       return { demoRuntime: getDemoRuntimeConfig(), demoRuntimeConfigError: null }
@@ -154,11 +154,12 @@ export function WorkspacePage({
   }, [risers])
 
   async function handleFileAccepted(file: File) {
-    const demoUploadError = buildDemoModeUploadError(file.name, demoRuntime)
-    if (demoUploadError) {
-      setDemoError(demoUploadError)
+    const uploadDemoError = buildDemoModeUploadError(file.name, demoRuntime)
+    if (uploadDemoError) {
+      setDemoUploadError(uploadDemoError)
       return
     }
+    if (demoUploadError !== null) setDemoUploadError(null)
     sourceIfcBytesRef.current = null
     nextRiserLabelRef.current = 1
     // Sync the ref alongside the state update so openStorey sees the cleared
@@ -167,7 +168,6 @@ export function WorkspacePage({
     setIsParsingStoreys(true)
     setModelFileName(file.name)
     setUploadError(null)
-    if (demoError !== null) setDemoError(null)
     startTransition(() => {
       setStoreys([])
       setSelectedStoreyId(null)
@@ -494,7 +494,7 @@ export function WorkspacePage({
       <IfcUpload
         onFileAccepted={handleFileAccepted}
         isLoading={isParsingStoreys}
-        error={demoRuntimeConfigError ?? demoError ?? uploadError}
+        error={demoRuntimeConfigError ?? demoUploadError ?? uploadError}
         fileName={modelFileName}
         storeyCount={storeys.length}
       />
