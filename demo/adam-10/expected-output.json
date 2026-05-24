@@ -3,16 +3,18 @@
     "fileName": "ADAM_10.ifc",
     "schema": "IFC2X3",
     "source": "Autodesk Revit 2024",
+    "isCanonicalDemoInput": true,
     "scanSummary": {
       "storeyCount": 14,
       "spaceCount": 320
     }
   },
   "demoScenario": {
-    "goal": "Run a fast investor walkthrough of upload → parse → detect → suggest risers → manual move → export.",
+    "goal": "Run a fast investor walkthrough of upload → parse → detect → suggest risers → manual override → export readiness.",
     "includedFloors": ["קומת קרקע", "קומה 1", "קומה 2"],
     "excludedFloors": ["-2.5", "-2 מרתף", "-1 מרתף", "גג", "גג עליון"],
-    "explanation": "Use a small representative subset of floors for predictable live performance and clear narration."
+    "explanation": "Use a small representative subset of floors for predictable live performance and clear narration.",
+    "scopeSource": "demo/adam-10/demo.config.json"
   },
   "routingPreparation": {
     "riserOrShaftCandidates": {
@@ -29,7 +31,20 @@
         "Kitchen/service sinks on included floors are reviewed as secondary targets.",
         "Any unassigned targets are called out during the demo as known limitations."
       ]
-    }
+    },
+    "manualOverrideRule": "Manual riser position changes take precedence over auto-suggested positions in the demo narrative."
+  },
+  "exportReadiness": {
+    "readyWhen": [
+      "ADAM_10.ifc was uploaded in demo mode.",
+      "At least one riser candidate is visible in scoped floors.",
+      "Primary toilet targets were reviewed for stack assignment."
+    ],
+    "blockedWhen": [
+      "Model upload is not ADAM_10.ifc while demo mode is enabled.",
+      "No risers are present after suggest/manual steps."
+    ],
+    "note": "This file documents demo expectations only and does not by itself prove end-to-end IFC export validation."
   },
   "investorNarrative": {
     "steps": [
@@ -37,7 +52,7 @@
       "Show parse success and explain scoped floors for the live run.",
       "Run detection and highlight toilets/kitchens as routing targets.",
       "Suggest risers, then manually adjust one riser to show override precedence.",
-      "Export and state whether output is ready or blocked."
+      "State export readiness as ready or blocked based on the run result."
     ]
   }
 }
