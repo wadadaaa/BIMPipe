@@ -26,11 +26,11 @@ external/demo-assets/ADAM_10.ifc
 
 ## Prepared routing baseline
 
-The current ADAM_10 demo baseline is documented in:
+The canonical ADAM_10 demo-prep baseline is documented in:
 
 - `demo/adam-10/expected-output.json`
 
-This baseline keeps the live investor flow focused on:
+This baseline keeps the live investor flow focused and explainable:
 
 1. upload and parse confirmation,
 2. fixture detection visibility,

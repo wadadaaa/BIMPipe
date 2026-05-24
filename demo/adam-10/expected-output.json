@@ -17,7 +17,7 @@
   "routingPreparation": {
     "riserOrShaftCandidates": {
       "expectedStackLabels": ["R1", "R2", "R3", "R4", "R5", "R6", "R7"],
-      "notes": "Labels come from the validated ADAM_10 BIMPipe baseline export and are used as demo stack identifiers."
+      "notes": "Labels come from the current ADAM_10 BIMPipe demo baseline export and are used as demo stack identifiers."
     },
     "targetConnectionPoints": {
       "priorityOrder": [
@@ -26,6 +26,7 @@
       ],
       "validationChecks": [
         "Included-floor toilets are visibly assigned to a stack candidate before export.",
+        "Kitchen/service sinks on included floors are reviewed as secondary targets.",
         "Any unassigned targets are called out during the demo as known limitations."
       ]
     }
