@@ -2,42 +2,41 @@
   "model": {
     "fileName": "ADAM_10.ifc",
     "schema": "IFC2X3",
-    "storeyCount": 14,
-    "spaceCount": 320
+    "source": "Autodesk Revit 2024",
+    "scanSummary": {
+      "storeyCount": 14,
+      "spaceCount": 320
+    }
   },
   "demoScenario": {
     "goal": "Run a fast investor walkthrough of upload → parse → detect → suggest risers → manual move → export.",
     "includedFloors": ["קומת קרקע", "קומה 1", "קומה 2"],
     "excludedFloors": ["-2.5", "-2 מרתף", "-1 מרתף", "גג", "גג עליון"],
-    "whyThisScope": "Keeps the run deterministic and visually explainable while still showing multi-floor riser behavior."
+    "explanation": "Use a small representative subset of floors for predictable live performance and clear narration."
   },
-  "riserAndShaftCandidates": {
-    "expectedStackLabels": ["R1", "R2", "R3", "R4", "R5", "R6", "R7"],
-    "selectionRule": "Use existing BIMPipe stack labels from the ADAM_10 baseline export and preserve labels during manual adjustment.",
-    "manualReviewChecklist": [
-      "Verify each stack appears in plan view on included floors.",
-      "Confirm stacks are near toilet/kitchen wet-core clusters before export.",
-      "If a stack is adjusted manually, keep the same stack label and track the reason in demo notes."
-    ]
-  },
-  "targetConnectionPoints": {
-    "fixtureTypes": ["TOILETPAN", "kitchen sink/service sink candidates"],
-    "priority": [
-      "Toilet fixtures (primary connection targets for sanitary routing demo).",
-      "Kitchen/service sinks where kitchens were detected in selected demo floors."
-    ],
-    "validation": [
-      "Each detected toilet on included floors is assigned to one visible stack candidate.",
-      "Any unassigned target is called out before export as a live demo caveat."
-    ]
+  "routingPreparation": {
+    "riserOrShaftCandidates": {
+      "expectedStackLabels": ["R1", "R2", "R3", "R4", "R5", "R6", "R7"],
+      "notes": "Labels come from the validated ADAM_10 BIMPipe baseline export and are used as demo stack identifiers."
+    },
+    "targetConnectionPoints": {
+      "priorityOrder": [
+        "Toilet fixtures (primary sanitary targets)",
+        "Kitchen/service sink fixtures on included floors"
+      ],
+      "validationChecks": [
+        "Included-floor toilets are visibly assigned to a stack candidate before export.",
+        "Any unassigned targets are called out during the demo as known limitations."
+      ]
+    }
   },
   "investorNarrative": {
     "steps": [
-      "Upload ADAM_10.ifc and confirm demo-mode file gate accepts only this model.",
-      "Show parsed floors and explain reduced floor scope for live reliability.",
-      "Run fixture detection and highlight toilet + kitchen candidates.",
-      "Generate risers (R1..R7), then manually reposition one stack to demonstrate override precedence.",
-      "Export IFC and explain that output is prepared from the validated in-session riser set."
+      "Upload ADAM_10.ifc and confirm demo-mode gate accepts only this file.",
+      "Show parse success and explain scoped floors for the live run.",
+      "Run detection and highlight toilets/kitchens as routing targets.",
+      "Suggest risers, then manually adjust one riser to show override precedence.",
+      "Export and state whether output is ready or blocked."
     ]
   }
 }

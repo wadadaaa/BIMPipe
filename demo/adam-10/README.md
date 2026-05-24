@@ -20,29 +20,29 @@ external/demo-assets/ADAM_10.ifc
 
 ## Demo scope
 
-## Prepared routing baseline
-
-The demo baseline assumes the currently validated ADAM_10 profile:
-
-- 14 storeys and 320 spaces in the source model metadata scan
-- 7 primary stack labels (`R1`..`R7`) used as the investor-demo riser candidates
-- Target connection points prioritized to toilets first, then kitchen/service sinks on included floors
-
-Detailed candidate stacks, connection-target rules, and the step-by-step live narrative are tracked in:
-
-- `demo/adam-10/expected-output.json`
-
-
 - Included floors: `קומת קרקע`, `קומה 1`, `קומה 2`
 - Excluded floors: `-2.5`, `-2 מרתף`, `-1 מרתף`, `גג`, `גג עליון`
 - Riser/shaft workflow is constrained by `demo.config.json` scope in demo mode.
-- Target connection points and generated route expectations should be tracked in `expected-output.json`.
+
+## Prepared routing baseline
+
+The current ADAM_10 demo baseline is documented in:
+
+- `demo/adam-10/expected-output.json`
+
+This baseline keeps the live investor flow focused on:
+
+1. upload and parse confirmation,
+2. fixture detection visibility,
+3. riser suggestion + one manual override,
+4. IFC export readiness.
 
 ## Run the demo
 
 ```bash
 pnpm demo:adam10
 ```
+
 > Note: the script currently uses POSIX-style inline env vars and may require adaptation for Windows shells.
 
 This command enables:
