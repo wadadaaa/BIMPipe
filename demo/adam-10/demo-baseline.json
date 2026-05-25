@@ -56,7 +56,8 @@
       "Uploaded model is not ADAM_10.ifc while demo mode is enabled.",
       "No risers are present after suggest/manual steps."
     ],
-    "note": "This file documents demo expectations only and does not by itself prove end-to-end IFC export validation."
+    "note": "This file documents demo expectations only and does not by itself prove end-to-end IFC export validation.",
+    "_note": "For the investor walkthrough, use ADAM_10 only. This is presenter guidance, not an enforced runtime upload gate."
   },
   "investorNarrative": {
     "steps": [
