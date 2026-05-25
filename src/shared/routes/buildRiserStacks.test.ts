@@ -19,6 +19,7 @@ describe('buildRiserStack', () => {
       2,
       { x: 188216.9, y: 655, z: -652685.9 },
       'R12',
+      'detected',
       createId,
     )
 
@@ -30,6 +31,9 @@ describe('buildRiserStack', () => {
       { x: 188216.9, y: 655, z: -652685.9 },
       { x: 188216.9, y: 961, z: -652685.9 },
     ])
+    expect(new Set(risers.map((riser) => riser.source))).toEqual(new Set(['detected']))
+    expect(new Set(risers.map((riser) => riser.systemType))).toEqual(new Set(['sanitary']))
+    expect(new Set(risers.map((riser) => `${riser.levelRange?.from}:${riser.levelRange?.to}`))).toEqual(new Set(['1:3']))
   })
 
   it('falls back to a single source-storey riser when storeys are unavailable', () => {
@@ -37,7 +41,7 @@ describe('buildRiserStack', () => {
     const createId = () => `id-${++seq}`
 
     expect(
-      buildRiserStack([], 42, { x: 10, y: 20, z: 30 }, 'R1', createId),
+      buildRiserStack([], 42, { x: 10, y: 20, z: 30 }, 'R1', 'manual', createId),
     ).toEqual([
       {
         id: 'id-2',
@@ -45,6 +49,9 @@ describe('buildRiserStack', () => {
         stackLabel: 'R1',
         storeyId: 42,
         position: { x: 10, y: 20, z: 30 },
+        source: 'manual',
+        systemType: 'sanitary',
+        levelRange: { from: 42, to: 42 },
       },
     ])
   })
@@ -57,6 +64,9 @@ describe('buildRiserStack', () => {
         stackLabel: 'R18',
         storeyId: 1,
         position: { x: 10, y: 306, z: 20 },
+        source: 'placed',
+        systemType: 'sanitary',
+        levelRange: { from: 1, to: 3 },
       },
       {
         id: 'r-02',
@@ -64,6 +74,9 @@ describe('buildRiserStack', () => {
         stackLabel: 'R18',
         storeyId: 2,
         position: { x: 10, y: 612, z: 20 },
+        source: 'placed',
+        systemType: 'sanitary',
+        levelRange: { from: 1, to: 3 },
       },
       {
         id: 'r-03',
@@ -71,6 +84,9 @@ describe('buildRiserStack', () => {
         stackLabel: 'R18',
         storeyId: 3,
         position: { x: 10, y: 918, z: 20 },
+        source: 'placed',
+        systemType: 'sanitary',
+        levelRange: { from: 1, to: 3 },
       },
       {
         id: 'other',
@@ -78,6 +94,9 @@ describe('buildRiserStack', () => {
         stackLabel: 'R19',
         storeyId: 2,
         position: { x: 30, y: 612, z: 40 },
+        source: 'placed',
+        systemType: 'sanitary',
+        levelRange: { from: 1, to: 3 },
       },
     ]
 
@@ -88,6 +107,9 @@ describe('buildRiserStack', () => {
         stackLabel: 'R19',
         storeyId: 2,
         position: { x: 30, y: 612, z: 40 },
+        source: 'placed',
+        systemType: 'sanitary',
+        levelRange: { from: 1, to: 3 },
       },
     ])
   })

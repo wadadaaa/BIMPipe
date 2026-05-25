@@ -305,7 +305,7 @@ export function WorkspacePage({
     startTransition(() =>
       setRisers((prev) => [
         ...prev,
-        ...buildRiserStack(storeys, selectedStoreyId, pos, takeNextRiserLabel(nextRiserLabelRef)),
+        ...buildRiserStack(storeys, selectedStoreyId, pos, takeNextRiserLabel(nextRiserLabelRef), 'manual'),
       ]),
     )
   }
@@ -665,6 +665,7 @@ function buildSuggestedRisers(
       sourceStoreyId,
       position,
       takeNextRiserLabel(nextRiserLabelRef),
+      'detected',
     ).filter((riser) => eligibleStoreyIds.has(riser.storeyId)),
   )
 }

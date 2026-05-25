@@ -90,7 +90,8 @@ export function RisersPanel({
               <path d="M12 8v4l2.5 2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </span>
-          <p>No risers placed yet. Use Suggest to generate one riser per toilet and one per kitchen, or place them manually.</p>
+          <p>No risers selected yet. Routing is blocked until at least one sanitary riser is selected.</p>
+          <p>Use Suggest to generate one riser per toilet and one per kitchen, or place them manually.</p>
         </div>
       ) : (
         <div className="risers-panel__list">
@@ -108,6 +109,9 @@ export function RisersPanel({
               <span className="risers-panel__item-marker">{riser.stackLabel}</span>
               <span className="risers-panel__item-coords">
                 {fmt(riser.position.x)}, {fmt(riser.position.z)}
+              </span>
+              <span className="risers-panel__item-coords" title="Riser source">
+                {riser.source ?? "placed"}
               </span>
               <button
                 className="risers-panel__item-delete"
