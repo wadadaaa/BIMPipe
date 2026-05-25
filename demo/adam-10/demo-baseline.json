@@ -1,0 +1,71 @@
+{
+  "_fileRole": "Human-readable ADAM_10 investor demo baseline. Not consumed by runtime code and not a machine-verifiable expected-output fixture.",
+  "_snapshotNote": "Scan metrics were manually recorded from an ADAM_10 parse run on 2026-05-25 and may become stale if the IFC or parser changes.",
+  "model": {
+    "fileName": "ADAM_10.ifc",
+    "schema": "IFC2X3",
+    "source": "Autodesk Revit 2024",
+    "assetPath": "external/demo-assets/ADAM_10.ifc",
+    "isCanonicalDemoInput": true,
+    "scanSummary": {
+      "storeyCount": 14,
+      "spaceCount": 320
+    }
+  },
+  "demoScenario": {
+    "goal": "Run a fast investor walkthrough of upload → parse → detect → suggest risers → manual override → export readiness.",
+    "scopeSource": "demo/adam-10/demo.config.json",
+    "routingMode": "demo",
+    "explanation": "Use a representative subset of floors for predictable live performance and clear narration.",
+    "_walkthroughNote_manualOverride": "Demo shows one manual riser adjustment."
+  },
+  "routingPreparation": {
+    "riserOrShaftCandidates": {
+      "expectedStackLabels": [
+        "R1",
+        "R2",
+        "R3",
+        "R4",
+        "R5",
+        "R6",
+        "R7"
+      ],
+      "notes": "Use current ADAM_10 BIMPipe baseline stack labels as demo identifiers.",
+      "_note": "Illustrative labels only — not asserted by automated tests."
+    },
+    "targetConnectionPoints": {
+      "priorityOrder": [
+        "Toilet fixtures (primary sanitary targets)",
+        "Kitchen/service sink fixtures on included demo floors"
+      ],
+      "validationChecks": [
+        "Included-floor toilets are visibly assigned to a stack candidate before export.",
+        "Kitchen/service sinks are reviewed as secondary targets.",
+        "Any unassigned targets are called out during the demo as known limitations."
+      ]
+    },
+    "manualOverrideRule": "Manual riser position changes take precedence over auto-suggested positions."
+  },
+  "exportReadiness": {
+    "readyWhen": [
+      "ADAM_10.ifc is uploaded while demo mode is enabled.",
+      "At least one riser candidate is visible in scoped floors.",
+      "Primary toilet targets were reviewed for stack assignment."
+    ],
+    "blockedWhen": [
+      "Uploaded model is not ADAM_10.ifc while demo mode is enabled.",
+      "No risers are present after suggest/manual steps."
+    ],
+    "note": "This file documents demo expectations only and does not by itself prove end-to-end IFC export validation.",
+    "_note": "For the investor walkthrough, use ADAM_10 only. This is presenter guidance, not an enforced runtime upload gate."
+  },
+  "investorNarrative": {
+    "steps": [
+      "Upload ADAM_10.ifc and confirm demo-mode gate accepts only this file.",
+      "Show parse success and explain scoped floors for the live run.",
+      "Run detection and highlight toilets/kitchens as routing targets.",
+      "Suggest risers, then manually adjust one riser to show override precedence.",
+      "State export readiness as ready or blocked based on the run result."
+    ]
+  }
+}
