@@ -1,4 +1,6 @@
 {
+  "_fileRole": "Human-readable ADAM_10 investor demo baseline. Not consumed by runtime code and not a machine-verifiable expected-output fixture.",
+  "_snapshotNote": "Scan metrics were manually recorded from an ADAM_10 parse run on 2026-05-25 and may become stale if the IFC or parser changes.",
   "model": {
     "fileName": "ADAM_10.ifc",
     "schema": "IFC2X3",
@@ -14,13 +16,22 @@
     "goal": "Run a fast investor walkthrough of upload → parse → detect → suggest risers → manual override → export readiness.",
     "scopeSource": "demo/adam-10/demo.config.json",
     "routingMode": "demo",
-    "allowManualRiserSelection": true,
-    "explanation": "Use a representative subset of floors for predictable live performance and clear narration."
+    "explanation": "Use a representative subset of floors for predictable live performance and clear narration.",
+    "_walkthroughNote_manualOverride": "Demo shows one manual riser adjustment."
   },
   "routingPreparation": {
     "riserOrShaftCandidates": {
-      "expectedStackLabels": ["R1", "R2", "R3", "R4", "R5", "R6", "R7"],
-      "notes": "Use current ADAM_10 BIMPipe baseline stack labels as demo identifiers."
+      "expectedStackLabels": [
+        "R1",
+        "R2",
+        "R3",
+        "R4",
+        "R5",
+        "R6",
+        "R7"
+      ],
+      "notes": "Use current ADAM_10 BIMPipe baseline stack labels as demo identifiers.",
+      "_note": "Illustrative labels only — not asserted by automated tests."
     },
     "targetConnectionPoints": {
       "priorityOrder": [

@@ -30,9 +30,9 @@ Source of truth for demo-mode floor filtering is `demo/adam-10/demo.config.json`
 
 The canonical ADAM_10 demo-prep baseline is documented in:
 
-- `demo/adam-10/expected-output.json`
+- `demo/adam-10/demo-baseline.json`
 
-`expected-output.json` documents expectations, while `demo.config.json` remains the executable scope source of truth used by demo mode.
+`demo-baseline.json` documents human-readable expectations, while `demo.config.json` remains the executable scope source of truth used by demo mode.
 
 This baseline keeps the live investor flow focused and explainable:
 
