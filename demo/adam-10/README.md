@@ -32,6 +32,8 @@ The canonical ADAM_10 demo-prep baseline is documented in:
 
 - `demo/adam-10/expected-output.json`
 
+`expected-output.json` documents expectations, while `demo.config.json` remains the executable scope source of truth used by demo mode.
+
 This baseline keeps the live investor flow focused and explainable:
 
 1. upload and parse confirmation,

@@ -3,6 +3,7 @@
     "fileName": "ADAM_10.ifc",
     "schema": "IFC2X3",
     "source": "Autodesk Revit 2024",
+    "assetPath": "external/demo-assets/ADAM_10.ifc",
     "isCanonicalDemoInput": true,
     "scanSummary": {
       "storeyCount": 14,
@@ -11,37 +12,37 @@
   },
   "demoScenario": {
     "goal": "Run a fast investor walkthrough of upload → parse → detect → suggest risers → manual override → export readiness.",
-    "includedFloors": ["קומת קרקע", "קומה 1", "קומה 2"],
-    "excludedFloors": ["-2.5", "-2 מרתף", "-1 מרתף", "גג", "גג עליון"],
-    "explanation": "Use a small representative subset of floors for predictable live performance and clear narration.",
-    "scopeSource": "demo/adam-10/demo.config.json"
+    "scopeSource": "demo/adam-10/demo.config.json",
+    "routingMode": "demo",
+    "allowManualRiserSelection": true,
+    "explanation": "Use a representative subset of floors for predictable live performance and clear narration."
   },
   "routingPreparation": {
     "riserOrShaftCandidates": {
       "expectedStackLabels": ["R1", "R2", "R3", "R4", "R5", "R6", "R7"],
-      "notes": "Labels come from the current ADAM_10 BIMPipe demo baseline export and are used as demo stack identifiers."
+      "notes": "Use current ADAM_10 BIMPipe baseline stack labels as demo identifiers."
     },
     "targetConnectionPoints": {
       "priorityOrder": [
         "Toilet fixtures (primary sanitary targets)",
-        "Kitchen/service sink fixtures on included floors"
+        "Kitchen/service sink fixtures on included demo floors"
       ],
       "validationChecks": [
         "Included-floor toilets are visibly assigned to a stack candidate before export.",
-        "Kitchen/service sinks on included floors are reviewed as secondary targets.",
+        "Kitchen/service sinks are reviewed as secondary targets.",
         "Any unassigned targets are called out during the demo as known limitations."
       ]
     },
-    "manualOverrideRule": "Manual riser position changes take precedence over auto-suggested positions in the demo narrative."
+    "manualOverrideRule": "Manual riser position changes take precedence over auto-suggested positions."
   },
   "exportReadiness": {
     "readyWhen": [
-      "ADAM_10.ifc was uploaded in demo mode.",
+      "ADAM_10.ifc is uploaded while demo mode is enabled.",
       "At least one riser candidate is visible in scoped floors.",
       "Primary toilet targets were reviewed for stack assignment."
     ],
     "blockedWhen": [
-      "Model upload is not ADAM_10.ifc while demo mode is enabled.",
+      "Uploaded model is not ADAM_10.ifc while demo mode is enabled.",
       "No risers are present after suggest/manual steps."
     ],
     "note": "This file documents demo expectations only and does not by itself prove end-to-end IFC export validation."
