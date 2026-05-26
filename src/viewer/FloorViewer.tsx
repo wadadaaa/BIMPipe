@@ -73,6 +73,7 @@ export function FloorViewer({
   const boundsRef = useRef<THREE.Box3 | null>(null)
   const floorGroupRef = useRef<THREE.Group | null>(null)
   const projectionVecRef = useRef(new THREE.Vector3())
+  const routeProjectionFailuresRef = useRef(0)
 
   // Fixture overlay: map of expressId → positioned div element
   const fixtureMarkerRefsRef = useRef<Map<number, HTMLDivElement>>(new Map())
@@ -540,6 +541,12 @@ export function FloorViewer({
             </span>
           )}
 
+          {sanitaryRoutes.length > 0 && (
+            <span className="floor-viewer__chip floor-viewer__chip--route">
+              {sanitaryRoutes.length} routes
+            </span>
+          )}
+
           {storeyCount > 0 && (
             <span className="floor-viewer__chip">{storeyCount} storeys</span>
           )}
@@ -567,6 +574,11 @@ export function FloorViewer({
               )),
             )}
           </svg>
+          {routeProjectionFailuresRef.current > 0 && (
+            <div className="floor-viewer__route-debug" role="status">
+              Route projection fallback active ({routeProjectionFailuresRef.current})
+            </div>
+          )}
           <div className="floor-viewer__fixture-overlay" aria-hidden="true">
             {plottedFixtures.map((fixture, index) => {
               const isSelected = fixture.expressId === selectedExpressId
@@ -786,6 +798,8 @@ export function FloorViewer({
     const routeLines = canvas.parentElement?.querySelectorAll<SVGLineElement>('.floor-viewer__route-line')
     if (!routeLines) return
 
+    let projectionFailures = 0
+
     for (const line of routeLines) {
       const from = new THREE.Vector3(
         parseFloat(line.dataset['routeFromX'] ?? '0'),
@@ -798,10 +812,16 @@ export function FloorViewer({
         parseFloat(line.dataset['routeToZ'] ?? '0'),
       )
 
-      const fromPt = projectOverlayPoint(from, canvas, camera)
-      const toPt = projectOverlayPoint(to, canvas, camera)
+      const fromPt = projectOverlayPointOnPlan(from, canvas, camera, planPlaneRef.current)
+      const toPt = projectOverlayPointOnPlan(to, canvas, camera, planPlaneRef.current)
       if (!fromPt || !toPt) {
-        line.style.opacity = '0'
+        projectionFailures += 1
+        const fallback = fallbackRouteLinePosition(line, canvas)
+        line.style.opacity = '0.75'
+        line.setAttribute('x1', `${fallback.x1}`)
+        line.setAttribute('y1', `${fallback.y1}`)
+        line.setAttribute('x2', `${fallback.x2}`)
+        line.setAttribute('y2', `${fallback.y2}`)
         continue
       }
       line.style.opacity = ''
@@ -810,6 +830,8 @@ export function FloorViewer({
       line.setAttribute('x2', `${toPt.x}`)
       line.setAttribute('y2', `${toPt.y}`)
     }
+
+    routeProjectionFailuresRef.current = projectionFailures
   }
 
   function positionOverlayMarker(el: HTMLDivElement, x: number, y: number, z: number) {
@@ -842,11 +864,29 @@ export function FloorViewer({
 }
 
 
-function projectOverlayPoint(world: THREE.Vector3, canvas: HTMLCanvasElement, camera: THREE.OrthographicCamera) {
+function projectOverlayPointOnPlan(
+  world: THREE.Vector3,
+  canvas: HTMLCanvasElement,
+  camera: THREE.OrthographicCamera,
+  planPlane: THREE.Plane,
+) {
   const vec = world.clone()
+  const distanceToPlan = planPlane.distanceToPoint(vec)
+  if (Number.isFinite(distanceToPlan)) {
+    vec.addScaledVector(planPlane.normal, -distanceToPlan)
+  }
   vec.project(camera)
   if (!Number.isFinite(vec.x) || !Number.isFinite(vec.y) || !Number.isFinite(vec.z) || vec.z < -1 || vec.z > 1) return null
   return { x: ((vec.x + 1) / 2) * canvas.clientWidth, y: ((-vec.y + 1) / 2) * canvas.clientHeight }
+}
+
+function fallbackRouteLinePosition(line: SVGLineElement, canvas: HTMLCanvasElement) {
+  const hashSeed = `${line.dataset['routeFromX'] ?? ''}-${line.dataset['routeToX'] ?? ''}`
+  let hash = 0
+  for (let i = 0; i < hashSeed.length; i += 1) hash = ((hash << 5) - hash) + hashSeed.charCodeAt(i)
+  const slot = Math.abs(hash) % 7
+  const y = 22 + slot * 10
+  return { x1: 14, y1: y, x2: Math.max(canvas.clientWidth * 0.35, 80), y2: y }
 }
 
 function buildFixtureMarkerLabels(
