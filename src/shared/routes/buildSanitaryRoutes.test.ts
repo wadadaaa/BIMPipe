@@ -66,5 +66,34 @@ describe('buildSanitaryRoutingDemoPlan', () => {
     expect(far?.segments[0].kind).toBe('main')
     expect(close?.segments).toHaveLength(2)
     expect(close?.segments[0].kind).toBe('branch')
+    expect(plan.limitations).toContain('45° branches are approximated by a single branch segment in plan view for the demo.')
+  })
+
+  it('assigns fixtures to their nearest riser when multiple risers exist', () => {
+    const plan = buildSanitaryRoutingDemoPlan(
+      [
+        fixture({ expressId: 201, position: { x: 1, y: 0, z: 0 } }),
+        fixture({ expressId: 202, position: { x: 101, y: 0, z: 0 } }),
+      ],
+      [riser('R1', 0, 0), riser('R2', 100, 0)],
+      demoConfig,
+    )
+
+    expect(plan.routes.find((route) => route.fixtureExpressId === 201)?.riserId).toBe('R1')
+    expect(plan.routes.find((route) => route.fixtureExpressId === 202)?.riserId).toBe('R2')
+  })
+
+  it('uses a single main segment without branch limitation for one fixture per riser', () => {
+    const plan = buildSanitaryRoutingDemoPlan(
+      [fixture({ expressId: 301, position: { x: 2, y: 0, z: 0 } })],
+      [riser('R1', 10, 0)],
+      demoConfig,
+    )
+
+    expect(plan.routes).toHaveLength(1)
+    expect(plan.routes[0].segments).toEqual([
+      { from: { x: 2, y: 0, z: 0 }, to: { x: 10, y: 0, z: 0 }, kind: 'main' },
+    ])
+    expect(plan.limitations).not.toContain('45° branches are approximated by a single branch segment in plan view for the demo.')
   })
 })
