@@ -56,6 +56,24 @@ describe('buildRiserStack', () => {
     ])
   })
 
+  it('computes levelRange from the provided storey slice', () => {
+    let seq = 0
+    const createId = () => `id-${++seq}`
+
+    const risers = buildRiserStack(
+      [STOREYS[1], STOREYS[2]],
+      2,
+      { x: 100, y: 700, z: 200 },
+      'R21',
+      'detected',
+      createId,
+    )
+
+    expect(risers).toHaveLength(2)
+    expect(new Set(risers.map((riser) => riser.storeyId))).toEqual(new Set([2, 3]))
+    expect(new Set(risers.map((riser) => `${riser.levelRange?.from}:${riser.levelRange?.to}`))).toEqual(new Set(['2:3']))
+  })
+
   it('removes the whole stack when one floor riser is deleted', () => {
     const risers: Riser[] = [
       {

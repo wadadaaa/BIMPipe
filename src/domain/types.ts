@@ -29,7 +29,6 @@ export interface Riser {
   systemType?: 'sanitary'
   source?: RiserSource
   levelRange?: { from: StoreyId; to: StoreyId }
-  connectionSide?: 'north' | 'south' | 'east' | 'west'
 }
 
 export type FixtureKind =
