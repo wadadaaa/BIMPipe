@@ -128,7 +128,7 @@
   position: absolute;
   top: 16px;
   left: 16px;
-  z-index: 5;
+  z-index: 4;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -188,7 +188,7 @@
 .floor-viewer__route-overlay {
   position: absolute;
   inset: 0;
-  z-index: 5;
+  z-index: 4;
   width: 100%;
   height: 100%;
   pointer-events: none;
@@ -197,33 +197,37 @@
 
 .floor-viewer__route-line {
   vector-effect: non-scaling-stroke;
-  stroke-width: 2.6;
+  stroke-width: 4;
   stroke-linecap: round;
-  stroke-dasharray: 10 7;
-  opacity: 0.76;
-  filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.6));
+  stroke-dasharray: 14 8;
+  opacity: 0.94;
+  filter:
+    drop-shadow(0 0 5px rgba(0, 0, 0, 0.82))
+    drop-shadow(0 0 10px rgba(0, 0, 0, 0.55));
 }
 
 .floor-viewer__route-line--main {
-  stroke: #4dd7ff;
-  stroke-width: 4.2;
+  stroke: #25c7ff;
+  stroke-width: 6.2;
   opacity: 1;
   stroke-dasharray: none;
-  filter: drop-shadow(0 0 6px rgba(8, 28, 36, 0.95));
+  filter:
+    drop-shadow(0 0 4px rgba(0, 0, 0, 0.92))
+    drop-shadow(0 0 12px rgba(24, 171, 227, 0.7));
 }
 
 .floor-viewer__route-line--branch {
-  stroke: #ffd166;
-  stroke-width: 2.8;
-  opacity: 0.98;
-  stroke-dasharray: 12 6;
+  stroke: #ffcc33;
+  stroke-width: 4.6;
+  opacity: 1;
+  stroke-dasharray: 18 10;
 }
 
 /* ── Fixture overlay ── */
 .floor-viewer__fixture-overlay {
   position: absolute;
   inset: 0;
-  z-index: 3;
+  z-index: 5;
   pointer-events: none;
   overflow: hidden;
 }
@@ -341,7 +345,7 @@
 .floor-viewer__kitchen-overlay {
   position: absolute;
   inset: 0;
-  z-index: 3;
+  z-index: 6;
   pointer-events: none;
   overflow: hidden;
 }
@@ -402,7 +406,7 @@
 .floor-viewer__riser-overlay {
   position: absolute;
   inset: 0;
-  z-index: 4;
+  z-index: 7;
   pointer-events: none;
   overflow: hidden;
 }
@@ -754,9 +758,10 @@
 }
 
 .floor-viewer__chip--route {
-  border-color: rgba(77, 215, 255, 0.5);
-  background: rgba(77, 215, 255, 0.18);
-  color: #b4f3ff;
+  border-color: rgba(37, 199, 255, 0.72);
+  background: rgba(8, 61, 92, 0.78);
+  color: #d8f6ff;
+  text-shadow: 0 0 8px rgba(37, 199, 255, 0.42);
 }
 
 .floor-viewer__route-debug {
@@ -771,4 +776,14 @@
   background: rgba(36, 25, 8, 0.92);
   color: #ffd166;
   pointer-events: none;
+}
+
+.floor-viewer__legend-item--route-main {
+  border-color: rgba(37, 199, 255, 0.45);
+  color: #98e9ff;
+}
+
+.floor-viewer__legend-item--route-branch {
+  border-color: rgba(255, 204, 51, 0.4);
+  color: #ffd772;
 }

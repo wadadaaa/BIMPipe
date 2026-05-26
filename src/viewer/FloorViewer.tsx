@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useMemo, useRef, type CSSProperties } from 'react'
+import { startTransition, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import * as THREE from 'three'
 import { MapControls } from 'three/examples/jsm/controls/MapControls.js'
 import type { ThemeMode } from '@/app/App'
@@ -73,7 +73,8 @@ export function FloorViewer({
   const boundsRef = useRef<THREE.Box3 | null>(null)
   const floorGroupRef = useRef<THREE.Group | null>(null)
   const projectionVecRef = useRef(new THREE.Vector3())
-  const routeProjectionFailuresRef = useRef(0)
+  const routeLineRefsRef = useRef<Map<string, SVGLineElement>>(new Map())
+  const [routeProjectionStatus, setRouteProjectionStatus] = useState<{ failed: number; total: number }>({ failed: 0, total: 0 })
 
   // Fixture overlay: map of expressId → positioned div element
   const fixtureMarkerRefsRef = useRef<Map<number, HTMLDivElement>>(new Map())
@@ -543,7 +544,7 @@ export function FloorViewer({
 
           {sanitaryRoutes.length > 0 && (
             <span className="floor-viewer__chip floor-viewer__chip--route">
-              {sanitaryRoutes.length} routes
+              {sanitaryRoutes.length} sanitary {sanitaryRoutes.length === 1 ? 'route' : 'routes'}
             </span>
           )}
 
@@ -560,6 +561,11 @@ export function FloorViewer({
               route.segments.map((segment, index) => (
                 <line
                   key={`${route.fixtureExpressId}-${segment.kind}-${index}`}
+                  ref={(el) => {
+                    const lineKey = `${route.fixtureExpressId}-${segment.kind}-${index}`
+                    if (el) routeLineRefsRef.current.set(lineKey, el)
+                    else routeLineRefsRef.current.delete(lineKey)
+                  }}
                   className={[
                     'floor-viewer__route-line',
                     segment.kind === 'main' ? 'floor-viewer__route-line--main' : 'floor-viewer__route-line--branch',
@@ -574,9 +580,9 @@ export function FloorViewer({
               )),
             )}
           </svg>
-          {routeProjectionFailuresRef.current > 0 && (
+          {routeProjectionStatus.failed > 0 && (
             <div className="floor-viewer__route-debug" role="status">
-              Route projection fallback active ({routeProjectionFailuresRef.current})
+              Preview limitation: {routeProjectionStatus.failed} / {routeProjectionStatus.total} route segments could not be projected exactly. Showing fallback guide lines.
             </div>
           )}
           <div className="floor-viewer__fixture-overlay" aria-hidden="true">
@@ -725,6 +731,12 @@ export function FloorViewer({
           <span className="floor-viewer__legend-item floor-viewer__legend-item--riser">
             Blue = risers
           </span>
+          <span className="floor-viewer__legend-item floor-viewer__legend-item--route-main">
+            Cyan = main sanitary route
+          </span>
+          <span className="floor-viewer__legend-item floor-viewer__legend-item--route-branch">
+            Dashed amber = branch route
+          </span>
           {isAddingFixture && (
             <span className="floor-viewer__legend-item floor-viewer__legend-item--fixture">
               Click to place {getFixtureKindLabel(pendingFixtureKind).toLowerCase()}
@@ -795,12 +807,17 @@ export function FloorViewer({
     const camera = cameraRef.current
     if (!canvas || !camera) return
 
-    const routeLines = canvas.parentElement?.querySelectorAll<SVGLineElement>('.floor-viewer__route-line')
-    if (!routeLines) return
+    const routeLines = routeLineRefsRef.current
+    if (routeLines.size === 0) {
+      if (routeProjectionStatus.failed !== 0 || routeProjectionStatus.total !== 0) {
+        setRouteProjectionStatus({ failed: 0, total: 0 })
+      }
+      return
+    }
 
     let projectionFailures = 0
 
-    for (const line of routeLines) {
+    for (const [, line] of routeLines) {
       const from = new THREE.Vector3(
         parseFloat(line.dataset['routeFromX'] ?? '0'),
         parseFloat(line.dataset['routeFromY'] ?? '0'),
@@ -831,7 +848,9 @@ export function FloorViewer({
       line.setAttribute('y2', `${toPt.y}`)
     }
 
-    routeProjectionFailuresRef.current = projectionFailures
+    if (projectionFailures !== routeProjectionStatus.failed || routeLines.size !== routeProjectionStatus.total) {
+      setRouteProjectionStatus({ failed: projectionFailures, total: routeLines.size })
+    }
   }
 
   function positionOverlayMarker(el: HTMLDivElement, x: number, y: number, z: number) {
