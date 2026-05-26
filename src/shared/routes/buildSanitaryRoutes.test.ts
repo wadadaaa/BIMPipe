@@ -21,8 +21,8 @@ function fixture(overrides: Partial<Fixture>): Fixture {
   }
 }
 
-function riser(id: string, x: number, z: number): Riser {
-  return { id, stackId: id, stackLabel: id, storeyId: 1, position: { x, y: 0, z } }
+function riser(id: string, x: number, z: number, storeyId = 1): Riser {
+  return { id, stackId: id, stackLabel: id, storeyId, position: { x, y: 0, z } }
 }
 
 describe('buildSanitaryRoutingDemoPlan', () => {
@@ -30,6 +30,15 @@ describe('buildSanitaryRoutingDemoPlan', () => {
     const plan = buildSanitaryRoutingDemoPlan([fixture({})], [], demoConfig)
     expect(plan.routes).toHaveLength(0)
     expect(plan.limitations[0]).toContain('requires at least one selected riser')
+  })
+
+  it('throws when called outside demo routing mode', () => {
+    expect(() =>
+      buildSanitaryRoutingDemoPlan([fixture({})], [riser('R1', 10, 0)], {
+        ...demoConfig,
+        routing: { ...demoConfig.routing, mode: 'production' },
+      }),
+    ).toThrow('requires demo routing mode')
   })
 
   it('applies PRD defaults for toilets and wet fixtures', () => {
@@ -69,7 +78,7 @@ describe('buildSanitaryRoutingDemoPlan', () => {
     expect(plan.limitations).toContain('45° branches are approximated by a single branch segment in plan view for the demo.')
   })
 
-  it('assigns fixtures to their nearest riser when multiple risers exist', () => {
+  it('assigns fixtures to their nearest same-storey riser when multiple risers exist', () => {
     const plan = buildSanitaryRoutingDemoPlan(
       [
         fixture({ expressId: 201, position: { x: 1, y: 0, z: 0 } }),
@@ -81,6 +90,29 @@ describe('buildSanitaryRoutingDemoPlan', () => {
 
     expect(plan.routes.find((route) => route.fixtureExpressId === 201)?.riserId).toBe('R1')
     expect(plan.routes.find((route) => route.fixtureExpressId === 202)?.riserId).toBe('R2')
+  })
+
+  it('does not route fixtures to risers from other storeys', () => {
+    const plan = buildSanitaryRoutingDemoPlan(
+      [fixture({ expressId: 401, storeyId: 1, position: { x: 1, y: 0, z: 0 } })],
+      [riser('R2', 1, 0, 2)],
+      demoConfig,
+    )
+
+    expect(plan.routes).toHaveLength(0)
+    expect(plan.limitations[0]).toContain('no same-storey riser')
+    expect(plan.limitations[0]).toContain('401')
+  })
+
+  it('documents unsupported fixture kinds as skipped', () => {
+    const plan = buildSanitaryRoutingDemoPlan(
+      [fixture({ expressId: 501, kind: 'URINAL', position: { x: 1, y: 0, z: 0 } })],
+      [riser('R1', 10, 0)],
+      demoConfig,
+    )
+
+    expect(plan.routes).toHaveLength(0)
+    expect(plan.limitations[0]).toContain('Unsupported fixture kinds skipped: URINAL')
   })
 
   it('uses a single main segment without branch limitation for one fixture per riser', () => {
