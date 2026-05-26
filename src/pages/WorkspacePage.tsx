@@ -1,4 +1,4 @@
-import { lazy, startTransition, Suspense, useEffect, useRef, useState, type MutableRefObject } from 'react'
+import { lazy, startTransition, Suspense, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import { IfcUpload } from '@/features/ifc-upload/IfcUpload'
 import { StoreyList } from '@/features/storey-list/StoreyList'
 import { Sidebar } from '@/features/sidebar/Sidebar'
@@ -18,6 +18,7 @@ import { suggestRiserPositions } from '@/shared/routes/suggestRisers'
 import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE } from '@/shared/routes/riserPlacementProfile'
 import { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
 import { buildDemoModeUploadError, getDemoRuntimeConfig, isStoreyIncludedInDemoScope } from '@/shared/demoConfig'
+import { buildSanitaryRoutingDemoPlan } from '@/shared/routes/buildSanitaryRoutes'
 
 let floorViewerModulePromise: Promise<typeof import('@/viewer/FloorViewer')> | null = null
 let model3DViewerModulePromise: Promise<typeof import('@/viewer/Model3DViewer')> | null = null
@@ -464,6 +465,14 @@ export function WorkspacePage({
 
   // ---------------------------------------------------------------------------
 
+
+  const sanitaryRoutingPreview = useMemo(() => {
+    if (!demoRuntime.enabled || selectedStoreyId === null) return { routes: [], limitations: [] }
+    const floorFixtures = fixtures.filter((fixture) => fixture.storeyId === selectedStoreyId)
+    const floorRisers = risers.filter((riser) => riser.storeyId === selectedStoreyId)
+    return buildSanitaryRoutingDemoPlan(floorFixtures, floorRisers, demoRuntime.config)
+  }, [demoRuntime, fixtures, risers, selectedStoreyId])
+
   const selectedStorey = storeys.find((storey) => storey.id === selectedStoreyId) ?? null
   const shouldLoadViewer =
     isExtractingGeometry || geometryError !== null || floorMeshes !== null
@@ -575,6 +584,7 @@ export function WorkspacePage({
           onRiserAdd={handleAddRiser}
           onRiserMove={handleMoveRiser}
           onSwitch3D={storeys.length > 0 ? handleSwitch3D : undefined}
+          sanitaryRoutes={sanitaryRoutingPreview.routes}
         />
       </ViewTransition>
     </Suspense>
@@ -603,6 +613,7 @@ export function WorkspacePage({
       onDownloadFullIfc={() => void handleDownloadIfc()}
       validationReport={validationReport}
       detectionAggregation={detectionDebugRef.current}
+      sanitaryRouteLimitations={sanitaryRoutingPreview.limitations}
     />
   )
 

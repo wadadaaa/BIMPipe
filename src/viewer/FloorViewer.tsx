@@ -2,6 +2,7 @@ import { startTransition, useEffect, useMemo, useRef, type CSSProperties } from 
 import * as THREE from 'three'
 import { MapControls } from 'three/examples/jsm/controls/MapControls.js'
 import type { ThemeMode } from '@/app/App'
+import type { SanitaryFixtureRoute } from '@/shared/routes/buildSanitaryRoutes'
 import type { FloorMeshes } from '@/shared/ifc/extractFloorMeshes'
 import type { Fixture, FixtureKind, KitchenArea, Riser, RiserId } from '@/domain/types'
 import { ViewTransition } from '@/shared/reactViewTransition'
@@ -32,6 +33,7 @@ interface FloorViewerProps {
   onRiserAdd?: (pos: { x: number; y: number; z: number }) => void
   onRiserMove?: (id: RiserId, pos: { x: number; y: number; z: number }) => void
   onSwitch3D?: () => void
+  sanitaryRoutes?: SanitaryFixtureRoute[]
 }
 
 export function FloorViewer({
@@ -56,6 +58,7 @@ export function FloorViewer({
   onRiserAdd = () => {},
   onRiserMove = () => {},
   onSwitch3D,
+  sanitaryRoutes = [],
 }: FloorViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
@@ -140,6 +143,7 @@ export function FloorViewer({
       animateKitchenMarkers()
       animateFixtureMarkers()
       animateRiserMarkers()
+      animateRouteLines()
     }
 
     const queueRender = () => {
@@ -299,7 +303,7 @@ export function FloorViewer({
 
   useEffect(() => {
     scheduleRender()
-  }, [floorMeshes, plottedFixtures, plottedKitchens, risers])
+  }, [floorMeshes, plottedFixtures, plottedKitchens, risers, sanitaryRoutes])
 
   const raycaster = useRef(new THREE.Raycaster())
   const pointer = useRef(new THREE.Vector2())
@@ -544,6 +548,25 @@ export function FloorViewer({
 
       {!showOverlay && (
         <>
+          <svg className="floor-viewer__route-overlay" aria-hidden="true">
+            {sanitaryRoutes.flatMap((route) =>
+              route.segments.map((segment, index) => (
+                <line
+                  key={`${route.fixtureExpressId}-${segment.kind}-${index}`}
+                  className={[
+                    'floor-viewer__route-line',
+                    segment.kind === 'main' ? 'floor-viewer__route-line--main' : 'floor-viewer__route-line--branch',
+                  ].join(' ')}
+                  data-route-from-x={String(segment.from.x)}
+                  data-route-from-y={String(segment.from.y)}
+                  data-route-from-z={String(segment.from.z)}
+                  data-route-to-x={String(segment.to.x)}
+                  data-route-to-y={String(segment.to.y)}
+                  data-route-to-z={String(segment.to.z)}
+                />
+              )),
+            )}
+          </svg>
           <div className="floor-viewer__fixture-overlay" aria-hidden="true">
             {plottedFixtures.map((fixture, index) => {
               const isSelected = fixture.expressId === selectedExpressId
@@ -754,6 +777,41 @@ export function FloorViewer({
     }
   }
 
+
+  function animateRouteLines() {
+    const canvas = canvasRef.current
+    const camera = cameraRef.current
+    if (!canvas || !camera) return
+
+    const routeLines = canvas.parentElement?.querySelectorAll<SVGLineElement>('.floor-viewer__route-line')
+    if (!routeLines) return
+
+    for (const line of routeLines) {
+      const from = new THREE.Vector3(
+        parseFloat(line.dataset['routeFromX'] ?? '0'),
+        parseFloat(line.dataset['routeFromY'] ?? '0'),
+        parseFloat(line.dataset['routeFromZ'] ?? '0'),
+      )
+      const to = new THREE.Vector3(
+        parseFloat(line.dataset['routeToX'] ?? '0'),
+        parseFloat(line.dataset['routeToY'] ?? '0'),
+        parseFloat(line.dataset['routeToZ'] ?? '0'),
+      )
+
+      const fromPt = projectOverlayPoint(from, canvas, camera)
+      const toPt = projectOverlayPoint(to, canvas, camera)
+      if (!fromPt || !toPt) {
+        line.style.opacity = '0'
+        continue
+      }
+      line.style.opacity = ''
+      line.setAttribute('x1', `${fromPt.x}`)
+      line.setAttribute('y1', `${fromPt.y}`)
+      line.setAttribute('x2', `${toPt.x}`)
+      line.setAttribute('y2', `${toPt.y}`)
+    }
+  }
+
   function positionOverlayMarker(el: HTMLDivElement, x: number, y: number, z: number) {
     const canvas = canvasRef.current
     const camera = cameraRef.current
@@ -781,6 +839,14 @@ export function FloorViewer({
     el.style.opacity = '1'
     el.style.transform = `translate(${sx}px, ${sy}px) translate(-50%, -50%)`
   }
+}
+
+
+function projectOverlayPoint(world: THREE.Vector3, canvas: HTMLCanvasElement, camera: THREE.OrthographicCamera) {
+  const vec = world.clone()
+  vec.project(camera)
+  if (!Number.isFinite(vec.x) || !Number.isFinite(vec.y) || !Number.isFinite(vec.z) || vec.z < -1 || vec.z > 1) return null
+  return { x: ((vec.x + 1) / 2) * canvas.clientWidth, y: ((-vec.y + 1) / 2) * canvas.clientHeight }
 }
 
 function buildFixtureMarkerLabels(
