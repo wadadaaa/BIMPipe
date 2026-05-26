@@ -1,8 +1,9 @@
 import type { Fixture, FixtureKind, Riser } from '@/domain/types'
 import type { DemoConfig } from '@/shared/demoConfig'
+import { SLOPE } from './buildRoutes'
 import { planDistance } from './planGeometry'
 
-export const DEMO_SANITARY_SLOPE = 0.02
+export const DEMO_SANITARY_SLOPE = SLOPE
 
 export interface RouteSegment {
   from: { x: number; y: number; z: number }
@@ -26,7 +27,14 @@ export interface SanitaryRoutingPlan {
   limitations: string[]
 }
 
+// BIM-48 demo scope intentionally supports only the fixture classes from the plumbing PRD.
+// URINAL, BIDET, CISTERN, and OTHER are skipped with a limitation until explicitly scoped.
 const SUPPORTED_KINDS = new Set<FixtureKind>(['TOILETPAN', 'BATH', 'SINK', 'WASHHANDBASIN'])
+
+interface RiserFixtureGroup {
+  riser: Riser
+  members: Fixture[]
+}
 
 export function buildSanitaryRoutingDemoPlan(
   fixtures: Fixture[],
@@ -42,21 +50,18 @@ export function buildSanitaryRoutingDemoPlan(
   }
 
   const located = fixtures.filter((fixture) => fixture.position && SUPPORTED_KINDS.has(fixture.kind))
-  const groupedByRiser = new Map<string, Fixture[]>()
+  const groupedByRiser = new Map<string, RiserFixtureGroup>()
 
   for (const fixture of located) {
     const nearest = findNearestRiser(fixture, risers)
     const bucket = groupedByRiser.get(nearest.id)
-    if (bucket) bucket.push(fixture)
-    else groupedByRiser.set(nearest.id, [fixture])
+    if (bucket) bucket.members.push(fixture)
+    else groupedByRiser.set(nearest.id, { riser: nearest, members: [fixture] })
   }
 
   const routes: SanitaryFixtureRoute[] = []
 
-  for (const [riserId, members] of groupedByRiser.entries()) {
-    const riser = risers.find((item) => item.id === riserId)
-    if (!riser) continue
-
+  for (const { riser, members } of groupedByRiser.values()) {
     const farthest = [...members].sort((a, b) => {
       const aPos = a.position!
       const bPos = b.position!
@@ -66,19 +71,19 @@ export function buildSanitaryRoutingDemoPlan(
     for (const fixture of members) {
       const fixturePos = fixture.position!
       const onMainLine = fixture.expressId === farthest.expressId
-      const mainConnection = buildMainConnectionPoint(fixturePos, riser.position)
+      const branchJunction = approximateBranchJunction(fixturePos, riser.position)
 
       const segments: RouteSegment[] = []
       if (!onMainLine) {
-        segments.push({ from: fixturePos, to: mainConnection, kind: 'branch' })
+        segments.push({ from: fixturePos, to: branchJunction, kind: 'branch' })
       }
-      segments.push({ from: onMainLine ? fixturePos : mainConnection, to: riser.position, kind: 'main' })
+      segments.push({ from: onMainLine ? fixturePos : branchJunction, to: riser.position, kind: 'main' })
 
       routes.push({
         fixtureExpressId: fixture.expressId,
         fixtureName: fixture.name,
         fixtureKind: fixture.kind,
-        riserId,
+        riserId: riser.id,
         pipeDiameterMm: fixture.kind === 'TOILETPAN' ? 110 : 50,
         startHeightAboveFloorM: fixture.kind === 'TOILETPAN' ? 0.2 : 0.15,
         slope: DEMO_SANITARY_SLOPE,
@@ -95,7 +100,9 @@ export function buildSanitaryRoutingDemoPlan(
   if (unsupportedKinds.length > 0) {
     limitations.push(`Unsupported fixture kinds skipped: ${Array.from(new Set(unsupportedKinds)).join(', ')}.`)
   }
-  limitations.push('45° branches are approximated by a single branch segment in plan view for the demo.')
+  if (routes.some((route) => route.segments.some((segment) => segment.kind === 'branch'))) {
+    limitations.push('45° branches are approximated by a single branch segment in plan view for the demo.')
+  }
 
   return { routes, limitations }
 }
@@ -117,7 +124,7 @@ function findNearestRiser(fixture: Fixture, risers: Riser[]): Riser {
   return nearest
 }
 
-function buildMainConnectionPoint(
+function approximateBranchJunction(
   fixture: { x: number; y: number; z: number },
   riser: { x: number; y: number; z: number },
 ): { x: number; y: number; z: number } {
