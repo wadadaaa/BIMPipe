@@ -42,7 +42,7 @@ export function buildSanitaryRoutingDemoPlan(
   config: DemoConfig,
 ): SanitaryRoutingPlan {
   if (config.routing.mode !== 'demo') {
-    return { routes: [], limitations: ['Demo sanitary routing is disabled for non-demo mode.'] }
+    throw new Error('buildSanitaryRoutingDemoPlan requires demo routing mode.')
   }
 
   if (risers.length === 0) {
@@ -50,10 +50,17 @@ export function buildSanitaryRoutingDemoPlan(
   }
 
   const located = fixtures.filter((fixture) => fixture.position && SUPPORTED_KINDS.has(fixture.kind))
+  const fixturesWithoutSameStoreyRiser: Fixture[] = []
   const groupedByRiser = new Map<string, RiserFixtureGroup>()
 
   for (const fixture of located) {
-    const nearest = findNearestRiser(fixture, risers)
+    const sameStoreyRisers = risers.filter((riser) => riser.storeyId === fixture.storeyId)
+    if (sameStoreyRisers.length === 0) {
+      fixturesWithoutSameStoreyRiser.push(fixture)
+      continue
+    }
+
+    const nearest = findNearestRiser(fixture, sameStoreyRisers)
     const bucket = groupedByRiser.get(nearest.id)
     if (bucket) bucket.members.push(fixture)
     else groupedByRiser.set(nearest.id, { riser: nearest, members: [fixture] })
@@ -99,6 +106,13 @@ export function buildSanitaryRoutingDemoPlan(
   const limitations: string[] = []
   if (unsupportedKinds.length > 0) {
     limitations.push(`Unsupported fixture kinds skipped: ${Array.from(new Set(unsupportedKinds)).join(', ')}.`)
+  }
+  if (fixturesWithoutSameStoreyRiser.length > 0) {
+    limitations.push(
+      `Fixtures skipped because no same-storey riser is available: ${fixturesWithoutSameStoreyRiser
+        .map((fixture) => fixture.expressId)
+        .join(', ')}.`,
+    )
   }
   if (routes.some((route) => route.segments.some((segment) => segment.kind === 'branch'))) {
     limitations.push('45° branches are approximated by a single branch segment in plan view for the demo.')
