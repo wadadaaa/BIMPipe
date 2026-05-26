@@ -305,7 +305,7 @@ export function WorkspacePage({
     startTransition(() =>
       setRisers((prev) => [
         ...prev,
-        ...buildRiserStack(storeys, selectedStoreyId, pos, takeNextRiserLabel(nextRiserLabelRef)),
+        ...buildRiserStack(storeys, selectedStoreyId, pos, takeNextRiserLabel(nextRiserLabelRef), 'manual'),
       ]),
     )
   }
@@ -657,15 +657,17 @@ function buildSuggestedRisers(
   const scopedKitchens = kitchens.filter((kitchen) => scopedStoreyIds.has(kitchen.storeyId))
   const eligibleStoreyIdsFromFullModel = new Set(getEligibleStoreyIdsForAutoRisers(storeys, ruleProfile))
   const eligibleStoreyIds = new Set([...eligibleStoreyIdsFromFullModel].filter((storeyId) => scopedStoreyIds.has(storeyId)))
+  const targetStoreys = storeys.filter((storey) => eligibleStoreyIds.has(storey.id))
   const positions = suggestRiserPositions(scopedFixtures, scopedKitchens, floorPlanBounds, ruleProfile)
 
   return positions.flatMap((position) =>
     buildRiserStack(
-      storeys,
+      targetStoreys,
       sourceStoreyId,
       position,
       takeNextRiserLabel(nextRiserLabelRef),
-    ).filter((riser) => eligibleStoreyIds.has(riser.storeyId)),
+      'detected',
+    ),
   )
 }
 

@@ -109,6 +109,9 @@ export function RisersPanel({
               <span className="risers-panel__item-coords">
                 {fmt(riser.position.x)}, {fmt(riser.position.z)}
               </span>
+              <span className="risers-panel__item-source" title="Riser source">
+                {riser.source ?? "placed"}
+              </span>
               <button
                 className="risers-panel__item-delete"
                 onClick={() => onRemove(riser.id)}

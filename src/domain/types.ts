@@ -16,6 +16,7 @@ export interface Storey {
 export type SidebarTab = 'fixtures' | 'risers' | 'validation'
 
 export type RiserId = string
+export type RiserSource = 'manual' | 'placed' | 'detected'
 
 export interface Riser {
   id: RiserId
@@ -25,6 +26,9 @@ export interface Riser {
   stackLabel: string
   storeyId: StoreyId
   position: { x: number; y: number; z: number }
+  systemType?: 'sanitary'
+  source?: RiserSource
+  levelRange?: { from: StoreyId; to: StoreyId }
 }
 
 export type FixtureKind =

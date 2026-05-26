@@ -6,6 +6,7 @@ export function buildRiserStack(
   sourceStoreyId: StoreyId,
   position: Point3D,
   stackLabel: string,
+  source: Riser['source'] = 'placed',
   createId: () => string = () => crypto.randomUUID(),
 ): Riser[] {
   const stackId = createId()
@@ -18,8 +19,17 @@ export function buildRiserStack(
         stackLabel,
         storeyId: sourceStoreyId,
         position: { ...position },
+        source,
+        systemType: 'sanitary',
+        levelRange: { from: sourceStoreyId, to: sourceStoreyId },
       },
     ]
+  }
+
+  const sortedStoreys = [...storeys].sort((left, right) => left.elevation - right.elevation)
+  const levelRange = {
+    from: sortedStoreys[0]?.id ?? sourceStoreyId,
+    to: sortedStoreys[sortedStoreys.length - 1]?.id ?? sourceStoreyId,
   }
 
   const sourceStorey = storeys.find((storey) => storey.id === sourceStoreyId)
@@ -36,6 +46,9 @@ export function buildRiserStack(
       y: storey.elevation + verticalOffset,
       z: position.z,
     },
+    source,
+    systemType: 'sanitary',
+    levelRange,
   }))
 }
 
