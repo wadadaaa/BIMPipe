@@ -350,6 +350,7 @@ async function exportFullIfcWithRisersInternal(
         api,
         ifc,
         modelId,
+        schema,
         systemOwnerHistory,
         sanitaryRouteExport.flowSegmentHandles,
       )
@@ -364,6 +365,7 @@ async function exportFullIfcWithRisersInternal(
       api,
       ifc,
       modelId,
+      schema,
       systemOwnerHistory,
       createdFlowSegmentHandles,
     )
@@ -1373,6 +1375,7 @@ function writeSanitarySystemAssignment(
   api: IfcAPI,
   ifc: ImportedIfcTypes,
   modelId: number,
+  schema: string,
   ownerHistory: IfcHandle | null,
   riserHandles: IfcHandle[],
 ): FullIfcSystemAssignmentDebug {
@@ -1401,7 +1404,9 @@ function writeSanitarySystemAssignment(
     Name: api.CreateIfcType(modelId, ifc.IFCLABEL, 'BIMPipe Sanitary System Assignment'),
     Description: null,
     RelatedObjects: riserHandles,
-    RelatedObjectsType: api.CreateIfcType(modelId, ifc.IFCLABEL, 'IFCFLOWSEGMENT'),
+    ...(schema === 'IFC2X3'
+      ? { RelatedObjectsType: api.CreateIfcType(modelId, ifc.IFCLABEL, 'IFCFLOWSEGMENT') }
+      : {}),
     RelatingGroup: handleRef(system.expressID),
   })
 

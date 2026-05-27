@@ -876,6 +876,7 @@ describe('exportFullIfcWithRisers', () => {
       (line) => typeof line.Name === 'object' && (line.Name as { value?: string })?.value?.includes('BIMPipe Main 110mm'),
     )
     expect(routeElements.length).toBeGreaterThan(0)
+    // Mock type codes: 6 = IFCFLOWSEGMENT, 12 = IFCPIPESEGMENT
     expect(writtenLines.some((line) => line.type === 6 || line.type === 12)).toBe(true)
   })
 

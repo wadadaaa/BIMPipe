@@ -387,6 +387,11 @@ export function WorkspacePage({
     })
   }
 
+  const sanitaryRoutesForExport = useMemo(() => {
+    if (!demoRuntime.enabled) return []
+    return buildSanitaryRoutingDemoPlan(fixtures, risers, demoRuntime.config).routes
+  }, [demoRuntime, fixtures, risers])
+
   async function handleDownloadIfc() {
     if (
       sourceIfcBytesRef.current === null ||
@@ -466,11 +471,6 @@ export function WorkspacePage({
 
   // ---------------------------------------------------------------------------
 
-
-  const sanitaryRoutesForExport = useMemo(() => {
-    if (!demoRuntime.enabled) return []
-    return buildSanitaryRoutingDemoPlan(fixtures, risers, demoRuntime.config).routes
-  }, [demoRuntime, fixtures, risers])
 
   const sanitaryRoutingPreview = useMemo(() => {
     if (!demoRuntime.enabled || selectedStoreyId === null) return { routes: [], limitations: [] }

@@ -22,6 +22,7 @@ export interface SanitaryFixtureRoute {
   pipeDiameterMm: SanitaryPipeDiameterMm
   startHeightAboveFloorM: number
   slope: number
+  /** Per-fixture segments only; shared main runs are owned by the farthest fixture per riser group. */
   segments: RouteSegment[]
 }
 
