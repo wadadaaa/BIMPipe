@@ -21,8 +21,8 @@ function fixture(overrides: Partial<Fixture>): Fixture {
   }
 }
 
-function riser(id: string, x: number, z: number, storeyId = 1): Riser {
-  return { id, stackId: id, stackLabel: id, storeyId, position: { x, y: 0, z } }
+function riser(id: string, x: number, z: number, storeyId = 1, stackId = id, y = 0): Riser {
+  return { id, stackId, stackLabel: stackId, storeyId, position: { x, y, z } }
 }
 
 describe('buildSanitaryRoutingDemoPlan', () => {
@@ -106,6 +106,45 @@ describe('buildSanitaryRoutingDemoPlan', () => {
 
     expect(plan.routes.find((route) => route.fixtureExpressId === 201)?.riserId).toBe('R1')
     expect(plan.routes.find((route) => route.fixtureExpressId === 202)?.riserId).toBe('R2')
+  })
+
+  it('duplicates single-floor demo routes across matching riser stack floors', () => {
+    const plan = buildSanitaryRoutingDemoPlan(
+      [fixture({ expressId: 701, storeyId: 2, position: { x: 1, y: 3, z: 0 } })],
+      [
+        riser('R1-F2', 10, 0, 2, 'stack-A', 3),
+        riser('R1-F3', 10, 0, 3, 'stack-A', 6),
+        riser('R1-F4', 10, 0, 4, 'stack-A', 9),
+      ],
+      demoConfig,
+    )
+
+    expect(plan.routes.map((route) => route.riserId).sort()).toEqual(['R1-F2', 'R1-F3', 'R1-F4'])
+    expect(plan.routes.find((route) => route.riserId === 'R1-F3')?.segments[0]).toMatchObject({
+      from: { x: 1, y: 6, z: 0 },
+      to: { x: 10, y: 6, z: 0 },
+      kind: 'main',
+      pipeDiameterMm: 110,
+    })
+    expect(plan.limitations).toContain('Single-floor demo sanitary routes are duplicated across matching riser stack floors for IFC export.')
+  })
+
+  it('does not duplicate routes when fixtures already cover multiple storeys', () => {
+    const plan = buildSanitaryRoutingDemoPlan(
+      [
+        fixture({ expressId: 801, storeyId: 2, position: { x: 1, y: 3, z: 0 } }),
+        fixture({ expressId: 802, storeyId: 3, position: { x: 1, y: 6, z: 0 } }),
+      ],
+      [
+        riser('R1-F2', 10, 0, 2, 'stack-A', 3),
+        riser('R1-F3', 10, 0, 3, 'stack-A', 6),
+      ],
+      demoConfig,
+    )
+
+    expect(plan.routes).toHaveLength(2)
+    expect(plan.routes.map((route) => route.riserId).sort()).toEqual(['R1-F2', 'R1-F3'])
+    expect(plan.limitations).not.toContain('Single-floor demo sanitary routes are duplicated across matching riser stack floors for IFC export.')
   })
 
   it('does not route fixtures to risers from other storeys', () => {
