@@ -13,6 +13,7 @@ interface RisersPanelProps {
   downloadMode?: 'full' | null
   downloadError?: string | null
   onDownloadFullIfc?: () => void
+  sanitaryRouteLimitations?: string[]
 }
 
 export function RisersPanel({
@@ -27,6 +28,7 @@ export function RisersPanel({
   downloadMode = null,
   downloadError = null,
   onDownloadFullIfc = () => {},
+  sanitaryRouteLimitations = [],
 }: RisersPanelProps) {
   const canSuggest =
     fixtures.some((fixture) => fixture.position !== null) ||
@@ -80,6 +82,17 @@ export function RisersPanel({
         <p className="risers-panel__error" role="alert">
           {downloadError}
         </p>
+      )}
+
+      {sanitaryRouteLimitations.length > 0 && (
+        <div className="risers-panel__hint" role="status">
+          <strong>Sanitary routing preview notes</strong>
+          <ul className="risers-panel__limitations">
+            {sanitaryRouteLimitations.map((note) => (
+              <li key={note}>{note}</li>
+            ))}
+          </ul>
+        </div>
       )}
 
       {risers.length === 0 ? (

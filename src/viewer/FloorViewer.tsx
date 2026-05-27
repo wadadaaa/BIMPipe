@@ -1,7 +1,8 @@
-import { startTransition, useEffect, useMemo, useRef, type CSSProperties } from 'react'
+import { startTransition, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import * as THREE from 'three'
 import { MapControls } from 'three/examples/jsm/controls/MapControls.js'
 import type { ThemeMode } from '@/app/App'
+import type { SanitaryFixtureRoute } from '@/shared/routes/buildSanitaryRoutes'
 import type { FloorMeshes } from '@/shared/ifc/extractFloorMeshes'
 import type { Fixture, FixtureKind, KitchenArea, Riser, RiserId } from '@/domain/types'
 import { ViewTransition } from '@/shared/reactViewTransition'
@@ -32,6 +33,7 @@ interface FloorViewerProps {
   onRiserAdd?: (pos: { x: number; y: number; z: number }) => void
   onRiserMove?: (id: RiserId, pos: { x: number; y: number; z: number }) => void
   onSwitch3D?: () => void
+  sanitaryRoutes?: SanitaryFixtureRoute[]
 }
 
 export function FloorViewer({
@@ -56,6 +58,7 @@ export function FloorViewer({
   onRiserAdd = () => {},
   onRiserMove = () => {},
   onSwitch3D,
+  sanitaryRoutes = [],
 }: FloorViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
@@ -70,6 +73,8 @@ export function FloorViewer({
   const boundsRef = useRef<THREE.Box3 | null>(null)
   const floorGroupRef = useRef<THREE.Group | null>(null)
   const projectionVecRef = useRef(new THREE.Vector3())
+  const routeLineRefsRef = useRef<Map<string, SVGLineElement>>(new Map())
+  const [routeProjectionStatus, setRouteProjectionStatus] = useState<{ failed: number; total: number }>({ failed: 0, total: 0 })
 
   // Fixture overlay: map of expressId → positioned div element
   const fixtureMarkerRefsRef = useRef<Map<number, HTMLDivElement>>(new Map())
@@ -140,6 +145,7 @@ export function FloorViewer({
       animateKitchenMarkers()
       animateFixtureMarkers()
       animateRiserMarkers()
+      animateRouteLines()
     }
 
     const queueRender = () => {
@@ -299,7 +305,7 @@ export function FloorViewer({
 
   useEffect(() => {
     scheduleRender()
-  }, [floorMeshes, plottedFixtures, plottedKitchens, risers])
+  }, [floorMeshes, plottedFixtures, plottedKitchens, risers, sanitaryRoutes])
 
   const raycaster = useRef(new THREE.Raycaster())
   const pointer = useRef(new THREE.Vector2())
@@ -536,6 +542,12 @@ export function FloorViewer({
             </span>
           )}
 
+          {sanitaryRoutes.length > 0 && (
+            <span className="floor-viewer__chip floor-viewer__chip--route">
+              {sanitaryRoutes.length} sanitary {sanitaryRoutes.length === 1 ? 'route' : 'routes'}
+            </span>
+          )}
+
           {storeyCount > 0 && (
             <span className="floor-viewer__chip">{storeyCount} storeys</span>
           )}
@@ -544,6 +556,35 @@ export function FloorViewer({
 
       {!showOverlay && (
         <>
+          <svg className="floor-viewer__route-overlay" aria-hidden="true">
+            {sanitaryRoutes.flatMap((route) =>
+              route.segments.map((segment, index) => (
+                <line
+                  key={`${route.fixtureExpressId}-${segment.kind}-${index}`}
+                  ref={(el) => {
+                    const lineKey = `${route.fixtureExpressId}-${segment.kind}-${index}`
+                    if (el) routeLineRefsRef.current.set(lineKey, el)
+                    else routeLineRefsRef.current.delete(lineKey)
+                  }}
+                  className={[
+                    'floor-viewer__route-line',
+                    segment.kind === 'main' ? 'floor-viewer__route-line--main' : 'floor-viewer__route-line--branch',
+                  ].join(' ')}
+                  data-route-from-x={String(segment.from.x)}
+                  data-route-from-y={String(segment.from.y)}
+                  data-route-from-z={String(segment.from.z)}
+                  data-route-to-x={String(segment.to.x)}
+                  data-route-to-y={String(segment.to.y)}
+                  data-route-to-z={String(segment.to.z)}
+                />
+              )),
+            )}
+          </svg>
+          {routeProjectionStatus.failed > 0 && (
+            <div className="floor-viewer__route-debug" role="status">
+              Preview limitation: {routeProjectionStatus.failed} / {routeProjectionStatus.total} route segments could not be projected exactly. Showing fallback guide lines.
+            </div>
+          )}
           <div className="floor-viewer__fixture-overlay" aria-hidden="true">
             {plottedFixtures.map((fixture, index) => {
               const isSelected = fixture.expressId === selectedExpressId
@@ -690,6 +731,12 @@ export function FloorViewer({
           <span className="floor-viewer__legend-item floor-viewer__legend-item--riser">
             Blue = risers
           </span>
+          <span className="floor-viewer__legend-item floor-viewer__legend-item--route-main">
+            Cyan = main sanitary route
+          </span>
+          <span className="floor-viewer__legend-item floor-viewer__legend-item--route-branch">
+            Dashed amber = branch route
+          </span>
           {isAddingFixture && (
             <span className="floor-viewer__legend-item floor-viewer__legend-item--fixture">
               Click to place {getFixtureKindLabel(pendingFixtureKind).toLowerCase()}
@@ -754,6 +801,58 @@ export function FloorViewer({
     }
   }
 
+
+  function animateRouteLines() {
+    const canvas = canvasRef.current
+    const camera = cameraRef.current
+    if (!canvas || !camera) return
+
+    const routeLines = routeLineRefsRef.current
+    if (routeLines.size === 0) {
+      if (routeProjectionStatus.failed !== 0 || routeProjectionStatus.total !== 0) {
+        setRouteProjectionStatus({ failed: 0, total: 0 })
+      }
+      return
+    }
+
+    let projectionFailures = 0
+
+    for (const [, line] of routeLines) {
+      const from = new THREE.Vector3(
+        parseFloat(line.dataset['routeFromX'] ?? '0'),
+        parseFloat(line.dataset['routeFromY'] ?? '0'),
+        parseFloat(line.dataset['routeFromZ'] ?? '0'),
+      )
+      const to = new THREE.Vector3(
+        parseFloat(line.dataset['routeToX'] ?? '0'),
+        parseFloat(line.dataset['routeToY'] ?? '0'),
+        parseFloat(line.dataset['routeToZ'] ?? '0'),
+      )
+
+      const fromPt = projectOverlayPointOnPlan(from, canvas, camera, planPlaneRef.current)
+      const toPt = projectOverlayPointOnPlan(to, canvas, camera, planPlaneRef.current)
+      if (!fromPt || !toPt) {
+        projectionFailures += 1
+        const fallback = fallbackRouteLinePosition(line, canvas)
+        line.style.opacity = '0.75'
+        line.setAttribute('x1', `${fallback.x1}`)
+        line.setAttribute('y1', `${fallback.y1}`)
+        line.setAttribute('x2', `${fallback.x2}`)
+        line.setAttribute('y2', `${fallback.y2}`)
+        continue
+      }
+      line.style.opacity = ''
+      line.setAttribute('x1', `${fromPt.x}`)
+      line.setAttribute('y1', `${fromPt.y}`)
+      line.setAttribute('x2', `${toPt.x}`)
+      line.setAttribute('y2', `${toPt.y}`)
+    }
+
+    if (projectionFailures !== routeProjectionStatus.failed || routeLines.size !== routeProjectionStatus.total) {
+      setRouteProjectionStatus({ failed: projectionFailures, total: routeLines.size })
+    }
+  }
+
   function positionOverlayMarker(el: HTMLDivElement, x: number, y: number, z: number) {
     const canvas = canvasRef.current
     const camera = cameraRef.current
@@ -781,6 +880,32 @@ export function FloorViewer({
     el.style.opacity = '1'
     el.style.transform = `translate(${sx}px, ${sy}px) translate(-50%, -50%)`
   }
+}
+
+
+function projectOverlayPointOnPlan(
+  world: THREE.Vector3,
+  canvas: HTMLCanvasElement,
+  camera: THREE.OrthographicCamera,
+  planPlane: THREE.Plane,
+) {
+  const vec = world.clone()
+  const distanceToPlan = planPlane.distanceToPoint(vec)
+  if (Number.isFinite(distanceToPlan)) {
+    vec.addScaledVector(planPlane.normal, -distanceToPlan)
+  }
+  vec.project(camera)
+  if (!Number.isFinite(vec.x) || !Number.isFinite(vec.y) || !Number.isFinite(vec.z) || vec.z < -1 || vec.z > 1) return null
+  return { x: ((vec.x + 1) / 2) * canvas.clientWidth, y: ((-vec.y + 1) / 2) * canvas.clientHeight }
+}
+
+function fallbackRouteLinePosition(line: SVGLineElement, canvas: HTMLCanvasElement) {
+  const hashSeed = `${line.dataset['routeFromX'] ?? ''}-${line.dataset['routeToX'] ?? ''}`
+  let hash = 0
+  for (let i = 0; i < hashSeed.length; i += 1) hash = ((hash << 5) - hash) + hashSeed.charCodeAt(i)
+  const slot = Math.abs(hash) % 7
+  const y = 22 + slot * 10
+  return { x1: 14, y1: y, x2: Math.max(canvas.clientWidth * 0.35, 80), y2: y }
 }
 
 function buildFixtureMarkerLabels(

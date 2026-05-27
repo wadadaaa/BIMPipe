@@ -37,7 +37,7 @@ describe('buildSanitaryRoutingDemoPlan', () => {
       buildSanitaryRoutingDemoPlan([fixture({})], [riser('R1', 10, 0)], {
         ...demoConfig,
         routing: { ...demoConfig.routing, mode: 'production' },
-      }),
+      } as unknown as DemoConfig),
     ).toThrow('requires demo routing mode')
   })
 

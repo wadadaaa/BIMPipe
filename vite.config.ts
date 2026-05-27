@@ -32,8 +32,8 @@ export default defineConfig(({ mode }) => {
     }
 
     if (!fs.existsSync(assetPath)) {
-      throw new Error(
-        `Demo model file was not found at ${assetPath}. Place ADAM_10.ifc there before running pnpm demo:adam10.`,
+      console.warn(
+        `[bimpipe demo] Demo model file was not found at ${assetPath}. Continuing build so demo users can upload ADAM_10.ifc manually.`,
       )
     }
   }

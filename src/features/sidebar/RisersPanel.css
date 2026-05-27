@@ -311,3 +311,8 @@
   border-color: rgba(255, 80, 80, 0.28);
   color: #ff7878;
 }
+
+.risers-panel__limitations {
+  margin: 6px 0 0;
+  padding-left: 16px;
+}

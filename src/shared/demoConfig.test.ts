@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
 import { buildDemoModeUploadError, isStoreyIncludedInDemoScope, parseDemoRuntimeConfig } from '@/shared/demoConfig'
+import type { DemoConfig } from '@/shared/demoConfig'
 
 describe('isStoreyIncludedInDemoScope', () => {
   it('normalizes floor names across case, whitespace, NBSP, and NFC', () => {
-    const config = {
+    const config: DemoConfig = {
       name: 'demo',
       model: {
         fileName: 'ADAM_10.ifc',
@@ -67,5 +68,22 @@ describe('buildDemoModeUploadError', () => {
 describe('parseDemoRuntimeConfig', () => {
   it('throws for invalid config shape', () => {
     expect(() => parseDemoRuntimeConfig({ name: 'demo' })).toThrow(/Demo mode config is invalid/)
+  })
+
+
+  it('throws when routing mode is not demo', () => {
+    expect(() =>
+      parseDemoRuntimeConfig({
+        name: 'demo',
+        model: {
+          fileName: 'ADAM_10.ifc',
+          schema: 'IFC2X3',
+          source: 'Autodesk Revit 2024',
+          assetPath: 'external/demo-assets/ADAM_10.ifc',
+        },
+        scope: { includedFloors: ['קומה 1'], excludedFloors: [] },
+        routing: { mode: 'standard', allowManualRiserSelection: true },
+      }),
+    ).toThrow(/routing\.mode/)
   })
 })

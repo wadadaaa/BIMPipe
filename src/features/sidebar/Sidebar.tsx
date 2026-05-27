@@ -28,6 +28,7 @@ interface SidebarProps {
   onDownloadFullIfc?: () => void
   validationReport?: ReturnType<typeof buildRiserValidationReport> | null
   detectionAggregation?: StoreyDetectionAggregation | null
+  sanitaryRouteLimitations?: string[]
 }
 
 const TABS: { id: SidebarTab; label: string; focus: string; hint: string }[] = [
@@ -71,6 +72,7 @@ export function Sidebar({
   onDownloadFullIfc = () => {},
   validationReport = null,
   detectionAggregation = null,
+  sanitaryRouteLimitations = [],
 }: SidebarProps) {
   const activeTabMeta = TABS.find((tab) => tab.id === activeTab)!
   const riserPanelKey = risers.map((riser) => riser.id).join(':') || 'empty'
@@ -186,6 +188,7 @@ export function Sidebar({
                 downloadMode={downloadMode}
                 downloadError={downloadError}
                 onDownloadFullIfc={onDownloadFullIfc}
+                sanitaryRouteLimitations={sanitaryRouteLimitations}
               />
             ) : (
               <PlacementValidationPanel
