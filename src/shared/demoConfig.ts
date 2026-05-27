@@ -13,7 +13,7 @@ export const demoConfigSchema = z.object({
     excludedFloors: z.array(z.string().min(1)).default([]),
   }),
   routing: z.object({
-    mode: z.string().min(1),
+    mode: z.literal('demo'),
     allowManualRiserSelection: z.boolean(),
   }),
 })
