@@ -5,10 +5,13 @@ import { planDistance } from './planGeometry'
 
 export const DEMO_SANITARY_SLOPE = SLOPE
 
+export type SanitaryPipeDiameterMm = 50 | 63 | 110
+
 export interface RouteSegment {
   from: { x: number; y: number; z: number }
   to: { x: number; y: number; z: number }
   kind: 'main' | 'branch'
+  pipeDiameterMm: SanitaryPipeDiameterMm
 }
 
 export interface SanitaryFixtureRoute {
@@ -16,7 +19,7 @@ export interface SanitaryFixtureRoute {
   fixtureName: string
   fixtureKind: FixtureKind
   riserId: string
-  pipeDiameterMm: 50 | 110
+  pipeDiameterMm: SanitaryPipeDiameterMm
   startHeightAboveFloorM: number
   slope: number
   segments: RouteSegment[]
@@ -75,23 +78,38 @@ export function buildSanitaryRoutingDemoPlan(
       return planDistance(bPos, riser.position) - planDistance(aPos, riser.position)
     })[0]
 
+    const hasBranches = members.length > 1
+
     for (const fixture of members) {
       const fixturePos = fixture.position!
       const onMainLine = fixture.expressId === farthest.expressId
       const branchJunction = approximateBranchJunction(fixturePos, riser.position)
+      const fixtureDiameter = fixtureDiameterForKind(fixture.kind)
+      const mainDiameter = mainLineDiameterForKind(fixture.kind, hasBranches)
 
       const segments: RouteSegment[] = []
       if (!onMainLine) {
-        segments.push({ from: fixturePos, to: branchJunction, kind: 'branch' })
+        segments.push({
+          from: fixturePos,
+          to: branchJunction,
+          kind: 'branch',
+          pipeDiameterMm: fixtureDiameter,
+        })
+      } else {
+        segments.push({
+          from: fixturePos,
+          to: riser.position,
+          kind: 'main',
+          pipeDiameterMm: mainDiameter,
+        })
       }
-      segments.push({ from: onMainLine ? fixturePos : branchJunction, to: riser.position, kind: 'main' })
 
       routes.push({
         fixtureExpressId: fixture.expressId,
         fixtureName: fixture.name,
         fixtureKind: fixture.kind,
         riserId: riser.id,
-        pipeDiameterMm: fixture.kind === 'TOILETPAN' ? 110 : 50,
+        pipeDiameterMm: fixtureDiameter,
         startHeightAboveFloorM: fixture.kind === 'TOILETPAN' ? 0.2 : 0.15,
         slope: DEMO_SANITARY_SLOPE,
         segments,
@@ -119,6 +137,16 @@ export function buildSanitaryRoutingDemoPlan(
   }
 
   return { routes, limitations }
+}
+
+
+function fixtureDiameterForKind(kind: FixtureKind): SanitaryPipeDiameterMm {
+  return kind === 'TOILETPAN' ? 110 : 50
+}
+
+function mainLineDiameterForKind(kind: FixtureKind, hasBranches: boolean): SanitaryPipeDiameterMm {
+  if (kind === 'TOILETPAN') return 110
+  return hasBranches ? 63 : 50
 }
 
 function findNearestRiser(fixture: Fixture, risers: Riser[]): Riser {

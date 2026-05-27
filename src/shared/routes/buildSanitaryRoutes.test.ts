@@ -58,6 +58,22 @@ describe('buildSanitaryRoutingDemoPlan', () => {
     expect(sink).toMatchObject({ pipeDiameterMm: 50, startHeightAboveFloorM: 0.15, slope: DEMO_SANITARY_SLOPE })
   })
 
+  it('uses 63mm collection main lines when grouped wet fixtures branch', () => {
+    const plan = buildSanitaryRoutingDemoPlan(
+      [
+        fixture({ expressId: 601, kind: 'SINK', position: { x: 2, y: 0, z: 0 } }),
+        fixture({ expressId: 602, kind: 'BATH', position: { x: 8, y: 0, z: 0 } }),
+      ],
+      [riser('R1', 10, 0)],
+      demoConfig,
+    )
+
+    const sink = plan.routes.find((route) => route.fixtureExpressId === 601)
+    const bath = plan.routes.find((route) => route.fixtureExpressId === 602)
+    expect(sink?.segments[0]).toMatchObject({ kind: 'main', pipeDiameterMm: 63 })
+    expect(bath?.segments[0]).toMatchObject({ kind: 'branch', pipeDiameterMm: 50 })
+  })
+
   it('uses farthest fixture as main line and branches closer fixtures', () => {
     const plan = buildSanitaryRoutingDemoPlan(
       [
@@ -73,7 +89,7 @@ describe('buildSanitaryRoutingDemoPlan', () => {
 
     expect(far?.segments).toHaveLength(1)
     expect(far?.segments[0].kind).toBe('main')
-    expect(close?.segments).toHaveLength(2)
+    expect(close?.segments).toHaveLength(1)
     expect(close?.segments[0].kind).toBe('branch')
     expect(plan.limitations).toContain('45° branches are approximated by a single branch segment in plan view for the demo.')
   })
@@ -124,7 +140,7 @@ describe('buildSanitaryRoutingDemoPlan', () => {
 
     expect(plan.routes).toHaveLength(1)
     expect(plan.routes[0].segments).toEqual([
-      { from: { x: 2, y: 0, z: 0 }, to: { x: 10, y: 0, z: 0 }, kind: 'main' },
+      { from: { x: 2, y: 0, z: 0 }, to: { x: 10, y: 0, z: 0 }, kind: 'main', pipeDiameterMm: 110 },
     ])
     expect(plan.limitations).not.toContain('45° branches are approximated by a single branch segment in plan view for the demo.')
   })

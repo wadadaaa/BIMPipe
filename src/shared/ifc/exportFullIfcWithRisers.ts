@@ -1,4 +1,10 @@
 import { Matrix4, Vector3 } from 'three'
+import type { SanitaryFixtureRoute } from '@/shared/routes/buildSanitaryRoutes'
+import {
+  createViewerPointToStoreyLocalResolver,
+  writeSanitaryRouteElements,
+  writeSanitaryRouteSystemAssignment,
+} from '@/shared/ifc/exportSanitaryRouteElements'
 import type { IfcAPI } from 'web-ifc'
 import type { PlanBounds, Riser, Storey, StoreyId } from '@/domain/types'
 
@@ -134,6 +140,7 @@ export async function exportFullIfcWithRisers(
   primaryStoreyId: StoreyId,
   risers: Riser[],
   sourceFloorPlanBounds: PlanBounds | null = null,
+  sanitaryRoutes: SanitaryFixtureRoute[] = [],
 ): Promise<Uint8Array> {
   const { ifcBytes } = await exportFullIfcWithRisersInternal(
     api,
@@ -142,6 +149,7 @@ export async function exportFullIfcWithRisers(
     risers,
     sourceFloorPlanBounds,
     null,
+    sanitaryRoutes,
   )
   return ifcBytes
 }
@@ -154,6 +162,7 @@ export async function exportFullIfcWithRisersWithDebug(
   risers: Riser[],
   sourceFloorPlanBounds: PlanBounds | null = null,
   debugOptions: FullIfcRiserDebugOptions = {},
+  sanitaryRoutes: SanitaryFixtureRoute[] = [],
 ): Promise<FullIfcWithRisersDebugResult> {
   const result = await exportFullIfcWithRisersInternal(
     api,
@@ -162,6 +171,7 @@ export async function exportFullIfcWithRisersWithDebug(
     risers,
     sourceFloorPlanBounds,
     debugOptions,
+    sanitaryRoutes,
   )
   if (!result.debugMapping) {
     throw new Error('Debug mapping was not created.')
@@ -179,6 +189,7 @@ async function exportFullIfcWithRisersInternal(
   risers: Riser[],
   sourceFloorPlanBounds: PlanBounds | null,
   debugOptions: FullIfcRiserDebugOptions | null,
+  sanitaryRoutes: SanitaryFixtureRoute[] = [],
 ): Promise<{
   ifcBytes: Uint8Array
   debugMapping: FullIfcRiserDebugArtifact | null
@@ -299,6 +310,53 @@ async function exportFullIfcWithRisersInternal(
           debugRecord.createdRelationIds.containmentRelation = relation.expressID
           debugRecord.notes.push(`Created IfcRelContainedInSpatialStructure #${relation.expressID}.`)
         }
+      }
+    }
+
+    const storeyContextCache = new Map<StoreyId, ReturnType<typeof resolveStoreyContext>>()
+    const resolveCachedStoreyContext = (storeyId: StoreyId) => {
+      const cached = storeyContextCache.get(storeyId)
+      if (cached) return cached
+      const context = resolveStoreyContext(api, modelId, storeyId, IFCRELCONTAINEDINSPATIALSTRUCTURE)
+      storeyContextCache.set(storeyId, context)
+      return context
+    }
+    const resolveViewerPointToStoreyLocal = createViewerPointToStoreyLocalResolver(
+      api,
+      modelId,
+      sourceUnitsPerViewerUnit,
+    )
+
+    const sanitaryRouteExport = writeSanitaryRouteElements(
+      api,
+      ifc,
+      modelId,
+      schema,
+      bodyContextId,
+      sanitaryRoutes,
+      [...storeysById.values()].flatMap((storey) =>
+        typeof storey.elevation === "number" ? [{ id: storey.id, elevation: storey.elevation }] : [],
+      ),
+      risers,
+      sourceUnitsPerViewerUnit,
+      millimetresPerSourceUnit,
+      resolveCachedStoreyContext,
+      resolveViewerPointToStoreyLocal,
+      IFCRELCONTAINEDINSPATIALSTRUCTURE,
+    )
+    createdFlowSegmentHandles.push(...sanitaryRouteExport.flowSegmentHandles)
+    if (sanitaryRouteExport.flowSegmentHandles.length > 0) {
+      writeSanitaryRouteSystemAssignment(
+        api,
+        ifc,
+        modelId,
+        systemOwnerHistory,
+        sanitaryRouteExport.flowSegmentHandles,
+      )
+      if (debugMapping) {
+        debugMapping.notes.push(
+          `Exported ${sanitaryRouteExport.elements.length} sanitary route pipe segment(s) as IfcFlowSegment/IfcPipeSegment elements.`,
+        )
       }
     }
 

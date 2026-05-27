@@ -428,6 +428,7 @@ export function WorkspacePage({
             elevation: storey.elevation,
           })),
         },
+        sanitaryRoutesForExport,
       )
 
       downloadBinary(
@@ -465,6 +466,11 @@ export function WorkspacePage({
 
   // ---------------------------------------------------------------------------
 
+
+  const sanitaryRoutesForExport = useMemo(() => {
+    if (!demoRuntime.enabled) return []
+    return buildSanitaryRoutingDemoPlan(fixtures, risers, demoRuntime.config).routes
+  }, [demoRuntime, fixtures, risers])
 
   const sanitaryRoutingPreview = useMemo(() => {
     if (!demoRuntime.enabled || selectedStoreyId === null) return { routes: [], limitations: [] }
