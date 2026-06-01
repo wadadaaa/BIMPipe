@@ -878,6 +878,28 @@ describe('exportFullIfcWithRisers', () => {
     expect(routeElements.length).toBeGreaterThan(0)
     // Mock type codes: 6 = IFCFLOWSEGMENT, 12 = IFCPIPESEGMENT
     expect(writtenLines.some((line) => line.type === 6 || line.type === 12)).toBe(true)
+
+    const systems = getLinesByType(writtenLines, IFCSYSTEM)
+    const groupRelations = getLinesByType(writtenLines, IFCRELASSIGNSTOGROUP)
+    expect(systems.map((system) => (system.Name as { value?: string })?.value)).toEqual([
+      'BIMPipe Sanitary Routes',
+      'BIMPipe Sanitary Stacks',
+    ])
+    expect(groupRelations).toHaveLength(2)
+    const routeGroup = groupRelations.find(
+      (relation) =>
+        (relation.RelatingGroup as { value?: number })?.value === systems[0].expressID,
+    )
+    const riserGroup = groupRelations.find(
+      (relation) =>
+        (relation.RelatingGroup as { value?: number })?.value === systems[1].expressID,
+    )
+    expect(riserGroup?.RelatedObjects).toHaveLength(1)
+    expect(routeGroup?.RelatedObjects).toHaveLength(1)
+    expect(getPropertySingleValue(writtenLines, 'NominalDiameter')?.NominalValue).toMatchObject({
+      type: IFCPOSITIVELENGTHMEASURE,
+      value: 11,
+    })
   })
 
 })

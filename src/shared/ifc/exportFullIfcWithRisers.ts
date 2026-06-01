@@ -344,7 +344,6 @@ async function exportFullIfcWithRisersInternal(
       resolveViewerPointToStoreyLocal,
       IFCRELCONTAINEDINSPATIALSTRUCTURE,
     )
-    createdFlowSegmentHandles.push(...sanitaryRouteExport.flowSegmentHandles)
     if (sanitaryRouteExport.flowSegmentHandles.length > 0) {
       writeSanitaryRouteSystemAssignment(
         api,

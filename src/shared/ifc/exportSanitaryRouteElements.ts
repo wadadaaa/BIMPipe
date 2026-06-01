@@ -262,13 +262,14 @@ function writeSlopedPipeSegment(
   const extrusionDirection = writeDirection(api, modelId, pipeAxis)
   const refDirection = pickPerpendicularReference(pipeAxis)
   const profileZAxis = writeDirection(api, modelId, refDirection)
+  const localExtrudeDirection = writeDirection(api, modelId, new Vector3(0, 0, 1))
 
   const sweptPlacement = writeLabeledLine(api, modelId, 'route swept solid placement', {
     expressID: -1,
     type: IFCAXIS2PLACEMENT3D,
     Location: handleRef(point3d.expressID),
-    Axis: handleRef(profileZAxis.expressID),
-    RefDirection: handleRef(extrusionDirection.expressID),
+    Axis: handleRef(extrusionDirection.expressID),
+    RefDirection: handleRef(profileZAxis.expressID),
   })
 
   const solid = writeLabeledLine(api, modelId, 'route extruded solid', {
@@ -276,7 +277,7 @@ function writeSlopedPipeSegment(
     type: IFCEXTRUDEDAREASOLID,
     SweptArea: handleRef(profile.expressID),
     Position: handleRef(sweptPlacement.expressID),
-    ExtrudedDirection: handleRef(extrusionDirection.expressID),
+    ExtrudedDirection: handleRef(localExtrudeDirection.expressID),
     Depth: api.CreateIfcType(modelId, IFCLENGTHMEASURE, pipeLength),
   })
 
@@ -311,8 +312,8 @@ function writeSlopedPipeSegment(
     expressID: -1,
     type: IFCAXIS2PLACEMENT3D,
     Location: handleRef(placementPoint.expressID),
-    Axis: handleRef(profileZAxis.expressID),
-    RefDirection: handleRef(extrusionDirection.expressID),
+    Axis: handleRef(extrusionDirection.expressID),
+    RefDirection: handleRef(profileZAxis.expressID),
   })
 
   const targetStoreyPlacement = api.GetLine(modelId, storeyContext.targetStoreyPlacementId, false)
@@ -406,7 +407,16 @@ function writeSlopedPipeSegment(
     RelatingMaterial: material,
   })
 
-  writeRouteOccurrencePset(api, ifc, modelId, storeyContext.ownerHistory, routeElement, exportSegment, pipeLength)
+  writeRouteOccurrencePset(
+    api,
+    ifc,
+    modelId,
+    storeyContext.ownerHistory,
+    routeElement,
+    exportSegment,
+    pipeLength,
+    millimetresPerSourceUnit,
+  )
 
   return { element: routeElement }
 }
@@ -461,6 +471,7 @@ function writeRouteOccurrencePset(
   routeHandle: IfcEntityRef,
   exportSegment: SanitaryExportSegment,
   lengthSourceUnits: number,
+  millimetresPerSourceUnit: number,
 ): void {
   const properties = [
     writePropertySingleValue(api, ifc, modelId, 'SystemType', api.GetTypeCodeFromName('IFCLABEL'), 'SANITARY'),
@@ -486,7 +497,7 @@ function writeRouteOccurrencePset(
       modelId,
       'NominalDiameter',
       api.GetTypeCodeFromName('IFCPOSITIVELENGTHMEASURE'),
-      exportSegment.segment.pipeDiameterMm,
+      exportSegment.segment.pipeDiameterMm / millimetresPerSourceUnit,
     ),
   ]
   const pset = writePropertySet(api, ifc, modelId, ownerHistory, 'Pset_FlowSegmentOccurrence', properties)
