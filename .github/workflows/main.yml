@@ -39,18 +39,29 @@ jobs:
       id-token: write
 
     steps:
+      # Only skip PRs that are opened by bots.
+      # Do NOT skip bot synchronize events, because Codex/Cursor pushes need review.
       - name: Skip Claude review for bot-opened pull requests
-        if: github.event_name == 'pull_request' && github.event.sender.type == 'Bot'
+        if: |
+          github.event_name == 'pull_request' &&
+          github.event.action == 'opened' &&
+          github.event.sender.type == 'Bot'
         run: echo "Bot-opened PR; Claude review skipped."
 
       - name: Checkout repository
-        if: github.event_name != 'pull_request' || github.event.sender.type != 'Bot'
+        if: |
+          github.event_name != 'pull_request' ||
+          github.event.action != 'opened' ||
+          github.event.sender.type != 'Bot'
         uses: actions/checkout@v6
         with:
           fetch-depth: 1
 
       - name: Claude review
-        if: github.event_name != 'pull_request' || github.event.sender.type != 'Bot'
+        if: |
+          github.event_name != 'pull_request' ||
+          github.event.action != 'opened' ||
+          github.event.sender.type != 'Bot'
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -78,6 +89,11 @@ jobs:
             Post a concise summary comment on the PR.
             Use inline comments only for specific code issues.
             Do not modify code.
+
+            Codex trigger rule:
+            - If actionable code fixes are required, include exactly this marker in the summary comment:
+              [codex-fix-needed]
+            - If no code changes are required, do not include that marker.
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
 
@@ -86,6 +102,7 @@ jobs:
       github.event_name == 'issue_comment' &&
       github.event.issue.pull_request &&
       contains(github.event.comment.user.login, 'claude') &&
+      contains(github.event.comment.body, '[codex-fix-needed]') &&
       !contains(github.event.comment.body, '@codex') &&
       !contains(github.event.comment.body, '[codex-triggered]')
     runs-on: ubuntu-latest
@@ -137,6 +154,7 @@ jobs:
       github.event_name == 'pull_request_review' &&
       contains(github.event.review.user.login, 'claude') &&
       github.event.review.body != '' &&
+      contains(github.event.review.body, '[codex-fix-needed]') &&
       !contains(github.event.review.body, '@codex') &&
       !contains(github.event.review.body, '[codex-triggered]')
     runs-on: ubuntu-latest
