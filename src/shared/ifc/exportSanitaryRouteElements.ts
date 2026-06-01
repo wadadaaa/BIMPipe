@@ -709,6 +709,10 @@ export function createViewerPointToStoreyLocalResolver(
       inverseStoreyWorldMatrix = storeyWorldMatrix.clone().invert()
       inverseMatrixByPlacementId.set(storeyContext.targetStoreyPlacementId, inverseStoreyWorldMatrix)
     }
+    // Viewer XZ are the plan axes; viewer Y is the up-axis (elevation).
+    // Elevation is re-derived from storeyElevation + slope (elevationSourceUnits) rather than
+    // reading position.y, so position.y is intentionally ignored here — duplicated routes carry a
+    // non-zero y delta for per-floor display offsets that must not leak into the exported geometry.
     const ifcWorldPoint = new Vector3(
       position.x * sourceUnitsPerViewerUnit,
       -position.z * sourceUnitsPerViewerUnit,
