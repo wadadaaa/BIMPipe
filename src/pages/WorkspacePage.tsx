@@ -480,6 +480,13 @@ export function WorkspacePage({
   }, [demoRuntime, fixtures, risers, selectedStoreyId])
 
   const selectedStorey = storeys.find((storey) => storey.id === selectedStoreyId) ?? null
+  // In demo mode only the configured floors carry risers/routes. A floor outside that scope
+  // legitimately has no risers, so the panel must say why instead of prompting an empty "Suggest".
+  const demoScopeFloorNames = demoRuntime.enabled ? demoRuntime.config.scope.includedFloors : []
+  const isSelectedFloorOutOfDemoScope =
+    demoRuntime.enabled &&
+    selectedStorey !== null &&
+    !isStoreyIncludedInDemoScope(selectedStorey.name, demoRuntime.config)
   const shouldLoadViewer =
     isExtractingGeometry || geometryError !== null || floorMeshes !== null
 
@@ -620,6 +627,8 @@ export function WorkspacePage({
       validationReport={validationReport}
       detectionAggregation={detectionDebugRef.current}
       sanitaryRouteLimitations={sanitaryRoutingPreview.limitations}
+      outOfDemoScope={isSelectedFloorOutOfDemoScope}
+      demoScopeFloorNames={demoScopeFloorNames}
     />
   )
 
