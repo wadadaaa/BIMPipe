@@ -52,6 +52,7 @@ export function writeSanitaryRouteElements(
     elevationSourceUnits: number,
   ) => Vector3,
   relationContainedInSpatialStructure: number,
+  exportNotes?: string[],
 ): { elements: WrittenSanitaryRoute[]; flowSegmentHandles: IfcHandle[] } {
   const exportSegments = collectSanitaryExportSegments(routes, storeys, risers)
   if (exportSegments.length === 0) {
@@ -61,11 +62,15 @@ export function writeSanitaryRouteElements(
   const storeyElevationById = new Map(storeys.map((storey) => [storey.id, storey.elevation]))
   const elements: WrittenSanitaryRoute[] = []
   const flowSegmentHandles: IfcHandle[] = []
-  const containmentByStorey = new Map<StoreyId, StoreyContext['containment']>()
 
   for (const exportSegment of exportSegments) {
     const storeyElevation = storeyElevationById.get(exportSegment.storeyId)
-    if (typeof storeyElevation !== 'number' || !Number.isFinite(storeyElevation)) continue
+    if (typeof storeyElevation !== 'number' || !Number.isFinite(storeyElevation)) {
+      exportNotes?.push(
+        `Skipped sanitary route segment ${exportSegment.key} because storey #${exportSegment.storeyId} has no elevation.`,
+      )
+      continue
+    }
 
     const storeyContext = resolveStoreyContext(exportSegment.storeyId)
     const { startElevation, endElevation } = segmentEndpointElevationsSourceUnits(
@@ -102,9 +107,6 @@ export function writeSanitaryRouteElements(
     elements.push({ element: written.element, exportSegment })
     flowSegmentHandles.push(handleRef(written.element.expressID))
 
-    if (!containmentByStorey.has(exportSegment.storeyId)) {
-      containmentByStorey.set(exportSegment.storeyId, storeyContext.containment)
-    }
     appendToStoreyContainment(
       api,
       ifc,
@@ -163,16 +165,18 @@ export function writeSanitaryRouteSystemAssignment(
     RelatingGroup: handleRef(system.expressID),
   })
 
-  writeLabeledLine(api, modelId, 'sanitary route system service', {
-    expressID: -1,
-    type: api.GetTypeCodeFromName('IFCRELSERVICESBUILDINGS'),
-    GlobalId: api.CreateIFCGloballyUniqueId(modelId),
-    OwnerHistory: ownerHistory,
-    Name: api.CreateIfcType(modelId, ifc.IFCLABEL, 'BIMPipe Sanitary Route Service'),
-    Description: null,
-    RelatedBuildings: [handleRef(buildingId)],
-    RelatingSystem: handleRef(system.expressID),
-  })
+  if (schema === 'IFC2X3') {
+    writeLabeledLine(api, modelId, 'sanitary route system service', {
+      expressID: -1,
+      type: api.GetTypeCodeFromName('IFCRELSERVICESBUILDINGS'),
+      GlobalId: api.CreateIFCGloballyUniqueId(modelId),
+      OwnerHistory: ownerHistory,
+      Name: api.CreateIfcType(modelId, ifc.IFCLABEL, 'BIMPipe Sanitary Route Service'),
+      Description: null,
+      RelatedBuildings: [handleRef(buildingId)],
+      RelatingSystem: handleRef(system.expressID),
+    })
+  }
 }
 
 // TODO: cache one IfcPipeSegmentType per diameter/kind and one shared PVC material to reduce IFC bloat.
@@ -316,14 +320,13 @@ function writeSlopedPipeSegment(
     RefDirection: handleRef(profileZAxis.expressID),
   })
 
-  const targetStoreyPlacement = api.GetLine(modelId, storeyContext.targetStoreyPlacementId, false)
   const localPlacement = createLabeledEntity(
     api,
     modelId,
     'route local placement',
     IFCLOCALPLACEMENT,
-    targetStoreyPlacement,
-    placementAxis,
+    handleRef(storeyContext.targetStoreyPlacementId),
+    handleRef(placementAxis.expressID),
   )
   api.WriteLine(modelId, localPlacement)
 
@@ -639,9 +642,15 @@ export function createViewerPointToStoreyLocalResolver(
   position: { x: number; y: number; z: number },
   elevationSourceUnits: number,
 ) => Vector3 {
+  const inverseMatrixByPlacementId = new Map<number, Matrix4>()
+
   return (storeyContext, position, elevationSourceUnits) => {
-    const storeyWorldMatrix = resolveLocalPlacementWorldMatrix(api, modelId, storeyContext.targetStoreyPlacementId)
-    const inverseStoreyWorldMatrix = storeyWorldMatrix.clone().invert()
+    let inverseStoreyWorldMatrix = inverseMatrixByPlacementId.get(storeyContext.targetStoreyPlacementId)
+    if (!inverseStoreyWorldMatrix) {
+      const storeyWorldMatrix = resolveLocalPlacementWorldMatrix(api, modelId, storeyContext.targetStoreyPlacementId)
+      inverseStoreyWorldMatrix = storeyWorldMatrix.clone().invert()
+      inverseMatrixByPlacementId.set(storeyContext.targetStoreyPlacementId, inverseStoreyWorldMatrix)
+    }
     const ifcWorldPoint = new Vector3(
       position.x * sourceUnitsPerViewerUnit,
       -position.z * sourceUnitsPerViewerUnit,

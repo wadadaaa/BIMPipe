@@ -99,7 +99,7 @@ export type FullIfcRiserDebugRecord = {
 export type FullIfcSystemAssignmentDebug = {
   ifcSystemId: number
   ifcRelAssignsToGroupId: number
-  ifcRelServicesBuildingsId: number
+  ifcRelServicesBuildingsId: number | null
   ifcBuildingId: number
   name: string
   objectType: string
@@ -343,6 +343,7 @@ async function exportFullIfcWithRisersInternal(
       resolveCachedStoreyContext,
       resolveViewerPointToStoreyLocal,
       IFCRELCONTAINEDINSPATIALSTRUCTURE,
+      debugMapping?.notes,
     )
     if (sanitaryRouteExport.flowSegmentHandles.length > 0) {
       writeSanitaryRouteSystemAssignment(
@@ -1018,14 +1019,13 @@ function writeMinimalRiser(
     RefDirection: handleRef(dirX.expressID),
   })
 
-  const targetStoreyPlacement = api.GetLine(modelId, targetStoreyPlacementId, false)
   const localPlacement = createLabeledEntity(
     api,
     modelId,
     'local placement',
     IFCLOCALPLACEMENT,
-    targetStoreyPlacement,
-    placementAxis,
+    handleRef(targetStoreyPlacementId),
+    handleRef(placementAxis.expressID),
   )
   api.WriteLine(modelId, localPlacement)
 
@@ -1409,21 +1409,33 @@ function writeSanitarySystemAssignment(
     RelatingGroup: handleRef(system.expressID),
   })
 
-  const serviceRelation = writeLabeledLine(api, modelId, 'sanitary system service', {
-    expressID: -1,
-    type: api.GetTypeCodeFromName('IFCRELSERVICESBUILDINGS'),
-    GlobalId: api.CreateIFCGloballyUniqueId(modelId),
-    OwnerHistory: ownerHistory,
-    Name: api.CreateIfcType(modelId, ifc.IFCLABEL, 'BIMPipe Sanitary System Service'),
-    Description: null,
-    RelatedBuildings: [handleRef(buildingId)],
-    RelatingSystem: handleRef(system.expressID),
-  })
+  if (schema === 'IFC2X3') {
+    const serviceRelation = writeLabeledLine(api, modelId, 'sanitary system service', {
+      expressID: -1,
+      type: api.GetTypeCodeFromName('IFCRELSERVICESBUILDINGS'),
+      GlobalId: api.CreateIFCGloballyUniqueId(modelId),
+      OwnerHistory: ownerHistory,
+      Name: api.CreateIfcType(modelId, ifc.IFCLABEL, 'BIMPipe Sanitary System Service'),
+      Description: null,
+      RelatedBuildings: [handleRef(buildingId)],
+      RelatingSystem: handleRef(system.expressID),
+    })
+
+    return {
+      ifcSystemId: system.expressID,
+      ifcRelAssignsToGroupId: groupRelation.expressID,
+      ifcRelServicesBuildingsId: serviceRelation.expressID,
+      ifcBuildingId: buildingId,
+      name: RISER_SYSTEM_NAME,
+      objectType: 'SANITARY',
+      description: RISER_SYSTEM_DESCRIPTION,
+    }
+  }
 
   return {
     ifcSystemId: system.expressID,
     ifcRelAssignsToGroupId: groupRelation.expressID,
-    ifcRelServicesBuildingsId: serviceRelation.expressID,
+    ifcRelServicesBuildingsId: null,
     ifcBuildingId: buildingId,
     name: RISER_SYSTEM_NAME,
     objectType: 'SANITARY',

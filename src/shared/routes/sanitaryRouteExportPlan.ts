@@ -37,7 +37,7 @@ export function collectSanitaryExportSegments(
 
     let upstreamPlanDistance = 0
     for (const segment of route.segments) {
-      const key = segmentGeometryKey(segment)
+      const key = segmentGeometryKey(segment, route.riserId)
       const existing = segmentsByKey.get(key)
       if (existing) {
         if (!existing.fixtureExpressIds.includes(route.fixtureExpressId)) {
@@ -85,10 +85,10 @@ export function segmentEndpointElevationsSourceUnits(
   return { startElevation, endElevation }
 }
 
-function segmentGeometryKey(segment: RouteSegment): string {
+function segmentGeometryKey(segment: RouteSegment, riserId: string): string {
   const from = coordKey(segment.from)
   const to = coordKey(segment.to)
-  return `${from}->${to}|${segment.kind}|${segment.pipeDiameterMm}`
+  return `${riserId}|${from}->${to}|${segment.kind}|${segment.pipeDiameterMm}`
 }
 
 function coordKey(point: { x: number; y: number; z: number }): string {

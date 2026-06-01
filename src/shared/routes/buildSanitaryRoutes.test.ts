@@ -170,6 +170,27 @@ describe('buildSanitaryRoutingDemoPlan', () => {
     expect(plan.limitations[0]).toContain('Unsupported fixture kinds skipped: URINAL')
   })
 
+  it('does not duplicate routes when unsupported fixtures occupy other storeys', () => {
+    const plan = buildSanitaryRoutingDemoPlan(
+      [
+        fixture({ expressId: 901, storeyId: 2, position: { x: 1, y: 3, z: 0 } }),
+        fixture({ expressId: 902, storeyId: 3, kind: 'URINAL', position: { x: 1, y: 6, z: 0 } }),
+      ],
+      [
+        riser('R1-F2', 10, 0, 2, 'stack-A', 3),
+        riser('R1-F3', 10, 0, 3, 'stack-A', 6),
+        riser('R1-F4', 10, 0, 4, 'stack-A', 9),
+      ],
+      demoConfig,
+    )
+
+    expect(plan.routes).toHaveLength(1)
+    expect(plan.routes[0].riserId).toBe('R1-F2')
+    expect(plan.limitations).not.toContain(
+      'Single-floor demo sanitary routes are duplicated across matching riser stack floors for IFC export.',
+    )
+  })
+
   it('uses a single main segment without branch limitation for one fixture per riser', () => {
     const plan = buildSanitaryRoutingDemoPlan(
       [fixture({ expressId: 301, position: { x: 2, y: 0, z: 0 } })],

@@ -65,6 +65,46 @@ describe('sanitaryRouteExportPlan', () => {
     )
   })
 
+  it('keeps coincident segments from different risers separate during export collection', () => {
+    const sharedSegment = {
+      from: { x: 0, y: 0, z: 0 },
+      to: { x: 10, y: 0, z: 0 },
+      kind: 'main' as const,
+      pipeDiameterMm: 110 as const,
+    }
+    const routes = [
+      {
+        fixtureExpressId: 401,
+        fixtureName: 'Toilet A',
+        fixtureKind: 'TOILETPAN' as const,
+        riserId: 'R1',
+        pipeDiameterMm: 110 as const,
+        startHeightAboveFloorM: 0.2,
+        slope: 0.02,
+        segments: [sharedSegment],
+      },
+      {
+        fixtureExpressId: 402,
+        fixtureName: 'Toilet B',
+        fixtureKind: 'TOILETPAN' as const,
+        riserId: 'R2',
+        pipeDiameterMm: 110 as const,
+        startHeightAboveFloorM: 0.2,
+        slope: 0.02,
+        segments: [sharedSegment],
+      },
+    ]
+
+    const segments = collectSanitaryExportSegments(
+      routes,
+      [{ id: 1, elevation: 300 }],
+      [riser('R1', 10, 0), riser('R2', 100, 0)],
+    )
+
+    expect(segments).toHaveLength(2)
+    expect(new Set(segments.map((segment) => segment.riserId))).toEqual(new Set(['R1', 'R2']))
+  })
+
   it('computes downstream elevations with 2% slope toward the riser', () => {
     const plan = buildSanitaryRoutingDemoPlan(
       [fixture({ expressId: 301, position: { x: 0, y: 0, z: 0 } })],

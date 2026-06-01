@@ -118,7 +118,7 @@ export function buildSanitaryRoutingDemoPlan(
     }
   }
 
-  const routes = shouldDuplicateSingleFloorRoutesAcrossRiserStacks(located, risers)
+  const routes = shouldDuplicateSingleFloorRoutesAcrossRiserStacks(fixtures, risers)
     ? duplicateRoutesAcrossRiserStacks(sourceRoutes, risers)
     : sourceRoutes
 
@@ -148,7 +148,8 @@ export function buildSanitaryRoutingDemoPlan(
 }
 
 function shouldDuplicateSingleFloorRoutesAcrossRiserStacks(fixtures: Fixture[], risers: Riser[]): boolean {
-  const fixtureStoreyIds = new Set(fixtures.map((fixture) => fixture.storeyId))
+  const positionedFixtures = fixtures.filter((fixture) => fixture.position)
+  const fixtureStoreyIds = new Set(positionedFixtures.map((fixture) => fixture.storeyId))
   const riserStoreyIds = new Set(risers.map((riser) => riser.storeyId))
   return fixtureStoreyIds.size === 1 && riserStoreyIds.size > 1
 }
