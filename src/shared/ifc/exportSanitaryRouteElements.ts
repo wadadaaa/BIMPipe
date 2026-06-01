@@ -1,7 +1,7 @@
 import { Matrix4, Vector3 } from 'three'
 import type { IfcAPI } from 'web-ifc'
 import type { Riser, Storey, StoreyId } from '@/domain/types'
-import type { SanitaryFixtureRoute } from '@/shared/routes/buildSanitaryRoutes'
+import type { SanitaryFixtureRoute, SanitaryPipeDiameterMm } from '@/shared/routes/buildSanitaryRoutes'
 import {
   collectSanitaryExportSegments,
   diameterLabel,
@@ -62,6 +62,9 @@ export function writeSanitaryRouteElements(
   const storeyElevationById = new Map(storeys.map((storey) => [storey.id, storey.elevation]))
   const elements: WrittenSanitaryRoute[] = []
   const flowSegmentHandles: IfcHandle[] = []
+  const allRouteElements: IfcEntityRef[] = []
+  const typeGroups = new Map<string, RouteTypeGroup>()
+  let sharedOwnerHistory: IfcHandle | null = null
 
   for (const exportSegment of exportSegments) {
     const storeyElevation = storeyElevationById.get(exportSegment.storeyId)
@@ -106,6 +109,23 @@ export function writeSanitaryRouteElements(
 
     elements.push({ element: written.element, exportSegment })
     flowSegmentHandles.push(handleRef(written.element.expressID))
+    allRouteElements.push(written.element)
+    if (!sharedOwnerHistory) sharedOwnerHistory = storeyContext.ownerHistory
+
+    const groupKey = routeTypeGroupKey(exportSegment)
+    const existingGroup = typeGroups.get(groupKey)
+    if (existingGroup) {
+      existingGroup.elements.push(written.element)
+    } else {
+      typeGroups.set(groupKey, {
+        diameter: exportSegment.segment.pipeDiameterMm,
+        kind: exportSegment.segment.kind,
+        stackLabel: exportSegment.riserStackLabel,
+        exportSegment,
+        ownerHistory: storeyContext.ownerHistory,
+        elements: [written.element],
+      })
+    }
 
     appendToStoreyContainment(
       api,
@@ -115,6 +135,14 @@ export function writeSanitaryRouteElements(
       written.element.expressID,
       relationContainedInSpatialStructure,
     )
+  }
+
+  writeSharedRouteMaterial(api, ifc, modelId, sharedOwnerHistory, allRouteElements)
+
+  if (schema === 'IFC2X3') {
+    for (const group of typeGroups.values()) {
+      writeSharedRoutePipeSegmentType(api, ifc, modelId, group, millimetresPerSourceUnit)
+    }
   }
 
   return { elements, flowSegmentHandles }
@@ -203,12 +231,8 @@ function writeSlopedPipeSegment(
     IFCLABEL,
     IFCLENGTHMEASURE,
     IFCLOCALPLACEMENT,
-    IFCMATERIAL,
     IFCPIPESEGMENT,
-    IFCPIPESEGMENTTYPE,
     IFCPRODUCTDEFINITIONSHAPE,
-    IFCRELASSOCIATESMATERIAL,
-    IFCRELDEFINESBYTYPE,
     IFCSHAPEREPRESENTATION,
   } = ifc
 
@@ -331,7 +355,6 @@ function writeSlopedPipeSegment(
   api.WriteLine(modelId, localPlacement)
 
   const diameter = exportSegment.segment.pipeDiameterMm
-  const typeName = `BIMPipe ${diameterLabel(diameter)} Sanitary`
   const routeElementType = schema === 'IFC2X3' ? IFCFLOWSEGMENT : IFCPIPESEGMENT
   const tag = `${exportSegment.riserStackLabel}-${diameter}-${exportSegment.segment.kind}`
 
@@ -353,63 +376,6 @@ function writeSlopedPipeSegment(
     ...(schema === 'IFC2X3' ? {} : { PredefinedType: { type: 3, value: 'NOTDEFINED' } }),
   })
 
-  if (schema === 'IFC2X3') {
-    const pipeSegmentType = writeLabeledLine(api, modelId, 'sanitary route pipe type', {
-      expressID: -1,
-      type: IFCPIPESEGMENTTYPE,
-      GlobalId: api.CreateIFCGloballyUniqueId(modelId),
-      OwnerHistory: storeyContext.ownerHistory,
-      Name: api.CreateIfcType(modelId, IFCLABEL, typeName),
-      Description: null,
-      ApplicableOccurrence: null,
-      HasPropertySets: [],
-      RepresentationMaps: null,
-      Tag: api.CreateIfcType(modelId, IFCLABEL, `${tag}-Type`),
-      ElementType: api.CreateIfcType(modelId, IFCLABEL, typeName),
-      PredefinedType: { type: 3, value: 'RIGIDSEGMENT' },
-    })
-
-    writeLabeledLine(api, modelId, 'sanitary route type relation', {
-      expressID: -1,
-      type: IFCRELDEFINESBYTYPE,
-      GlobalId: api.CreateIFCGloballyUniqueId(modelId),
-      OwnerHistory: storeyContext.ownerHistory,
-      Name: null,
-      Description: null,
-      RelatedObjects: [handleRef(routeElement.expressID)],
-      RelatingType: handleRef(pipeSegmentType.expressID),
-    })
-
-    const typePset = writeRoutePipeTypeCommonPset(
-      api,
-      ifc,
-      modelId,
-      storeyContext.ownerHistory,
-      pipeSegmentType,
-      exportSegment,
-      millimetresPerSourceUnit,
-    )
-    pipeSegmentType.HasPropertySets = [handleRef(typePset.pset.expressID)]
-    writeLabeledLine(api, modelId, 'sanitary route pipe type property sets', pipeSegmentType)
-  }
-
-  const material = writeLabeledLine(api, modelId, 'route material', {
-    expressID: -1,
-    type: IFCMATERIAL,
-    Name: api.CreateIfcType(modelId, IFCLABEL, 'PVC'),
-  })
-
-  writeLabeledLine(api, modelId, 'route material relation', {
-    expressID: -1,
-    type: IFCRELASSOCIATESMATERIAL,
-    GlobalId: api.CreateIFCGloballyUniqueId(modelId),
-    OwnerHistory: storeyContext.ownerHistory,
-    Name: null,
-    Description: null,
-    RelatedObjects: [handleRef(routeElement.expressID)],
-    RelatingMaterial: material,
-  })
-
   writeRouteOccurrencePset(
     api,
     ifc,
@@ -422,6 +388,99 @@ function writeSlopedPipeSegment(
   )
 
   return { element: routeElement }
+}
+
+type RouteTypeGroup = {
+  diameter: SanitaryPipeDiameterMm
+  kind: string
+  stackLabel: string
+  exportSegment: SanitaryExportSegment
+  ownerHistory: IfcHandle | null
+  elements: IfcEntityRef[]
+}
+
+function routeTypeGroupKey(exportSegment: SanitaryExportSegment): string {
+  return `${exportSegment.segment.pipeDiameterMm}|${exportSegment.segment.kind}|${exportSegment.riserStackLabel}`
+}
+
+// One shared PVC material is associated with every exported route element so Revit's
+// material browser shows a single entry instead of one record per pipe segment.
+function writeSharedRouteMaterial(
+  api: IfcAPI,
+  ifc: ImportedIfcTypes,
+  modelId: number,
+  ownerHistory: IfcHandle | null,
+  elementHandles: IfcEntityRef[],
+): void {
+  if (elementHandles.length === 0) return
+
+  const material = writeLabeledLine(api, modelId, 'route material', {
+    expressID: -1,
+    type: ifc.IFCMATERIAL,
+    Name: api.CreateIfcType(modelId, ifc.IFCLABEL, 'PVC'),
+  })
+
+  writeLabeledLine(api, modelId, 'route material relation', {
+    expressID: -1,
+    type: ifc.IFCRELASSOCIATESMATERIAL,
+    GlobalId: api.CreateIFCGloballyUniqueId(modelId),
+    OwnerHistory: ownerHistory,
+    Name: null,
+    Description: null,
+    RelatedObjects: elementHandles.map((handle) => handleRef(handle.expressID)),
+    RelatingMaterial: material,
+  })
+}
+
+// One IfcPipeSegmentType per (diameter, kind, stack) is shared across all matching
+// occurrences (including those duplicated across riser-stack floors) instead of one per segment.
+function writeSharedRoutePipeSegmentType(
+  api: IfcAPI,
+  ifc: ImportedIfcTypes,
+  modelId: number,
+  group: RouteTypeGroup,
+  millimetresPerSourceUnit: number,
+): void {
+  const typeName = `BIMPipe ${diameterLabel(group.diameter)} Sanitary`
+  const tag = `${group.stackLabel}-${group.diameter}-${group.kind}`
+
+  const pipeSegmentType = writeLabeledLine(api, modelId, 'sanitary route pipe type', {
+    expressID: -1,
+    type: ifc.IFCPIPESEGMENTTYPE,
+    GlobalId: api.CreateIFCGloballyUniqueId(modelId),
+    OwnerHistory: group.ownerHistory,
+    Name: api.CreateIfcType(modelId, ifc.IFCLABEL, typeName),
+    Description: null,
+    ApplicableOccurrence: null,
+    HasPropertySets: [],
+    RepresentationMaps: null,
+    Tag: api.CreateIfcType(modelId, ifc.IFCLABEL, `${tag}-Type`),
+    ElementType: api.CreateIfcType(modelId, ifc.IFCLABEL, typeName),
+    PredefinedType: { type: 3, value: 'RIGIDSEGMENT' },
+  })
+
+  writeLabeledLine(api, modelId, 'sanitary route type relation', {
+    expressID: -1,
+    type: ifc.IFCRELDEFINESBYTYPE,
+    GlobalId: api.CreateIFCGloballyUniqueId(modelId),
+    OwnerHistory: group.ownerHistory,
+    Name: null,
+    Description: null,
+    RelatedObjects: group.elements.map((element) => handleRef(element.expressID)),
+    RelatingType: handleRef(pipeSegmentType.expressID),
+  })
+
+  const typePset = writeRoutePipeTypeCommonPset(
+    api,
+    ifc,
+    modelId,
+    group.ownerHistory,
+    pipeSegmentType,
+    group.exportSegment,
+    millimetresPerSourceUnit,
+  )
+  pipeSegmentType.HasPropertySets = [handleRef(typePset.pset.expressID)]
+  writeLabeledLine(api, modelId, 'sanitary route pipe type property sets', pipeSegmentType)
 }
 
 function writeRoutePipeTypeCommonPset(
@@ -517,12 +576,10 @@ function appendToStoreyContainment(
 ): void {
   const createdHandle = handleRef(elementExpressId)
   if (storeyContext.containment) {
-    storeyContext.containment.RelatedElements = [
-      ...(Array.isArray(storeyContext.containment.RelatedElements)
-        ? storeyContext.containment.RelatedElements
-        : []),
-      createdHandle,
-    ]
+    if (!Array.isArray(storeyContext.containment.RelatedElements)) {
+      storeyContext.containment.RelatedElements = []
+    }
+    storeyContext.containment.RelatedElements.push(createdHandle)
     api.WriteLine(modelId, storeyContext.containment)
     return
   }

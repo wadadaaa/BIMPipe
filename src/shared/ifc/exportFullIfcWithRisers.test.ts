@@ -902,4 +902,71 @@ describe('exportFullIfcWithRisers', () => {
     })
   })
 
+  it('shares one material and one pipe type across coincident-diameter route segments', async () => {
+    const { api, writtenLines } = makeMockApi()
+    const risers: Riser[] = [
+      {
+        id: 'riser-1',
+        stackId: 'stack-1',
+        stackLabel: 'S5',
+        storeyId: 66,
+        position: { x: 10, y: 0, z: 0 },
+      },
+      {
+        id: 'riser-2',
+        stackId: 'stack-1',
+        stackLabel: 'S5',
+        storeyId: 67,
+        position: { x: 10, y: 0, z: 0 },
+      },
+    ]
+    const sanitaryRoutes = [
+      {
+        fixtureExpressId: 501,
+        fixtureName: 'Toilet 1',
+        fixtureKind: 'TOILETPAN' as const,
+        riserId: 'riser-1',
+        pipeDiameterMm: 110 as const,
+        startHeightAboveFloorM: 0.2,
+        slope: 0.02,
+        segments: [
+          { from: { x: 0, y: 0, z: 0 }, to: { x: 10, y: 0, z: 0 }, kind: 'main' as const, pipeDiameterMm: 110 as const },
+        ],
+      },
+      {
+        fixtureExpressId: 502,
+        fixtureName: 'Toilet 2',
+        fixtureKind: 'TOILETPAN' as const,
+        riserId: 'riser-1',
+        pipeDiameterMm: 110 as const,
+        startHeightAboveFloorM: 0.2,
+        slope: 0.02,
+        segments: [
+          { from: { x: 0, y: 5, z: 0 }, to: { x: 10, y: 0, z: 0 }, kind: 'main' as const, pipeDiameterMm: 110 as const },
+        ],
+      },
+    ]
+
+    await exportFullIfcWithRisers(api, new Uint8Array([1, 2, 3]), 66, risers, null, sanitaryRoutes)
+
+    // Mock type codes: 15 = IFCRELASSOCIATESMATERIAL, 17 = IFCRELDEFINESBYTYPE
+    const routeElements = writtenLines.filter(
+      (line) => typeof line.ObjectType === 'object' && (line.ObjectType as { value?: string })?.value === 'BIMPipeSanitaryRoute',
+    )
+    const routeElementIds = new Set(routeElements.map((line) => line.expressID))
+    const referencesRouteElement = (line: Record<string, unknown>) =>
+      Array.isArray(line.RelatedObjects) &&
+      (line.RelatedObjects as { value?: number }[]).some((ref) => routeElementIds.has(ref.value ?? -1))
+
+    const routeMaterialRelations = writtenLines.filter((line) => line.type === 15 && referencesRouteElement(line))
+    const routeTypeRelations = writtenLines.filter((line) => line.type === 17 && referencesRouteElement(line))
+
+    expect(routeElements).toHaveLength(2)
+    // Both segments share a single material association and a single pipe type.
+    expect(routeMaterialRelations).toHaveLength(1)
+    expect((routeMaterialRelations[0].RelatedObjects as unknown[]).length).toBe(2)
+    expect(routeTypeRelations).toHaveLength(1)
+    expect((routeTypeRelations[0].RelatedObjects as unknown[]).length).toBe(2)
+  })
+
 })
