@@ -147,6 +147,9 @@ export function buildSanitaryRoutingDemoPlan(
   return { routes, limitations }
 }
 
+// Intentionally inspects ALL positioned fixtures (not just SUPPORTED_KINDS): an unsupported
+// fixture on another storey is still evidence that the model already has multi-floor fixture
+// data, so single-floor demo duplication must be suppressed.
 function shouldDuplicateSingleFloorRoutesAcrossRiserStacks(fixtures: Fixture[], risers: Riser[]): boolean {
   const positionedFixtures = fixtures.filter((fixture) => fixture.position)
   const fixtureStoreyIds = new Set(positionedFixtures.map((fixture) => fixture.storeyId))

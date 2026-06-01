@@ -207,7 +207,8 @@ export function writeSanitaryRouteSystemAssignment(
   }
 }
 
-// TODO: cache one IfcPipeSegmentType per diameter/kind and one shared PVC material to reduce IFC bloat.
+// Writes only the per-segment geometry, element, and occurrence pset. The shared PVC
+// material and pipe-segment type are written once per group by the caller.
 function writeSlopedPipeSegment(
   api: IfcAPI,
   ifc: ImportedIfcTypes,
