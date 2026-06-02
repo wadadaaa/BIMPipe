@@ -65,6 +65,47 @@ describe('sanitaryRouteExportPlan', () => {
     )
   })
 
+  it('keeps coincident segments from different route groups separate during export collection', () => {
+    const sharedSegment = {
+      from: { x: 0, y: 0, z: 0 },
+      to: { x: 10, y: 0, z: 0 },
+      kind: 'main' as const,
+      routeRole: 'collectionMain' as const,
+      pipeDiameterMm: 63 as const,
+    }
+    const routes = [
+      {
+        fixtureExpressId: 451,
+        fixtureName: 'Sink A',
+        fixtureKind: 'SINK' as const,
+        riserId: 'R1',
+        pipeDiameterMm: 50 as const,
+        startHeightAboveFloorM: 0.15,
+        slope: 0.02,
+        segments: [{ ...sharedSegment, routeGroupId: 'group-a' }],
+      },
+      {
+        fixtureExpressId: 452,
+        fixtureName: 'Sink B',
+        fixtureKind: 'SINK' as const,
+        riserId: 'R1',
+        pipeDiameterMm: 50 as const,
+        startHeightAboveFloorM: 0.15,
+        slope: 0.02,
+        segments: [{ ...sharedSegment, routeGroupId: 'group-b' }],
+      },
+    ]
+
+    const segments = collectSanitaryExportSegments(
+      routes,
+      [{ id: 1, elevation: 300 }],
+      [riser('R1', 10, 0)],
+    )
+
+    expect(segments).toHaveLength(2)
+    expect(new Set(segments.map((segment) => segment.segment.routeGroupId))).toEqual(new Set(['group-a', 'group-b']))
+  })
+
   it('keeps coincident segments from different risers separate during export collection', () => {
     const sharedSegment = {
       from: { x: 0, y: 0, z: 0 },

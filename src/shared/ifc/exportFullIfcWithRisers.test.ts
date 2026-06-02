@@ -871,6 +871,7 @@ describe('exportFullIfcWithRisers', () => {
             from: { x: 0, y: 0, z: 0 },
             to: { x: 10, y: 0, z: 0 },
             kind: 'main' as const,
+            routeGroupId: 'storey-66-zone-1',
             pipeDiameterMm: 110 as const,
           },
         ],
@@ -906,6 +907,10 @@ describe('exportFullIfcWithRisers', () => {
     expect(getPropertySingleValue(writtenLines, 'NominalDiameter')?.NominalValue).toMatchObject({
       type: IFCPOSITIVELENGTHMEASURE,
       value: 11,
+    })
+    expect(getPropertySingleValue(writtenLines, 'RouteGroupId')?.NominalValue).toMatchObject({
+      type: 8,
+      value: 'storey-66-zone-1',
     })
   })
 

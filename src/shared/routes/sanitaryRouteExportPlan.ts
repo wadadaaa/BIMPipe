@@ -88,7 +88,7 @@ export function segmentEndpointElevationsSourceUnits(
 function segmentGeometryKey(segment: RouteSegment, riserId: string): string {
   const from = coordKey(segment.from)
   const to = coordKey(segment.to)
-  return `${riserId}|${from}->${to}|${segment.routeRole ?? segment.kind}|${segment.pipeDiameterMm}`
+  return `${riserId}|${segment.routeGroupId ?? 'ungrouped'}|${from}->${to}|${segment.routeRole ?? segment.kind}|${segment.pipeDiameterMm}`
 }
 
 function coordKey(point: { x: number; y: number; z: number }): string {
