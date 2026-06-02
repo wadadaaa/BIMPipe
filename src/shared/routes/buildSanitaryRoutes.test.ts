@@ -141,7 +141,23 @@ describe('buildSanitaryRoutingDemoPlan', () => {
     expect(plan.routes.filter((route) => route.segments[0].kind === 'branch')).toHaveLength(2)
   })
 
-  it('groups nearby toilets to one service-zone riser instead of direct nearest-riser lines', () => {
+  it('does not merge service zones across different nearest risers', () => {
+    const plan = buildSanitaryRoutingDemoPlan(
+      [
+        fixture({ expressId: 141, kind: 'SINK', position: { x: 0, y: 0, z: 0 } }),
+        fixture({ expressId: 142, kind: 'BATH', position: { x: 3, y: 0, z: 0 } }),
+      ],
+      [riser('R1', 0, 0), riser('R2', 3, 0)],
+      demoConfig,
+    )
+
+    expect(plan.debug.groups).toHaveLength(2)
+    expect(plan.routes.find((route) => route.fixtureExpressId === 141)?.riserId).toBe('R1')
+    expect(plan.routes.find((route) => route.fixtureExpressId === 142)?.riserId).toBe('R2')
+    expect(plan.routes.every((route) => route.segments[0].routeRole === 'transition')).toBe(true)
+  })
+
+  it('keeps nearby toilets on their own nearest risers instead of drawing a cross-riser trunk', () => {
     const plan = buildSanitaryRoutingDemoPlan(
       [
         fixture({ expressId: 111, position: { x: 0, y: 0, z: 0 } }),
@@ -151,10 +167,10 @@ describe('buildSanitaryRoutingDemoPlan', () => {
       demoConfig,
     )
 
-    expect(new Set(plan.routes.map((route) => route.riserId)).size).toBe(1)
-    expect(plan.routes.some((route) => route.segments[0].routeRole === 'riserConnection')).toBe(true)
-    expect(plan.routes.some((route) => route.segments[0].kind === 'branch')).toBe(true)
-    expect(plan.debug.groups[0].decisions[0]).toContain('Grouped sanitary service zone')
+    expect(plan.routes.find((route) => route.fixtureExpressId === 111)?.riserId).toBe('R1')
+    expect(plan.routes.find((route) => route.fixtureExpressId === 112)?.riserId).toBe('R2')
+    expect(plan.routes.every((route) => route.segments[0].routeRole === 'transition')).toBe(true)
+    expect(plan.debug.groups).toHaveLength(2)
   })
 
   it('assigns fixtures to their nearest same-storey riser when multiple risers exist', () => {

@@ -268,10 +268,8 @@ export function WorkspacePage({
           detectedFixtures.status === 'fulfilled' ? detectedFixtures.value : []
         const kitchensResult =
           detectedKitchens.status === 'fulfilled' ? detectedKitchens.value : []
-        const toiletFixtures = fixturesResult.filter((fixture) => fixture.kind === 'TOILETPAN')
-
         startTransition(() => {
-          setFixtures(toiletFixtures)
+          setFixtures(fixturesResult)
           setKitchens(kitchensResult)
           // Detection and placement are split into two distinct phases.
           // Risers are placed only when the user explicitly clicks Suggest.

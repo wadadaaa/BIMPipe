@@ -168,7 +168,7 @@ describe('WorkspacePage', () => {
     await screen.findByLabelText('Remove riser R2')
     await screen.findByLabelText('Remove riser R3')
 
-    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('fixtures:2')
+    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('fixtures:3')
     expect(screen.getByTestId('floor-viewer')).toHaveTextContent('kitchens:1')
     expect(screen.getByTestId('floor-viewer')).toHaveTextContent('risers:3')
 

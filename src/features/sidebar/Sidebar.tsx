@@ -34,9 +34,9 @@ interface SidebarProps {
 const TABS: { id: SidebarTab; label: string; focus: string; hint: string }[] = [
   {
     id: 'fixtures',
-    label: 'Toilets',
-    focus: 'Toilet inventory',
-    hint: 'Amber markers on the plan are detected toilets from the IFC. Kitchens stay visible on the plan for kitchen riser placement.',
+    label: 'Fixtures',
+    focus: 'Sanitary fixture inventory',
+    hint: 'Amber markers on the plan are detected sanitary fixtures from the IFC. Kitchens stay visible on the plan for kitchen riser placement.',
   },
   {
     id: 'risers',
@@ -96,9 +96,9 @@ export function Sidebar({
 
       <div className="sidebar__summary-grid">
         <div className="sidebar__summary-card">
-          <span className="sidebar__summary-label">Toilets</span>
+          <span className="sidebar__summary-label">Fixtures</span>
           <strong
-            key={`toilets-${selectedStoreyName ? fixtures.length : 'idle'}`}
+            key={`fixtures-${selectedStoreyName ? fixtures.length : 'idle'}`}
             className="sidebar__summary-value sidebar__summary-value--flash"
           >
             {selectedStoreyName ? fixtures.length : '—'}

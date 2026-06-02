@@ -31,7 +31,7 @@ export function FixturesPanel({
       <div className="fixtures-panel">
         <div className="fixtures-panel__loading">
           <span className="fixtures-panel__loading-dot" />
-          Finding toilets...
+          Finding sanitary fixtures...
         </div>
       </div>
     )
@@ -41,7 +41,7 @@ export function FixturesPanel({
     return (
       <div className="fixtures-panel__empty">
         <span className="fixtures-panel__empty-icon">WC</span>
-        <p>No toilets were detected on this floor.</p>
+        <p>No sanitary fixtures were detected on this floor.</p>
       </div>
     )
   }
@@ -97,7 +97,7 @@ export function FixturesPanel({
               {canPlaceRisers
                 ? hasRisers
                   ? 'Replace auto risers using the latest detection'
-                  : 'Auto-place one riser per toilet and outer kitchen corner'
+                  : 'Auto-place risers from toilets and outer kitchen corners'
                 : 'No fixtures with plan coordinates yet'}
             </span>
           </span>
@@ -120,7 +120,7 @@ export function FixturesPanel({
 
       <div className="fixtures-panel__group">
         <div className="fixtures-panel__group-header">
-          <span className="fixtures-panel__group-label">Toilets</span>
+          <span className="fixtures-panel__group-label">Sanitary fixtures</span>
           <span className="fixtures-panel__group-count">{fixtures.length}</span>
         </div>
         <ul className="fixtures-panel__list">

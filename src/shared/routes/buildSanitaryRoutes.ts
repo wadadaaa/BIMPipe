@@ -31,6 +31,7 @@ export interface RouteSegment {
   /** Legacy viewer/export grouping. Prefer routeRole for semantic route classification. */
   kind: 'main' | 'branch'
   routeRole?: SanitaryRouteRole
+  routeGroupId?: string
   system?: typeof SANITARY_ROUTE_SYSTEM
   pipeDiameterMm: SanitaryPipeDiameterMm
   diameterMm?: SanitaryPipeDiameterMm
@@ -55,6 +56,7 @@ export interface SanitaryFixtureRoute {
 }
 
 export interface SanitaryRoutingDebugGroup {
+  groupId: string
   riserId: string
   fixtureIds: number[]
   toiletFixtureIds: number[]
@@ -96,6 +98,11 @@ interface RiserFixtureGroup {
   riser: Riser
   members: Fixture[]
   groupId: string
+}
+
+interface ServiceZoneCluster {
+  riser: Riser
+  members: Fixture[]
 }
 
 export function buildSanitaryRoutingDemoPlan(
@@ -184,6 +191,7 @@ function buildRoutesForRiserGroup(
       to: riser.position,
       kind: 'main',
       routeRole: 'riserConnection',
+      groupId,
       diameterMm: 110,
       fixture: toiletHeaderFixture,
       riser,
@@ -206,6 +214,7 @@ function buildRoutesForRiserGroup(
         to: branchLength < MIN_SANITARY_SEGMENT_PLAN_LENGTH ? riser.position : join.point,
         kind: 'branch',
         routeRole: branchLength < MIN_SANITARY_SEGMENT_PLAN_LENGTH || join.usedFallback ? 'transition' : 'toiletRoute',
+        groupId,
         diameterMm: 110,
         fixture: toilet,
         riser,
@@ -229,6 +238,7 @@ function buildRoutesForRiserGroup(
         to: riser.position,
         kind: 'main',
         routeRole: isCoincident ? 'transition' : 'toiletRoute',
+        groupId,
         diameterMm: 110,
         fixture: toilet,
         riser,
@@ -252,6 +262,7 @@ function buildRoutesForRiserGroup(
         to: riser.position,
         kind: 'branch',
         routeRole: 'transition',
+        groupId,
         diameterMm: 50,
         fixture: collectionMain,
         riser,
@@ -268,6 +279,7 @@ function buildRoutesForRiserGroup(
         to: riser.position,
         kind: 'branch',
         routeRole: 'fixtureBranch',
+        groupId,
         diameterMm: 50,
         fixture: collectionMain,
         riser,
@@ -284,6 +296,7 @@ function buildRoutesForRiserGroup(
         to: riser.position,
         kind: 'main',
         routeRole: 'collectionMain',
+        groupId,
         diameterMm: 63,
         fixture: collectionMain,
         riser,
@@ -306,6 +319,7 @@ function buildRoutesForRiserGroup(
           to: isOnCollectionMain ? fixture.position! : join.point,
           kind: 'branch',
           routeRole: isOnCollectionMain ? 'transition' : routeRole,
+          groupId,
           diameterMm: 50,
           fixture,
           riser,
@@ -326,6 +340,7 @@ function buildRoutesForRiserGroup(
   return {
     routes,
     debugGroup: {
+      groupId,
       riserId: riser.id,
       fixtureIds: members.map((fixture) => fixture.expressId),
       toiletFixtureIds: toilets.map((fixture) => fixture.expressId),
@@ -344,7 +359,7 @@ function groupFixturesBySanitaryServiceZone(
   risers: Riser[],
 ): { groups: RiserFixtureGroup[]; fixturesWithoutSameStoreyRiser: Fixture[] } {
   const fixturesWithoutSameStoreyRiser: Fixture[] = []
-  const clustersByStorey = new Map<number, Fixture[][]>()
+  const clustersByStorey = new Map<number, ServiceZoneCluster[]>()
 
   for (const fixture of fixtures) {
     const sameStoreyRisers = risers.filter((riser) => riser.storeyId === fixture.storeyId)
@@ -353,19 +368,24 @@ function groupFixturesBySanitaryServiceZone(
       continue
     }
 
+    const targetRiser = findNearestRiser(fixture, sameStoreyRisers)
     const clusters = clustersByStorey.get(fixture.storeyId) ?? []
     const matchingClusterIndexes = clusters
       .map((cluster, index) => ({ cluster, index }))
-      .filter(({ cluster }) => cluster.some((member) => fixturesBelongToSameSanitaryServiceZone(member, fixture)))
+      .filter(
+        ({ cluster }) =>
+          cluster.riser.id === targetRiser.id &&
+          cluster.members.some((member) => fixturesBelongToSameSanitaryServiceZone(member, fixture)),
+      )
       .map(({ index }) => index)
 
     if (matchingClusterIndexes.length === 0) {
-      clusters.push([fixture])
+      clusters.push({ riser: targetRiser, members: [fixture] })
     } else {
       const targetCluster = clusters[matchingClusterIndexes[0]]
-      targetCluster.push(fixture)
+      targetCluster.members.push(fixture)
       for (const clusterIndex of matchingClusterIndexes.slice(1).reverse()) {
-        targetCluster.push(...clusters[clusterIndex])
+        targetCluster.members.push(...clusters[clusterIndex].members)
         clusters.splice(clusterIndex, 1)
       }
     }
@@ -375,15 +395,13 @@ function groupFixturesBySanitaryServiceZone(
 
   const groups: RiserFixtureGroup[] = []
   for (const [storeyId, clusters] of clustersByStorey) {
-    const sameStoreyRisers = risers.filter((riser) => riser.storeyId === storeyId)
     const sortedClusters = [...clusters].sort(
-      (left, right) => minFixtureExpressId(left) - minFixtureExpressId(right),
+      (left, right) => minFixtureExpressId(left.members) - minFixtureExpressId(right.members),
     )
     sortedClusters.forEach((cluster, index) => {
-      const riser = findNearestRiserToFixtureCluster(cluster, sameStoreyRisers)
       groups.push({
-        riser,
-        members: [...cluster].sort((left, right) => left.expressId - right.expressId),
+        riser: cluster.riser,
+        members: [...cluster.members].sort((left, right) => left.expressId - right.expressId),
         groupId: `${storeyId}-${index + 1}`,
       })
     })
@@ -400,14 +418,14 @@ function minFixtureExpressId(fixtures: Fixture[]): number {
   return Math.min(...fixtures.map((fixture) => fixture.expressId))
 }
 
-function findNearestRiserToFixtureCluster(fixtures: Fixture[], risers: Riser[]): Riser {
-  const centroid = fixtureClusterCentroid(fixtures)
+function findNearestRiser(fixture: Fixture, risers: Riser[]): Riser {
+  const fixturePos = fixture.position!
   let nearest = risers[0]
-  let min = planDistance(centroid, nearest.position)
+  let min = planDistance(fixturePos, nearest.position)
 
   for (let index = 1; index < risers.length; index += 1) {
     const candidate = risers[index]
-    const distance = planDistance(centroid, candidate.position)
+    const distance = planDistance(fixturePos, candidate.position)
     if (distance < min) {
       min = distance
       nearest = candidate
@@ -482,6 +500,7 @@ function makeSegment(input: {
   to: { x: number; y: number; z: number }
   kind: 'main' | 'branch'
   routeRole: SanitaryRouteRole
+  groupId: string
   diameterMm: SanitaryPipeDiameterMm
   fixture: Fixture
   riser: Riser
@@ -493,6 +512,7 @@ function makeSegment(input: {
     to: input.to,
     kind: input.kind,
     routeRole: input.routeRole,
+    routeGroupId: input.groupId,
     system: SANITARY_ROUTE_SYSTEM,
     pipeDiameterMm: input.diameterMm,
     diameterMm: input.diameterMm,

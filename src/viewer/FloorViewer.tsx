@@ -539,7 +539,7 @@ export function FloorViewer({
 
           {plottedFixtures.length > 0 && (
             <span className="floor-viewer__chip floor-viewer__chip--fixture">
-              {plottedFixtures.length} toilets
+              {plottedFixtures.length} fixtures
             </span>
           )}
 
@@ -876,7 +876,7 @@ export function FloorViewer({
         line.setAttribute('y1', `${fallback.y1}`)
         line.setAttribute('x2', `${fallback.x2}`)
         line.setAttribute('y2', `${fallback.y2}`)
-        positionRouteLabel(label, fallback.x1, fallback.y1, fallback.x2, fallback.y2)
+        positionRouteLabel(label, routeKey, fallback.x1, fallback.y1, fallback.x2, fallback.y2)
         continue
       }
       line.style.opacity = ''
@@ -884,7 +884,7 @@ export function FloorViewer({
       line.setAttribute('y1', `${fromPt.y}`)
       line.setAttribute('x2', `${toPt.x}`)
       line.setAttribute('y2', `${toPt.y}`)
-      positionRouteLabel(label, fromPt.x, fromPt.y, toPt.x, toPt.y)
+      positionRouteLabel(label, routeKey, fromPt.x, fromPt.y, toPt.x, toPt.y)
     }
 
     if (projectionFailures !== routeProjectionStatusRef.current.failed || routeLines.size !== routeProjectionStatusRef.current.total) {
@@ -935,15 +935,34 @@ function buildRoutePreviewLabel(segment: SanitaryFixtureRoute['segments'][number
 
 function positionRouteLabel(
   label: SVGTextElement | undefined,
+  routeKey: string,
   x1: number,
   y1: number,
   x2: number,
   y2: number,
 ) {
   if (!label) return
-  label.setAttribute('x', `${(x1 + x2) / 2}`)
-  label.setAttribute('y', `${(y1 + y2) / 2 - 6}`)
+
+  const dx = x2 - x1
+  const dy = y2 - y1
+  const length = Math.hypot(dx, dy) || 1
+  const normal = { x: -dy / length, y: dx / length }
+  const stagger = (stableHash(routeKey) % 5) - 2
+  const offset = 10 + Math.abs(stagger) * 4
+  const side = stagger < 0 ? -1 : 1
+
+  label.setAttribute('x', `${(x1 + x2) / 2 + normal.x * offset * side}`)
+  label.setAttribute('y', `${(y1 + y2) / 2 + normal.y * offset * side}`)
   label.style.opacity = '1'
+}
+
+function stableHash(value: string): number {
+  let hash = 0
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) - hash) + value.charCodeAt(index)
+    hash |= 0
+  }
+  return Math.abs(hash)
 }
 
 function projectOverlayPointOnPlan(
