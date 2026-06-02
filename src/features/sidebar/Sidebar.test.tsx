@@ -106,23 +106,4 @@ describe('Sidebar', () => {
 
     expect(screen.getByRole('button', { name: /^download ifc$/i })).toBeDisabled()
   })
-
-  it('explains the empty riser list on a floor outside the demo scope', () => {
-    render(
-      <Sidebar
-        activeTab="risers"
-        onTabChange={vi.fn()}
-        selectedStoreyName="קומה 3"
-        risers={[]}
-        outOfDemoScope
-        demoScopeFloorNames={['קומת קרקע', 'קומה 1', 'קומה 2']}
-      />,
-    )
-
-    expect(screen.getByText(/outside the demo planning scope/i)).toBeInTheDocument()
-    expect(screen.getByText(/קומת קרקע, קומה 1, קומה 2/)).toBeInTheDocument()
-    expect(screen.queryByText(/no risers placed yet/i)).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /suggest/i })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /add riser/i })).toBeDisabled()
-  })
 })

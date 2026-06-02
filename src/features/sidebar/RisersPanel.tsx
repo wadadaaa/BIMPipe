@@ -14,8 +14,6 @@ interface RisersPanelProps {
   downloadError?: string | null
   onDownloadFullIfc?: () => void
   sanitaryRouteLimitations?: string[]
-  outOfDemoScope?: boolean
-  demoScopeFloorNames?: string[]
 }
 
 export function RisersPanel({
@@ -31,8 +29,6 @@ export function RisersPanel({
   downloadError = null,
   onDownloadFullIfc = () => {},
   sanitaryRouteLimitations = [],
-  outOfDemoScope = false,
-  demoScopeFloorNames = [],
 }: RisersPanelProps) {
   const canSuggest =
     fixtures.some((fixture) => fixture.position !== null) ||
@@ -50,21 +46,17 @@ export function RisersPanel({
             .filter(Boolean)
             .join(' ')}
           onClick={onToggleAddMode}
-          disabled={outOfDemoScope}
-          title={outOfDemoScope ? 'This floor is outside the demo planning scope' : undefined}
         >
           {isAddingRiser ? 'Cancel' : '+ Add riser'}
         </button>
         <button
           className="risers-panel__btn risers-panel__btn--ghost"
           onClick={onSuggestRisers}
-          disabled={!canSuggest || outOfDemoScope}
+          disabled={!canSuggest}
           title={
-            outOfDemoScope
-              ? 'This floor is outside the demo planning scope'
-              : canSuggest
-                ? 'Auto-place one riser per toilet and one outer-corner riser per kitchen.'
-                : 'Open a floor with fixtures or kitchens first'
+            canSuggest
+              ? 'Auto-place one riser per toilet and one outer-corner riser per kitchen.'
+              : 'Open a floor with fixtures or kitchens first'
           }
         >
           {risers.length > 0 ? 'Re-suggest' : 'Suggest'}
@@ -103,26 +95,7 @@ export function RisersPanel({
         </div>
       )}
 
-      {risers.length === 0 && outOfDemoScope ? (
-        <div className="risers-panel__empty">
-          <span className="risers-panel__empty-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.4" strokeDasharray="2 3" />
-              <path d="M8 12h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-            </svg>
-          </span>
-          <p>
-            This floor is outside the demo planning scope, so it has no risers or sanitary routes.
-            {demoScopeFloorNames.length > 0 ? (
-              <>
-                {' '}Risers are managed only on the included floors:{' '}
-                <span dir="auto">{demoScopeFloorNames.join(', ')}</span>.
-              </>
-            ) : null}{' '}
-            Switch to an included floor to view or place risers.
-          </p>
-        </div>
-      ) : risers.length === 0 ? (
+      {risers.length === 0 ? (
         <div className="risers-panel__empty">
           <span className="risers-panel__empty-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none">
