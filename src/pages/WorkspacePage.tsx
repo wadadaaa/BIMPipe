@@ -392,6 +392,10 @@ export function WorkspacePage({
     // Risers span every eligible floor (the physical vertical shaft), but demo sanitary routing
     // stays on the demo-scoped floors. Scope the riser set used for routing so exported routes are
     // not duplicated up the whole shaft when fixtures only exist on the demo floors.
+    //
+    // Note: this still leaves multiple storeys in `scopedRisers` (the demo's includedFloors, e.g.
+    // ground/1/2 for ADAM_10), so `duplicateRoutesAcrossRiserStacks` intentionally replicates the
+    // active floor's routes across those demo floors — it is not disabled, only bounded to scope.
     const config = demoRuntime.config
     const storeyById = new Map(storeys.map((storey) => [storey.id, storey]))
     const scopedRisers = risers.filter((riser) => {
