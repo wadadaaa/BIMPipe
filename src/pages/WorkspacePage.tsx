@@ -13,9 +13,9 @@ import { aggregateStoreyDetections } from '@/shared/ifc/aggregateStoreyDetection
 import { parseStoreys } from '@/shared/ifc/parseStoreys'
 import type { Fixture, KitchenArea, Riser, RiserId, Storey, StoreyId, SidebarTab } from '@/domain/types'
 import { buildRiserStack, removeRiserStack } from '@/shared/routes/buildRiserStacks'
-import { classifyFloors, getEligibleStoreyIdsForAutoRisers } from '@/shared/routes/floorClassification'
-import { suggestRiserPositions } from '@/shared/routes/suggestRisers'
+import { classifyFloors } from '@/shared/routes/floorClassification'
 import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE } from '@/shared/routes/riserPlacementProfile'
+import { buildSuggestedRisers } from '@/shared/routes/buildSuggestedRisers'
 import { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
 import { buildDemoModeUploadError, getDemoRuntimeConfig, isStoreyIncludedInDemoScope } from '@/shared/demoConfig'
 import { buildSanitaryRoutingDemoPlan } from '@/shared/routes/buildSanitaryRoutes'
@@ -378,7 +378,7 @@ export function WorkspacePage({
           fixtures,
           kitchens,
           floorMeshes,
-          nextRiserLabelRef,
+          () => takeNextRiserLabel(nextRiserLabelRef),
           demoRuntime,
         ),
       )
@@ -386,6 +386,24 @@ export function WorkspacePage({
       setActiveTab('risers')
     })
   }
+
+  const sanitaryRoutesForExport = useMemo(() => {
+    if (!demoRuntime.enabled) return []
+    // Risers span every eligible floor (the physical vertical shaft), but demo sanitary routing
+    // stays on the demo-scoped floors. Scope the riser set used for routing so exported routes are
+    // not duplicated up the whole shaft when fixtures only exist on the demo floors.
+    //
+    // Note: this still leaves multiple storeys in `scopedRisers` (the demo's includedFloors, e.g.
+    // ground/1/2 for ADAM_10), so `duplicateRoutesAcrossRiserStacks` intentionally replicates the
+    // active floor's routes across those demo floors — it is not disabled, only bounded to scope.
+    const config = demoRuntime.config
+    const storeyById = new Map(storeys.map((storey) => [storey.id, storey]))
+    const scopedRisers = risers.filter((riser) => {
+      const storey = storeyById.get(riser.storeyId)
+      return storey ? isStoreyIncludedInDemoScope(storey.name, config) : false
+    })
+    return buildSanitaryRoutingDemoPlan(fixtures, scopedRisers, config).routes
+  }, [demoRuntime, fixtures, risers, storeys])
 
   async function handleDownloadIfc() {
     if (
@@ -428,6 +446,7 @@ export function WorkspacePage({
             elevation: storey.elevation,
           })),
         },
+        sanitaryRoutesForExport,
       )
 
       downloadBinary(
@@ -631,54 +650,6 @@ export function WorkspacePage({
       centerPanel={centerPanel}
       rightPanel={rightPanel}
     />
-  )
-}
-
-/**
- * Suggests riser positions from the fixtures/kitchens on `sourceStoreyId`, then
- * creates one `Riser` entry per storey while preserving the source floor's
- * vertical offset from its storey elevation.
- * All entries for the same physical pipe share a `stackId`.
- */
-function buildSuggestedRisers(
-  storeys: Storey[],
-  sourceStoreyId: StoreyId,
-  fixtures: Fixture[],
-  kitchens: KitchenArea[],
-  floorMeshes: FloorMeshes | null,
-  nextRiserLabelRef: MutableRefObject<number>,
-  demoRuntime: ReturnType<typeof getDemoRuntimeConfig>,
-): Riser[] {
-  const ruleProfile = DEFAULT_RISER_PLACEMENT_RULE_PROFILE
-  const floorPlanBounds = floorMeshes
-    ? {
-        minX: floorMeshes.boundingBox.min.x,
-        maxX: floorMeshes.boundingBox.max.x,
-        minZ: floorMeshes.boundingBox.min.z,
-        maxZ: floorMeshes.boundingBox.max.z,
-      }
-    : null
-  // TODO(BIM-56): derive plan bounds from scoped/target storeys instead of only the active viewer floor.
-
-  const scopedStoreys = demoRuntime.enabled
-    ? storeys.filter((storey) => isStoreyIncludedInDemoScope(storey.name, demoRuntime.config))
-    : storeys
-  const scopedStoreyIds = new Set(scopedStoreys.map((storey) => storey.id))
-  const scopedFixtures = fixtures.filter((fixture) => scopedStoreyIds.has(fixture.storeyId))
-  const scopedKitchens = kitchens.filter((kitchen) => scopedStoreyIds.has(kitchen.storeyId))
-  const eligibleStoreyIdsFromFullModel = new Set(getEligibleStoreyIdsForAutoRisers(storeys, ruleProfile))
-  const eligibleStoreyIds = new Set([...eligibleStoreyIdsFromFullModel].filter((storeyId) => scopedStoreyIds.has(storeyId)))
-  const targetStoreys = storeys.filter((storey) => eligibleStoreyIds.has(storey.id))
-  const positions = suggestRiserPositions(scopedFixtures, scopedKitchens, floorPlanBounds, ruleProfile)
-
-  return positions.flatMap((position) =>
-    buildRiserStack(
-      targetStoreys,
-      sourceStoreyId,
-      position,
-      takeNextRiserLabel(nextRiserLabelRef),
-      'detected',
-    ),
   )
 }
 

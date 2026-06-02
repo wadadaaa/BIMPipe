@@ -5,10 +5,18 @@ import { planDistance } from './planGeometry'
 
 export const DEMO_SANITARY_SLOPE = SLOPE
 
+// Minimum plan-view length (viewer units) for a sanitary route segment. Segments shorter than
+// this are degenerate (fixture point coincides with the riser) and would produce a zero-volume
+// IFC pipe, so they are dropped rather than emitted.
+export const MIN_SANITARY_SEGMENT_PLAN_LENGTH = 1e-6
+
+export type SanitaryPipeDiameterMm = 50 | 63 | 110
+
 export interface RouteSegment {
   from: { x: number; y: number; z: number }
   to: { x: number; y: number; z: number }
   kind: 'main' | 'branch'
+  pipeDiameterMm: SanitaryPipeDiameterMm
 }
 
 export interface SanitaryFixtureRoute {
@@ -16,9 +24,10 @@ export interface SanitaryFixtureRoute {
   fixtureName: string
   fixtureKind: FixtureKind
   riserId: string
-  pipeDiameterMm: 50 | 110
+  pipeDiameterMm: SanitaryPipeDiameterMm
   startHeightAboveFloorM: number
   slope: number
+  /** Per-fixture segments only; shared main runs are owned by the farthest fixture per riser group. */
   segments: RouteSegment[]
 }
 
@@ -66,7 +75,8 @@ export function buildSanitaryRoutingDemoPlan(
     else groupedByRiser.set(nearest.id, { riser: nearest, members: [fixture] })
   }
 
-  const routes: SanitaryFixtureRoute[] = []
+  const sourceRoutes: SanitaryFixtureRoute[] = []
+  const coincidentFixtures: { expressId: number; riserId: string }[] = []
 
   for (const { riser, members } of groupedByRiser.values()) {
     const farthest = [...members].sort((a, b) => {
@@ -75,29 +85,49 @@ export function buildSanitaryRoutingDemoPlan(
       return planDistance(bPos, riser.position) - planDistance(aPos, riser.position)
     })[0]
 
+    const hasBranches = members.length > 1
+
     for (const fixture of members) {
       const fixturePos = fixture.position!
       const onMainLine = fixture.expressId === farthest.expressId
-      const branchJunction = approximateBranchJunction(fixturePos, riser.position)
+      const fixtureDiameter = fixtureDiameterForKind(fixture.kind)
+      const mainDiameter = mainLineDiameterForKind(fixture.kind, hasBranches)
 
-      const segments: RouteSegment[] = []
-      if (!onMainLine) {
-        segments.push({ from: fixturePos, to: branchJunction, kind: 'branch' })
+      // A fixture sitting on (or within rounding distance of) its riser produces no pipe run.
+      // Skip the degenerate segment instead of emitting a zero-length pipe.
+      if (planDistance(fixturePos, riser.position) < MIN_SANITARY_SEGMENT_PLAN_LENGTH) {
+        coincidentFixtures.push({ expressId: fixture.expressId, riserId: riser.id })
+        continue
       }
-      segments.push({ from: onMainLine ? fixturePos : branchJunction, to: riser.position, kind: 'main' })
 
-      routes.push({
+      // Both the main run and each branch run terminate at the riser: every fixture's pipe
+      // reaches the stack. The farthest fixture owns the larger-diameter main line; the rest are
+      // smaller-diameter branch runs that also tie into the riser.
+      const segments: RouteSegment[] = [
+        {
+          from: fixturePos,
+          to: riser.position,
+          kind: onMainLine ? 'main' : 'branch',
+          pipeDiameterMm: onMainLine ? mainDiameter : fixtureDiameter,
+        },
+      ]
+
+      sourceRoutes.push({
         fixtureExpressId: fixture.expressId,
         fixtureName: fixture.name,
         fixtureKind: fixture.kind,
         riserId: riser.id,
-        pipeDiameterMm: fixture.kind === 'TOILETPAN' ? 110 : 50,
+        pipeDiameterMm: fixtureDiameter,
         startHeightAboveFloorM: fixture.kind === 'TOILETPAN' ? 0.2 : 0.15,
         slope: DEMO_SANITARY_SLOPE,
         segments,
       })
     }
   }
+
+  const routes = shouldDuplicateSingleFloorRoutesAcrossRiserStacks(fixtures, risers)
+    ? duplicateRoutesAcrossRiserStacks(sourceRoutes, risers)
+    : sourceRoutes
 
   const unsupportedKinds = fixtures
     .filter((fixture) => fixture.position && !SUPPORTED_KINDS.has(fixture.kind))
@@ -114,11 +144,125 @@ export function buildSanitaryRoutingDemoPlan(
         .join(', ')}.`,
     )
   }
+  for (const { expressId, riserId } of coincidentFixtures) {
+    limitations.push(
+      `Sanitary route skipped for fixture ${expressId} because fixture point coincides with riser ${riserId}.`,
+    )
+  }
   if (routes.some((route) => route.segments.some((segment) => segment.kind === 'branch'))) {
-    limitations.push('45° branches are approximated by a single branch segment in plan view for the demo.')
+    limitations.push('Branch fixtures are drawn as a single straight branch run to the riser in plan view for the demo.')
+  }
+  if (routes.length > sourceRoutes.length) {
+    limitations.push('Single-floor demo sanitary routes are duplicated across matching riser stack floors for IFC export.')
   }
 
   return { routes, limitations }
+}
+
+// Intentionally inspects ALL positioned fixtures (not just SUPPORTED_KINDS): an unsupported
+// fixture on another storey is still evidence that the model already has multi-floor fixture
+// data, so single-floor demo duplication must be suppressed.
+function shouldDuplicateSingleFloorRoutesAcrossRiserStacks(fixtures: Fixture[], risers: Riser[]): boolean {
+  const positionedFixtures = fixtures.filter((fixture) => fixture.position)
+  const fixtureStoreyIds = new Set(positionedFixtures.map((fixture) => fixture.storeyId))
+  const riserStoreyIds = new Set(risers.map((riser) => riser.storeyId))
+  return fixtureStoreyIds.size === 1 && riserStoreyIds.size > 1
+}
+
+function duplicateRoutesAcrossRiserStacks(
+  routes: SanitaryFixtureRoute[],
+  risers: Riser[],
+): SanitaryFixtureRoute[] {
+  if (routes.length === 0) return routes
+
+  const riserById = new Map(risers.map((riser) => [riser.id, riser]))
+  const risersByStackId = new Map<string, Riser[]>()
+  for (const riser of risers) {
+    const bucket = risersByStackId.get(riser.stackId)
+    if (bucket) bucket.push(riser)
+    else risersByStackId.set(riser.stackId, [riser])
+  }
+
+  const duplicated = [...routes]
+  const routeKeys = new Set(duplicated.map(routeKey))
+
+  for (const route of routes) {
+    const sourceRiser = riserById.get(route.riserId)
+    if (!sourceRiser) continue
+
+    const stackRisers = risersByStackId.get(sourceRiser.stackId) ?? []
+    for (const targetRiser of stackRisers) {
+      if (targetRiser.id === sourceRiser.id) continue
+
+      const translated = translateRouteToRiser(route, sourceRiser, targetRiser)
+      const key = routeKey(translated)
+      if (routeKeys.has(key)) continue
+
+      routeKeys.add(key)
+      duplicated.push(translated)
+    }
+  }
+
+  return duplicated
+}
+
+function translateRouteToRiser(
+  route: SanitaryFixtureRoute,
+  sourceRiser: Riser,
+  targetRiser: Riser,
+): SanitaryFixtureRoute {
+  const delta = {
+    x: targetRiser.position.x - sourceRiser.position.x,
+    y: targetRiser.position.y - sourceRiser.position.y,
+    z: targetRiser.position.z - sourceRiser.position.z,
+  }
+
+  return {
+    ...route,
+    riserId: targetRiser.id,
+    segments: route.segments.map((segment) => ({
+      ...segment,
+      from: translatePoint(segment.from, delta),
+      to: translatePoint(segment.to, delta),
+    })),
+  }
+}
+
+function translatePoint(
+  point: { x: number; y: number; z: number },
+  delta: { x: number; y: number; z: number },
+): { x: number; y: number; z: number } {
+  return {
+    x: point.x + delta.x,
+    y: point.y + delta.y,
+    z: point.z + delta.z,
+  }
+}
+
+function routeKey(route: SanitaryFixtureRoute): string {
+  return [
+    route.fixtureExpressId,
+    route.fixtureKind,
+    route.riserId,
+    ...route.segments.map((segment) => `${segment.kind}:${segment.pipeDiameterMm}:${pointKey(segment.from)}->${pointKey(segment.to)}`),
+  ].join('|')
+}
+
+function pointKey(point: { x: number; y: number; z: number }): string {
+  return `${roundKey(point.x)},${roundKey(point.y)},${roundKey(point.z)}`
+}
+
+function roundKey(value: number): number {
+  return Math.round(value * 1000)
+}
+
+function fixtureDiameterForKind(kind: FixtureKind): SanitaryPipeDiameterMm {
+  return kind === 'TOILETPAN' ? 110 : 50
+}
+
+function mainLineDiameterForKind(kind: FixtureKind, hasBranches: boolean): SanitaryPipeDiameterMm {
+  if (kind === 'TOILETPAN') return 110
+  return hasBranches ? 63 : 50
 }
 
 function findNearestRiser(fixture: Fixture, risers: Riser[]): Riser {
@@ -136,15 +280,4 @@ function findNearestRiser(fixture: Fixture, risers: Riser[]): Riser {
   }
 
   return nearest
-}
-
-function approximateBranchJunction(
-  fixture: { x: number; y: number; z: number },
-  riser: { x: number; y: number; z: number },
-): { x: number; y: number; z: number } {
-  return {
-    x: (fixture.x + riser.x) / 2,
-    y: fixture.y,
-    z: (fixture.z + riser.z) / 2,
-  }
 }

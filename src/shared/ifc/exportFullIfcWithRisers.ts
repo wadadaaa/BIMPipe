@@ -1,6 +1,13 @@
-import { Matrix4, Vector3 } from 'three'
-import type { IfcAPI } from 'web-ifc'
+import { Vector3 } from 'three'
+import type { SanitaryFixtureRoute } from '@/shared/routes/buildSanitaryRoutes'
+import {
+  createViewerPointToStoreyLocalResolver,
+  writeSanitaryRouteElements,
+  writeSanitaryRouteSystemAssignment,
+} from '@/shared/ifc/exportSanitaryRouteElements'
+import { Handle, type IfcAPI } from 'web-ifc'
 import type { PlanBounds, Riser, Storey, StoreyId } from '@/domain/types'
+import { readDirection, resolveLocalPlacementWorldMatrix } from './localPlacementMatrix'
 
 type IfcHandle = { type: 5; value: number }
 type IfcWritableLine = { expressID: number; type: number; [key: string]: unknown }
@@ -93,7 +100,7 @@ export type FullIfcRiserDebugRecord = {
 export type FullIfcSystemAssignmentDebug = {
   ifcSystemId: number
   ifcRelAssignsToGroupId: number
-  ifcRelServicesBuildingsId: number
+  ifcRelServicesBuildingsId: number | null
   ifcBuildingId: number
   name: string
   objectType: string
@@ -134,6 +141,7 @@ export async function exportFullIfcWithRisers(
   primaryStoreyId: StoreyId,
   risers: Riser[],
   sourceFloorPlanBounds: PlanBounds | null = null,
+  sanitaryRoutes: SanitaryFixtureRoute[] = [],
 ): Promise<Uint8Array> {
   const { ifcBytes } = await exportFullIfcWithRisersInternal(
     api,
@@ -142,6 +150,7 @@ export async function exportFullIfcWithRisers(
     risers,
     sourceFloorPlanBounds,
     null,
+    sanitaryRoutes,
   )
   return ifcBytes
 }
@@ -154,6 +163,7 @@ export async function exportFullIfcWithRisersWithDebug(
   risers: Riser[],
   sourceFloorPlanBounds: PlanBounds | null = null,
   debugOptions: FullIfcRiserDebugOptions = {},
+  sanitaryRoutes: SanitaryFixtureRoute[] = [],
 ): Promise<FullIfcWithRisersDebugResult> {
   const result = await exportFullIfcWithRisersInternal(
     api,
@@ -162,6 +172,7 @@ export async function exportFullIfcWithRisersWithDebug(
     risers,
     sourceFloorPlanBounds,
     debugOptions,
+    sanitaryRoutes,
   )
   if (!result.debugMapping) {
     throw new Error('Debug mapping was not created.')
@@ -179,6 +190,7 @@ async function exportFullIfcWithRisersInternal(
   risers: Riser[],
   sourceFloorPlanBounds: PlanBounds | null,
   debugOptions: FullIfcRiserDebugOptions | null,
+  sanitaryRoutes: SanitaryFixtureRoute[] = [],
 ): Promise<{
   ifcBytes: Uint8Array
   debugMapping: FullIfcRiserDebugArtifact | null
@@ -284,17 +296,16 @@ async function exportFullIfcWithRisersInternal(
           debugRecord.notes.push(`Appended to existing IfcRelContainedInSpatialStructure #${storeyContext.containment.expressID}.`)
         }
       } else {
-        const relation = api.CreateIfcEntity(
-          modelId,
-          IFCRELCONTAINEDINSPATIALSTRUCTURE,
-          api.CreateIFCGloballyUniqueId(modelId),
-          storeyContext.ownerHistory,
-          api.CreateIfcType(modelId, IFCLABEL, 'BIMPipe riser set'),
-          null,
-          createdHandles,
-          handleRef(bottomStoreyId),
-        )
-        api.WriteLine(modelId, relation)
+        const relation = writeLabeledLine(api, modelId, 'riser containment', {
+          expressID: -1,
+          type: IFCRELCONTAINEDINSPATIALSTRUCTURE,
+          GlobalId: api.CreateIFCGloballyUniqueId(modelId),
+          OwnerHistory: storeyContext.ownerHistory,
+          Name: api.CreateIfcType(modelId, IFCLABEL, 'BIMPipe riser set'),
+          Description: null,
+          RelatedElements: createdHandles,
+          RelatingStructure: handleRef(bottomStoreyId),
+        })
         if (debugRecord) {
           debugRecord.createdRelationIds.containmentRelation = relation.expressID
           debugRecord.notes.push(`Created IfcRelContainedInSpatialStructure #${relation.expressID}.`)
@@ -302,10 +313,59 @@ async function exportFullIfcWithRisersInternal(
       }
     }
 
+    const storeyContextCache = new Map<StoreyId, ReturnType<typeof resolveStoreyContext>>()
+    const resolveCachedStoreyContext = (storeyId: StoreyId) => {
+      const cached = storeyContextCache.get(storeyId)
+      if (cached) return cached
+      const context = resolveStoreyContext(api, modelId, storeyId, IFCRELCONTAINEDINSPATIALSTRUCTURE)
+      storeyContextCache.set(storeyId, context)
+      return context
+    }
+    const resolveViewerPointToStoreyLocal = createViewerPointToStoreyLocalResolver(
+      api,
+      modelId,
+      sourceUnitsPerViewerUnit,
+    )
+
+    const sanitaryRouteExport = writeSanitaryRouteElements(
+      api,
+      ifc,
+      modelId,
+      schema,
+      bodyContextId,
+      sanitaryRoutes,
+      [...storeysById.values()].flatMap((storey) =>
+        typeof storey.elevation === "number" ? [{ id: storey.id, elevation: storey.elevation }] : [],
+      ),
+      risers,
+      sourceUnitsPerViewerUnit,
+      millimetresPerSourceUnit,
+      resolveCachedStoreyContext,
+      resolveViewerPointToStoreyLocal,
+      IFCRELCONTAINEDINSPATIALSTRUCTURE,
+      debugMapping?.notes,
+    )
+    if (sanitaryRouteExport.flowSegmentHandles.length > 0) {
+      writeSanitaryRouteSystemAssignment(
+        api,
+        ifc,
+        modelId,
+        schema,
+        systemOwnerHistory,
+        sanitaryRouteExport.flowSegmentHandles,
+      )
+      if (debugMapping) {
+        debugMapping.notes.push(
+          `Exported ${sanitaryRouteExport.elements.length} sanitary route pipe segment(s) as IfcFlowSegment/IfcPipeSegment elements.`,
+        )
+      }
+    }
+
     const systemAssignment = writeSanitarySystemAssignment(
       api,
       ifc,
       modelId,
+      schema,
       systemOwnerHistory,
       createdFlowSegmentHandles,
     )
@@ -490,81 +550,6 @@ function resolveBodyContext(api: IfcAPI, modelId: number): number {
   }
 
   throw new Error('Could not resolve a Body representation context.')
-}
-
-function resolveLocalPlacementWorldMatrix(api: IfcAPI, modelId: number, placementId: number): Matrix4 {
-  const placement = api.GetLine(modelId, placementId, false) as {
-    PlacementRelTo?: IfcHandle | null
-    RelativePlacement?: IfcHandle | null
-  } | null
-  if (!placement) throw new Error(`Missing IfcLocalPlacement #${placementId}.`)
-
-  const parentMatrix =
-    placement.PlacementRelTo?.value != null
-      ? resolveLocalPlacementWorldMatrix(api, modelId, placement.PlacementRelTo.value)
-      : new Matrix4()
-
-  const relativePlacementId = placement.RelativePlacement?.value ?? null
-  if (relativePlacementId === null) return parentMatrix
-
-  return parentMatrix.multiply(resolveAxisPlacementMatrix(api, modelId, relativePlacementId))
-}
-
-function resolveAxisPlacementMatrix(api: IfcAPI, modelId: number, placementId: number): Matrix4 {
-  const placement = api.GetLine(modelId, placementId, false) as {
-    Location?: IfcHandle | null
-    Axis?: IfcHandle | null
-    RefDirection?: IfcHandle | null
-  } | null
-  if (!placement) throw new Error(`Missing axis placement #${placementId}.`)
-
-  const location = readCoordinates(api, modelId, placement.Location?.value ?? null, [0, 0, 0])
-  const zAxis = readDirection(api, modelId, placement.Axis?.value ?? null, new Vector3(0, 0, 1))
-  const xHint = readDirection(api, modelId, placement.RefDirection?.value ?? null, new Vector3(1, 0, 0))
-  const yAxis = new Vector3().crossVectors(zAxis, xHint).normalize()
-  const xAxis = new Vector3().crossVectors(yAxis, zAxis).normalize()
-
-  const matrix = new Matrix4()
-  matrix.makeBasis(xAxis, yAxis, zAxis)
-  matrix.setPosition(location)
-  return matrix
-}
-
-function readCoordinates(
-  api: IfcAPI,
-  modelId: number,
-  pointId: number | null,
-  fallback: [number, number, number],
-): Vector3 {
-  if (pointId === null) return new Vector3(...fallback)
-  const point = api.GetLine(modelId, pointId, false) as {
-    Coordinates?: Array<{ value?: number } | number> | null
-  } | null
-  const coords = (point?.Coordinates ?? []).map((value) => Number((value as { value?: number })?.value ?? value))
-  return new Vector3(
-    Number.isFinite(coords[0]) ? coords[0] : fallback[0],
-    Number.isFinite(coords[1]) ? coords[1] : fallback[1],
-    Number.isFinite(coords[2]) ? coords[2] : fallback[2],
-  )
-}
-
-function readDirection(
-  api: IfcAPI,
-  modelId: number,
-  directionId: number | null,
-  fallback: Vector3,
-): Vector3 {
-  if (directionId === null) return fallback.clone()
-  const direction = api.GetLine(modelId, directionId, false) as {
-    DirectionRatios?: Array<{ value?: number } | number> | null
-  } | null
-  const ratios = (direction?.DirectionRatios ?? []).map((value) => Number((value as { value?: number })?.value ?? value))
-  const vector = new Vector3(
-    Number.isFinite(ratios[0]) ? ratios[0] : fallback.x,
-    Number.isFinite(ratios[1]) ? ratios[1] : fallback.y,
-    Number.isFinite(ratios[2]) ? ratios[2] : fallback.z,
-  )
-  return vector.lengthSq() > 1e-9 ? vector.normalize() : fallback.clone()
 }
 
 function toIfcWorldPlanPoint(
@@ -959,16 +944,12 @@ function writeMinimalRiser(
     RefDirection: handleRef(dirX.expressID),
   })
 
-  const targetStoreyPlacement = api.GetLine(modelId, targetStoreyPlacementId, false)
-  const localPlacement = createLabeledEntity(
-    api,
-    modelId,
-    'local placement',
-    IFCLOCALPLACEMENT,
-    targetStoreyPlacement,
-    placementAxis,
-  )
-  api.WriteLine(modelId, localPlacement)
+  const localPlacement = writeLabeledLine(api, modelId, 'local placement', {
+    expressID: -1,
+    type: IFCLOCALPLACEMENT,
+    PlacementRelTo: handleRef(targetStoreyPlacementId),
+    RelativePlacement: handleRef(placementAxis.expressID),
+  })
 
   const stackLabel = riser.stackLabel.trim() || 'R1'
   const riserName = `BIMPipe ${stackLabel}`
@@ -1045,7 +1026,7 @@ function writeMinimalRiser(
     Name: null,
     Description: null,
     RelatedObjects: [handleRef(riserElement.expressID)],
-    RelatingMaterial: material,
+    RelatingMaterial: handleRef(material.expressID),
   })
 
   const occurrencePset = writeFlowSegmentOccurrencePset(
@@ -1315,6 +1296,7 @@ function writeSanitarySystemAssignment(
   api: IfcAPI,
   ifc: ImportedIfcTypes,
   modelId: number,
+  schema: string,
   ownerHistory: IfcHandle | null,
   riserHandles: IfcHandle[],
 ): FullIfcSystemAssignmentDebug {
@@ -1343,25 +1325,39 @@ function writeSanitarySystemAssignment(
     Name: api.CreateIfcType(modelId, ifc.IFCLABEL, 'BIMPipe Sanitary System Assignment'),
     Description: null,
     RelatedObjects: riserHandles,
-    RelatedObjectsType: api.CreateIfcType(modelId, ifc.IFCLABEL, 'IFCFLOWSEGMENT'),
+    ...(schema === 'IFC2X3'
+      ? { RelatedObjectsType: api.CreateIfcType(modelId, ifc.IFCLABEL, 'IFCFLOWSEGMENT') }
+      : {}),
     RelatingGroup: handleRef(system.expressID),
   })
 
-  const serviceRelation = writeLabeledLine(api, modelId, 'sanitary system service', {
-    expressID: -1,
-    type: api.GetTypeCodeFromName('IFCRELSERVICESBUILDINGS'),
-    GlobalId: api.CreateIFCGloballyUniqueId(modelId),
-    OwnerHistory: ownerHistory,
-    Name: api.CreateIfcType(modelId, ifc.IFCLABEL, 'BIMPipe Sanitary System Service'),
-    Description: null,
-    RelatedBuildings: [handleRef(buildingId)],
-    RelatingSystem: handleRef(system.expressID),
-  })
+  if (schema === 'IFC2X3') {
+    const serviceRelation = writeLabeledLine(api, modelId, 'sanitary system service', {
+      expressID: -1,
+      type: api.GetTypeCodeFromName('IFCRELSERVICESBUILDINGS'),
+      GlobalId: api.CreateIFCGloballyUniqueId(modelId),
+      OwnerHistory: ownerHistory,
+      Name: api.CreateIfcType(modelId, ifc.IFCLABEL, 'BIMPipe Sanitary System Service'),
+      Description: null,
+      RelatedBuildings: [handleRef(buildingId)],
+      RelatingSystem: handleRef(system.expressID),
+    })
+
+    return {
+      ifcSystemId: system.expressID,
+      ifcRelAssignsToGroupId: groupRelation.expressID,
+      ifcRelServicesBuildingsId: serviceRelation.expressID,
+      ifcBuildingId: buildingId,
+      name: RISER_SYSTEM_NAME,
+      objectType: 'SANITARY',
+      description: RISER_SYSTEM_DESCRIPTION,
+    }
+  }
 
   return {
     ifcSystemId: system.expressID,
     ifcRelAssignsToGroupId: groupRelation.expressID,
-    ifcRelServicesBuildingsId: serviceRelation.expressID,
+    ifcRelServicesBuildingsId: null,
     ifcBuildingId: buildingId,
     name: RISER_SYSTEM_NAME,
     objectType: 'SANITARY',
@@ -1409,7 +1405,10 @@ function toHandle(value: IfcHandle | { expressID: number } | null | undefined): 
 }
 
 function handleRef(expressId: number): IfcHandle {
-  return { type: 5, value: expressId }
+  // web-ifc's WriteLine requires a real Handle instance for SELECT-typed attributes
+  // (e.g. IfcLocalPlacement.RelativePlacement); a plain { type: 5, value } object throws
+  // "Cannot pass non-string to std::string". A Handle instance is accepted everywhere.
+  return new Handle(expressId) as unknown as IfcHandle
 }
 
 function writeLabeledLine(api: IfcAPI, modelId: number, label: string, line: IfcWritableLine) {
@@ -1421,10 +1420,3 @@ function writeLabeledLine(api: IfcAPI, modelId: number, label: string, line: Ifc
   }
 }
 
-function createLabeledEntity(api: IfcAPI, modelId: number, label: string, type: number, ...args: unknown[]) {
-  try {
-    return api.CreateIfcEntity(modelId, type, ...args) as { expressID: number; type: number }
-  } catch (error) {
-    throw new Error(`Failed to create ${label}: ${error instanceof Error ? error.message : String(error)}`)
-  }
-}

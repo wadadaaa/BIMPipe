@@ -21,8 +21,8 @@ function fixture(overrides: Partial<Fixture>): Fixture {
   }
 }
 
-function riser(id: string, x: number, z: number, storeyId = 1): Riser {
-  return { id, stackId: id, stackLabel: id, storeyId, position: { x, y: 0, z } }
+function riser(id: string, x: number, z: number, storeyId = 1, stackId = id, y = 0): Riser {
+  return { id, stackId, stackLabel: stackId, storeyId, position: { x, y, z } }
 }
 
 describe('buildSanitaryRoutingDemoPlan', () => {
@@ -58,6 +58,22 @@ describe('buildSanitaryRoutingDemoPlan', () => {
     expect(sink).toMatchObject({ pipeDiameterMm: 50, startHeightAboveFloorM: 0.15, slope: DEMO_SANITARY_SLOPE })
   })
 
+  it('uses 63mm collection main lines when grouped wet fixtures branch', () => {
+    const plan = buildSanitaryRoutingDemoPlan(
+      [
+        fixture({ expressId: 601, kind: 'SINK', position: { x: 2, y: 0, z: 0 } }),
+        fixture({ expressId: 602, kind: 'BATH', position: { x: 8, y: 0, z: 0 } }),
+      ],
+      [riser('R1', 10, 0)],
+      demoConfig,
+    )
+
+    const sink = plan.routes.find((route) => route.fixtureExpressId === 601)
+    const bath = plan.routes.find((route) => route.fixtureExpressId === 602)
+    expect(sink?.segments[0]).toMatchObject({ kind: 'main', pipeDiameterMm: 63 })
+    expect(bath?.segments[0]).toMatchObject({ kind: 'branch', pipeDiameterMm: 50 })
+  })
+
   it('uses farthest fixture as main line and branches closer fixtures', () => {
     const plan = buildSanitaryRoutingDemoPlan(
       [
@@ -73,9 +89,12 @@ describe('buildSanitaryRoutingDemoPlan', () => {
 
     expect(far?.segments).toHaveLength(1)
     expect(far?.segments[0].kind).toBe('main')
-    expect(close?.segments).toHaveLength(2)
+    expect(close?.segments).toHaveLength(1)
     expect(close?.segments[0].kind).toBe('branch')
-    expect(plan.limitations).toContain('45° branches are approximated by a single branch segment in plan view for the demo.')
+    // Both the main run and the branch run terminate at the riser position.
+    expect(far?.segments[0].to).toEqual({ x: 10, y: 0, z: 0 })
+    expect(close?.segments[0].to).toEqual({ x: 10, y: 0, z: 0 })
+    expect(plan.limitations).toContain('Branch fixtures are drawn as a single straight branch run to the riser in plan view for the demo.')
   })
 
   it('assigns fixtures to their nearest same-storey riser when multiple risers exist', () => {
@@ -90,6 +109,45 @@ describe('buildSanitaryRoutingDemoPlan', () => {
 
     expect(plan.routes.find((route) => route.fixtureExpressId === 201)?.riserId).toBe('R1')
     expect(plan.routes.find((route) => route.fixtureExpressId === 202)?.riserId).toBe('R2')
+  })
+
+  it('duplicates single-floor demo routes across matching riser stack floors', () => {
+    const plan = buildSanitaryRoutingDemoPlan(
+      [fixture({ expressId: 701, storeyId: 2, position: { x: 1, y: 3, z: 0 } })],
+      [
+        riser('R1-F2', 10, 0, 2, 'stack-A', 3),
+        riser('R1-F3', 10, 0, 3, 'stack-A', 6),
+        riser('R1-F4', 10, 0, 4, 'stack-A', 9),
+      ],
+      demoConfig,
+    )
+
+    expect(plan.routes.map((route) => route.riserId).sort()).toEqual(['R1-F2', 'R1-F3', 'R1-F4'])
+    expect(plan.routes.find((route) => route.riserId === 'R1-F3')?.segments[0]).toMatchObject({
+      from: { x: 1, y: 6, z: 0 },
+      to: { x: 10, y: 6, z: 0 },
+      kind: 'main',
+      pipeDiameterMm: 110,
+    })
+    expect(plan.limitations).toContain('Single-floor demo sanitary routes are duplicated across matching riser stack floors for IFC export.')
+  })
+
+  it('does not duplicate routes when fixtures already cover multiple storeys', () => {
+    const plan = buildSanitaryRoutingDemoPlan(
+      [
+        fixture({ expressId: 801, storeyId: 2, position: { x: 1, y: 3, z: 0 } }),
+        fixture({ expressId: 802, storeyId: 3, position: { x: 1, y: 6, z: 0 } }),
+      ],
+      [
+        riser('R1-F2', 10, 0, 2, 'stack-A', 3),
+        riser('R1-F3', 10, 0, 3, 'stack-A', 6),
+      ],
+      demoConfig,
+    )
+
+    expect(plan.routes).toHaveLength(2)
+    expect(plan.routes.map((route) => route.riserId).sort()).toEqual(['R1-F2', 'R1-F3'])
+    expect(plan.limitations).not.toContain('Single-floor demo sanitary routes are duplicated across matching riser stack floors for IFC export.')
   })
 
   it('does not route fixtures to risers from other storeys', () => {
@@ -115,6 +173,57 @@ describe('buildSanitaryRoutingDemoPlan', () => {
     expect(plan.limitations[0]).toContain('Unsupported fixture kinds skipped: URINAL')
   })
 
+  it('does not duplicate routes when unsupported fixtures occupy other storeys', () => {
+    const plan = buildSanitaryRoutingDemoPlan(
+      [
+        fixture({ expressId: 901, storeyId: 2, position: { x: 1, y: 3, z: 0 } }),
+        fixture({ expressId: 902, storeyId: 3, kind: 'URINAL', position: { x: 1, y: 6, z: 0 } }),
+      ],
+      [
+        riser('R1-F2', 10, 0, 2, 'stack-A', 3),
+        riser('R1-F3', 10, 0, 3, 'stack-A', 6),
+        riser('R1-F4', 10, 0, 4, 'stack-A', 9),
+      ],
+      demoConfig,
+    )
+
+    expect(plan.routes).toHaveLength(1)
+    expect(plan.routes[0].riserId).toBe('R1-F2')
+    expect(plan.limitations).not.toContain(
+      'Single-floor demo sanitary routes are duplicated across matching riser stack floors for IFC export.',
+    )
+  })
+
+  it('does not emit a zero-length segment when a fixture coincides with its riser', () => {
+    const plan = buildSanitaryRoutingDemoPlan(
+      [fixture({ expressId: 901, position: { x: 10, y: 0, z: 0 } })],
+      [riser('R1', 10, 0)],
+      demoConfig,
+    )
+
+    expect(plan.routes).toHaveLength(0)
+    expect(plan.limitations).toContain(
+      'Sanitary route skipped for fixture 901 because fixture point coincides with riser R1.',
+    )
+  })
+
+  it('keeps other fixtures routed when one fixture coincides with the riser', () => {
+    const plan = buildSanitaryRoutingDemoPlan(
+      [
+        fixture({ expressId: 902, position: { x: 10, y: 0, z: 0 } }),
+        fixture({ expressId: 903, position: { x: 2, y: 0, z: 0 } }),
+      ],
+      [riser('R1', 10, 0)],
+      demoConfig,
+    )
+
+    expect(plan.routes.map((route) => route.fixtureExpressId)).toEqual([903])
+    expect(plan.routes[0].segments).toHaveLength(1)
+    expect(plan.limitations).toContain(
+      'Sanitary route skipped for fixture 902 because fixture point coincides with riser R1.',
+    )
+  })
+
   it('uses a single main segment without branch limitation for one fixture per riser', () => {
     const plan = buildSanitaryRoutingDemoPlan(
       [fixture({ expressId: 301, position: { x: 2, y: 0, z: 0 } })],
@@ -124,8 +233,8 @@ describe('buildSanitaryRoutingDemoPlan', () => {
 
     expect(plan.routes).toHaveLength(1)
     expect(plan.routes[0].segments).toEqual([
-      { from: { x: 2, y: 0, z: 0 }, to: { x: 10, y: 0, z: 0 }, kind: 'main' },
+      { from: { x: 2, y: 0, z: 0 }, to: { x: 10, y: 0, z: 0 }, kind: 'main', pipeDiameterMm: 110 },
     ])
-    expect(plan.limitations).not.toContain('45° branches are approximated by a single branch segment in plan view for the demo.')
+    expect(plan.limitations).not.toContain('Branch fixtures are drawn as a single straight branch run to the riser in plan view for the demo.')
   })
 })
