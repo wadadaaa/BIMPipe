@@ -5,7 +5,7 @@ import {
   writeSanitaryRouteElements,
   writeSanitaryRouteSystemAssignment,
 } from '@/shared/ifc/exportSanitaryRouteElements'
-import type { IfcAPI } from 'web-ifc'
+import { Handle, type IfcAPI } from 'web-ifc'
 import type { PlanBounds, Riser, Storey, StoreyId } from '@/domain/types'
 
 type IfcHandle = { type: 5; value: number }
@@ -1019,15 +1019,12 @@ function writeMinimalRiser(
     RefDirection: handleRef(dirX.expressID),
   })
 
-  const localPlacement = createLabeledEntity(
-    api,
-    modelId,
-    'local placement',
-    IFCLOCALPLACEMENT,
-    handleRef(targetStoreyPlacementId),
-    handleRef(placementAxis.expressID),
-  )
-  api.WriteLine(modelId, localPlacement)
+  const localPlacement = writeLabeledLine(api, modelId, 'local placement', {
+    expressID: -1,
+    type: IFCLOCALPLACEMENT,
+    PlacementRelTo: handleRef(targetStoreyPlacementId),
+    RelativePlacement: handleRef(placementAxis.expressID),
+  })
 
   const stackLabel = riser.stackLabel.trim() || 'R1'
   const riserName = `BIMPipe ${stackLabel}`
@@ -1104,7 +1101,7 @@ function writeMinimalRiser(
     Name: null,
     Description: null,
     RelatedObjects: [handleRef(riserElement.expressID)],
-    RelatingMaterial: material,
+    RelatingMaterial: handleRef(material.expressID),
   })
 
   const occurrencePset = writeFlowSegmentOccurrencePset(
@@ -1483,7 +1480,10 @@ function toHandle(value: IfcHandle | { expressID: number } | null | undefined): 
 }
 
 function handleRef(expressId: number): IfcHandle {
-  return { type: 5, value: expressId }
+  // web-ifc's WriteLine requires a real Handle instance for SELECT-typed attributes
+  // (e.g. IfcLocalPlacement.RelativePlacement); a plain { type: 5, value } object throws
+  // "Cannot pass non-string to std::string". A Handle instance is accepted everywhere.
+  return new Handle(expressId) as unknown as IfcHandle
 }
 
 function writeLabeledLine(api: IfcAPI, modelId: number, label: string, line: IfcWritableLine) {
@@ -1495,10 +1495,3 @@ function writeLabeledLine(api: IfcAPI, modelId: number, label: string, line: Ifc
   }
 }
 
-function createLabeledEntity(api: IfcAPI, modelId: number, label: string, type: number, ...args: unknown[]) {
-  try {
-    return api.CreateIfcEntity(modelId, type, ...args) as { expressID: number; type: number }
-  } catch (error) {
-    throw new Error(`Failed to create ${label}: ${error instanceof Error ? error.message : String(error)}`)
-  }
-}

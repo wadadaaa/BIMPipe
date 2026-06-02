@@ -4,6 +4,13 @@ import type { Riser } from '@/domain/types'
 import type { IfcAPI } from 'web-ifc'
 
 vi.mock('web-ifc', () => ({
+  Handle: class Handle {
+    type = 5 as const
+    value: number
+    constructor(value: number) {
+      this.value = value
+    }
+  },
   IFCAXIS2PLACEMENT2D: 1,
   IFCAXIS2PLACEMENT3D: 2,
   IFCCARTESIANPOINT: 3,
