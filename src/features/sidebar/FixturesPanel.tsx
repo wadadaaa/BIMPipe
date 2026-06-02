@@ -40,7 +40,7 @@ export function FixturesPanel({
   if (fixtures.length === 0) {
     return (
       <div className="fixtures-panel__empty">
-        <span className="fixtures-panel__empty-icon">WC</span>
+        <span className="fixtures-panel__empty-icon">FX</span>
         <p>No sanitary fixtures were detected on this floor.</p>
       </div>
     )
@@ -97,7 +97,7 @@ export function FixturesPanel({
               {canPlaceRisers
                 ? hasRisers
                   ? 'Replace auto risers using the latest detection'
-                  : 'Auto-place risers from toilets and outer kitchen corners'
+                  : 'Auto-place risers from sanitary fixtures and outer kitchen corners'
                 : 'No fixtures with plan coordinates yet'}
             </span>
           </span>

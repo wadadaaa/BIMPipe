@@ -42,7 +42,7 @@ const TABS: { id: SidebarTab; label: string; focus: string; hint: string }[] = [
     id: 'risers',
     label: 'Risers',
     focus: 'Riser layout',
-    hint: 'Blue pins are suggested risers. One is proposed per toilet and one in an outer kitchen corner. Drag pins on the plan before downloading the IFC.',
+    hint: 'Blue pins are suggested risers for sanitary fixture groups and kitchen service corners. Drag pins on the plan before downloading the IFC.',
   },
   {
     id: 'validation',
