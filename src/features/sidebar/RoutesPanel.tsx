@@ -14,7 +14,7 @@ export function RoutesPanel({ routes, unitLabel, riserLabels }: RoutesPanelProps
     return (
       <div className="routes-panel__empty">
         <span className="routes-panel__empty-icon">~</span>
-        <p>Place risers to generate routes. Each fixture connects to its nearest riser at 2% slope.</p>
+        <p>Place risers to generate grouped sanitary routes with Ø110 toilets, Ø63 collection mains, Ø50 branches, and 2% slope intent.</p>
       </div>
     )
   }

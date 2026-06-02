@@ -223,6 +223,40 @@
   stroke-dasharray: 18 10;
 }
 
+.floor-viewer__route-label {
+  paint-order: stroke;
+  stroke: rgba(4, 14, 22, 0.96);
+  stroke-width: 4px;
+  fill: #f7fdff;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-anchor: middle;
+  dominant-baseline: central;
+  opacity: 0;
+  pointer-events: none;
+  filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.74));
+}
+
+.floor-viewer__route-label--main {
+  fill: #d8f8ff;
+}
+
+.floor-viewer__route-label--branch {
+  fill: #ffe79a;
+}
+
+.floor-viewer__route-line--riserConnection,
+.floor-viewer__route-line--toiletRoute {
+  stroke-width: 6.8;
+}
+
+.floor-viewer__route-line--fixtureBranch,
+.floor-viewer__route-line--transition {
+  stroke-dasharray: 12 8;
+}
+
+
 /* ── Fixture overlay ── */
 .floor-viewer__fixture-overlay {
   position: absolute;

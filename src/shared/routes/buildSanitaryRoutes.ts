@@ -12,6 +12,12 @@ export const SANITARY_ROUTE_SYSTEM = 'BIMPipe Sanitary Routes'
 // zero-volume IFC pipe, so they are dropped rather than emitted.
 export const MIN_SANITARY_SEGMENT_PLAN_LENGTH = 1e-6
 
+// Demo-room grouping is intentionally conservative: fixtures within this plan distance
+// are treated as one sanitary room/service zone and routed to one discharge riser so the
+// preview reads as a grouped bathroom layout rather than one tiny route per fixture.
+export const SANITARY_ROOM_GROUPING_DISTANCE = 8
+export const COINCIDENT_CONNECTOR_LENGTH = 0.75
+
 export type SanitaryPipeDiameterMm = 50 | 63 | 110
 export type SanitaryRouteRole =
   | 'riserConnection'
@@ -90,6 +96,7 @@ const SUPPORTED_KINDS = new Set<FixtureKind>([
 interface RiserFixtureGroup {
   riser: Riser
   members: Fixture[]
+  groupId: string
 }
 
 export function buildSanitaryRoutingDemoPlan(
@@ -107,28 +114,17 @@ export function buildSanitaryRoutingDemoPlan(
   }
 
   const located = fixtures.filter((fixture) => fixture.position && SUPPORTED_KINDS.has(fixture.kind))
-  const fixturesWithoutSameStoreyRiser: Fixture[] = []
-  const groupedByRiser = new Map<string, RiserFixtureGroup>()
-
-  for (const fixture of located) {
-    const sameStoreyRisers = risers.filter((riser) => riser.storeyId === fixture.storeyId)
-    if (sameStoreyRisers.length === 0) {
-      fixturesWithoutSameStoreyRiser.push(fixture)
-      continue
-    }
-
-    const nearest = findNearestRiser(fixture, sameStoreyRisers)
-    const bucket = groupedByRiser.get(nearest.id)
-    if (bucket) bucket.members.push(fixture)
-    else groupedByRiser.set(nearest.id, { riser: nearest, members: [fixture] })
-  }
+  const { groups: groupedByServiceZone, fixturesWithoutSameStoreyRiser } = groupFixturesBySanitaryServiceZone(
+    located,
+    risers,
+  )
 
   const sourceRoutes: SanitaryFixtureRoute[] = []
   const coincidentFixtures: { expressId: number; riserId: string }[] = []
   const debugGroups: SanitaryRoutingDebugGroup[] = []
 
-  for (const { riser, members } of groupedByRiser.values()) {
-    const { routes, coincident, debugGroup } = buildRoutesForRiserGroup(riser, members)
+  for (const { riser, members, groupId } of groupedByServiceZone) {
+    const { routes, coincident, debugGroup } = buildRoutesForRiserGroup(riser, members, groupId)
     sourceRoutes.push(...routes)
     coincidentFixtures.push(...coincident)
     debugGroups.push(debugGroup)
@@ -171,6 +167,7 @@ export function buildSanitaryRoutingDemoPlan(
 function buildRoutesForRiserGroup(
   riser: Riser,
   members: Fixture[],
+  groupId: string,
 ): {
   routes: SanitaryFixtureRoute[]
   coincident: { expressId: number; riserId: string }[]
@@ -178,42 +175,103 @@ function buildRoutesForRiserGroup(
 } {
   const routes: SanitaryFixtureRoute[] = []
   const coincident: { expressId: number; riserId: string }[] = []
-  const decisions: string[] = []
+  const decisions: string[] = [`Grouped sanitary service zone ${groupId} routes ${members.length} fixture(s) to riser ${riser.id}.`]
   let segmentCount = 0
   let branchCount = 0
 
   const toilets = members.filter((fixture) => fixture.kind === 'TOILETPAN')
   const smallFixtures = members.filter((fixture) => fixture.kind !== 'TOILETPAN')
 
-  for (const toilet of toilets) {
-    const fixturePos = toilet.position!
-    if (planDistance(fixturePos, riser.position) < MIN_SANITARY_SEGMENT_PLAN_LENGTH) {
-      coincident.push({ expressId: toilet.expressId, riserId: riser.id })
-      decisions.push(`Skipped WC ${toilet.expressId}: coincides with riser ${riser.id}.`)
-      continue
-    }
+  if (toilets.length > 1) {
+    const toiletHeaderFixture = chooseFarthestFixture(toilets, riser)!
+    const headerStart =
+      planDistance(toiletHeaderFixture.position!, riser.position) < MIN_SANITARY_SEGMENT_PLAN_LENGTH
+        ? makeVisibleConnectorStart(toiletHeaderFixture, members, riser)
+        : toiletHeaderFixture.position!
 
-    const segment = makeSegment({
-      from: fixturePos,
+    const headerSegment = makeSegment({
+      from: headerStart,
       to: riser.position,
       kind: 'main',
-      routeRole: 'toiletRoute',
+      routeRole: 'riserConnection',
       diameterMm: 110,
-      fixture: toilet,
+      fixture: toiletHeaderFixture,
       riser,
-      labelIntent: 'BIMPipe Ø110 Toilet',
-      debugReason: 'WC receives a dedicated Ø110 toilet route to the sanitary stack.',
+      labelIntent: 'BIMPipe Ø110 Riser Connection',
+      debugReason: `Grouped WC bank uses one visible Ø110 riser connection from fixture ${toiletHeaderFixture.expressId} toward stack ${riser.id}.`,
     })
-    routes.push(makeFixtureRoute(toilet, riser.id, 110, [segment]))
+    routes.push(makeFixtureRoute(toiletHeaderFixture, riser.id, 110, [headerSegment]))
     segmentCount += 1
+    decisions.push(`WC fixture ${toiletHeaderFixture.expressId} selected as farthest WC for the shared Ø110 header/riser connection.`)
+
+    for (const toilet of toilets) {
+      if (toilet.expressId === toiletHeaderFixture.expressId) continue
+
+      const join = computeFortyFiveDegreeJoinPoint(toilet.position!, headerStart, riser.position)
+      const branchLength = planDistance(toilet.position!, join.point)
+      const segment = makeSegment({
+        from: branchLength < MIN_SANITARY_SEGMENT_PLAN_LENGTH
+          ? makeVisibleConnectorStart(toilet, members, riser)
+          : toilet.position!,
+        to: branchLength < MIN_SANITARY_SEGMENT_PLAN_LENGTH ? riser.position : join.point,
+        kind: 'branch',
+        routeRole: branchLength < MIN_SANITARY_SEGMENT_PLAN_LENGTH || join.usedFallback ? 'transition' : 'toiletRoute',
+        diameterMm: 110,
+        fixture: toilet,
+        riser,
+        labelIntent: branchLength < MIN_SANITARY_SEGMENT_PLAN_LENGTH ? 'BIMPipe Ø110 WC transition' : 'BIMPipe Ø110 Toilet',
+        debugReason: branchLength < MIN_SANITARY_SEGMENT_PLAN_LENGTH
+          ? 'WC coincides with the grouped header/riser; preview emits a short explicit Ø110 transition so the demo does not silently lose the fixture route.'
+          : join.usedFallback
+            ? 'WC joins the grouped Ø110 header using a projected transition because a 45° join could not be kept inside the header span.'
+            : `WC uses an Ø110 branch that joins the grouped header at an approximate 45° wye before flowing to riser ${riser.id}.`,
+      })
+      routes.push(makeFixtureRoute(toilet, riser.id, 110, [segment]))
+      segmentCount += 1
+      branchCount += 1
+    }
+  } else {
+    for (const toilet of toilets) {
+      const fixturePos = toilet.position!
+      const isCoincident = planDistance(fixturePos, riser.position) < MIN_SANITARY_SEGMENT_PLAN_LENGTH
+      const segment = makeSegment({
+        from: isCoincident ? makeVisibleConnectorStart(toilet, members, riser) : fixturePos,
+        to: riser.position,
+        kind: 'main',
+        routeRole: isCoincident ? 'transition' : 'toiletRoute',
+        diameterMm: 110,
+        fixture: toilet,
+        riser,
+        labelIntent: isCoincident ? 'BIMPipe Ø110 WC transition' : 'BIMPipe Ø110 Toilet',
+        debugReason: isCoincident
+          ? 'WC point coincides with the riser; preview emits a short explicit Ø110 transition segment instead of dropping the route.'
+          : 'WC receives a dedicated Ø110 toilet route to the sanitary stack.',
+      })
+      routes.push(makeFixtureRoute(toilet, riser.id, 110, [segment]))
+      segmentCount += 1
+      if (isCoincident) decisions.push(`WC ${toilet.expressId} coincides with riser ${riser.id}; emitted visible Ø110 transition fallback.`)
+    }
   }
 
   const collectionMain = chooseFarthestFixture(smallFixtures, riser)
   if (collectionMain) {
     const mainDistance = planDistance(collectionMain.position!, riser.position)
     if (mainDistance < MIN_SANITARY_SEGMENT_PLAN_LENGTH) {
-      coincident.push({ expressId: collectionMain.expressId, riserId: riser.id })
-      decisions.push(`Skipped collection main fixture ${collectionMain.expressId}: coincides with riser ${riser.id}.`)
+      const segment = makeSegment({
+        from: makeVisibleConnectorStart(collectionMain, members, riser),
+        to: riser.position,
+        kind: 'branch',
+        routeRole: 'transition',
+        diameterMm: 50,
+        fixture: collectionMain,
+        riser,
+        labelIntent: 'BIMPipe Branch Ø50 transition',
+        debugReason: 'Small fixture point coincides with the riser; preview emits a short explicit Ø50 transition segment instead of dropping the route.',
+      })
+      routes.push(makeFixtureRoute(collectionMain, riser.id, 50, [segment]))
+      segmentCount += 1
+      branchCount += 1
+      decisions.push(`Small fixture ${collectionMain.expressId} coincides with riser ${riser.id}; emitted visible Ø50 transition fallback.`)
     } else if (smallFixtures.length === 1) {
       const segment = makeSegment({
         from: collectionMain.position!,
@@ -292,6 +350,110 @@ function buildRoutesForRiserGroup(
       segmentCount,
       decisions,
     },
+  }
+}
+
+function groupFixturesBySanitaryServiceZone(
+  fixtures: Fixture[],
+  risers: Riser[],
+): { groups: RiserFixtureGroup[]; fixturesWithoutSameStoreyRiser: Fixture[] } {
+  const fixturesWithoutSameStoreyRiser: Fixture[] = []
+  const clustersByStorey = new Map<number, Fixture[][]>()
+
+  for (const fixture of fixtures) {
+    const sameStoreyRisers = risers.filter((riser) => riser.storeyId === fixture.storeyId)
+    if (sameStoreyRisers.length === 0) {
+      fixturesWithoutSameStoreyRiser.push(fixture)
+      continue
+    }
+
+    const clusters = clustersByStorey.get(fixture.storeyId) ?? []
+    let targetCluster: Fixture[] | null = null
+    for (const cluster of clusters) {
+      if (cluster.some((member) => planDistance(member.position!, fixture.position!) <= SANITARY_ROOM_GROUPING_DISTANCE)) {
+        targetCluster = cluster
+        break
+      }
+    }
+
+    if (targetCluster) targetCluster.push(fixture)
+    else clusters.push([fixture])
+
+    clustersByStorey.set(fixture.storeyId, clusters)
+  }
+
+  const groups: RiserFixtureGroup[] = []
+  for (const [storeyId, clusters] of clustersByStorey) {
+    const sameStoreyRisers = risers.filter((riser) => riser.storeyId === storeyId)
+    clusters.forEach((cluster, index) => {
+      const riser = findNearestRiserToFixtureCluster(cluster, sameStoreyRisers)
+      groups.push({
+        riser,
+        members: [...cluster].sort((left, right) => left.expressId - right.expressId),
+        groupId: `${storeyId}-${index + 1}`,
+      })
+    })
+  }
+
+  return { groups, fixturesWithoutSameStoreyRiser }
+}
+
+function findNearestRiserToFixtureCluster(fixtures: Fixture[], risers: Riser[]): Riser {
+  const centroid = fixtureClusterCentroid(fixtures)
+  let nearest = risers[0]
+  let min = planDistance(centroid, nearest.position)
+
+  for (let index = 1; index < risers.length; index += 1) {
+    const candidate = risers[index]
+    const distance = planDistance(centroid, candidate.position)
+    if (distance < min) {
+      min = distance
+      nearest = candidate
+    }
+  }
+
+  return nearest
+}
+
+function fixtureClusterCentroid(fixtures: Fixture[]): { x: number; y: number; z: number } {
+  const totals = fixtures.reduce(
+    (acc, fixture) => ({
+      x: acc.x + fixture.position!.x,
+      y: acc.y + fixture.position!.y,
+      z: acc.z + fixture.position!.z,
+    }),
+    { x: 0, y: 0, z: 0 },
+  )
+  return {
+    x: totals.x / fixtures.length,
+    y: totals.y / fixtures.length,
+    z: totals.z / fixtures.length,
+  }
+}
+
+function makeVisibleConnectorStart(
+  fixture: Fixture,
+  groupMembers: Fixture[],
+  riser: Riser,
+): { x: number; y: number; z: number } {
+  const fixturePos = fixture.position!
+  const centroid = fixtureClusterCentroid(groupMembers)
+  let dx = centroid.x - riser.position.x
+  let dz = centroid.z - riser.position.z
+  const length = Math.hypot(dx, dz)
+
+  if (length < MIN_SANITARY_SEGMENT_PLAN_LENGTH) {
+    dx = 1
+    dz = 0
+  } else {
+    dx /= length
+    dz /= length
+  }
+
+  return {
+    x: fixturePos.x + dx * COINCIDENT_CONNECTOR_LENGTH,
+    y: fixturePos.y,
+    z: fixturePos.z + dz * COINCIDENT_CONNECTOR_LENGTH,
   }
 }
 
@@ -505,21 +667,4 @@ function pointKey(point: { x: number; y: number; z: number }): string {
 
 function roundKey(value: number): number {
   return Math.round(value * 1000)
-}
-
-function findNearestRiser(fixture: Fixture, risers: Riser[]): Riser {
-  const fixturePos = fixture.position!
-  let nearest = risers[0]
-  let min = planDistance(fixturePos, nearest.position)
-
-  for (let index = 1; index < risers.length; index += 1) {
-    const candidate = risers[index]
-    const distance = planDistance(fixturePos, candidate.position)
-    if (distance < min) {
-      min = distance
-      nearest = candidate
-    }
-  }
-
-  return nearest
 }

@@ -98,6 +98,22 @@ describe('buildSanitaryRoutingDemoPlan', () => {
     expect(plan.limitations).toContain('Grouped sanitary preview uses shared collection mains and 45° fixture branches where plan geometry allows.')
   })
 
+  it('groups nearby toilets to one service-zone riser instead of direct nearest-riser lines', () => {
+    const plan = buildSanitaryRoutingDemoPlan(
+      [
+        fixture({ expressId: 111, position: { x: 0, y: 0, z: 0 } }),
+        fixture({ expressId: 112, position: { x: 3, y: 0, z: 1 } }),
+      ],
+      [riser('R1', 0, 0), riser('R2', 3, 1)],
+      demoConfig,
+    )
+
+    expect(new Set(plan.routes.map((route) => route.riserId)).size).toBe(1)
+    expect(plan.routes.some((route) => route.segments[0].routeRole === 'riserConnection')).toBe(true)
+    expect(plan.routes.some((route) => route.segments[0].kind === 'branch')).toBe(true)
+    expect(plan.debug.groups[0].decisions[0]).toContain('Grouped sanitary service zone')
+  })
+
   it('assigns fixtures to their nearest same-storey riser when multiple risers exist', () => {
     const plan = buildSanitaryRoutingDemoPlan(
       [
@@ -195,15 +211,22 @@ describe('buildSanitaryRoutingDemoPlan', () => {
     )
   })
 
-  it('does not emit a zero-length segment when a fixture coincides with its riser', () => {
+  it('emits a visible transition when a fixture coincides with its riser', () => {
     const plan = buildSanitaryRoutingDemoPlan(
       [fixture({ expressId: 901, position: { x: 10, y: 0, z: 0 } })],
       [riser('R1', 10, 0)],
       demoConfig,
     )
 
-    expect(plan.routes).toHaveLength(0)
-    expect(plan.limitations).toContain(
+    expect(plan.routes).toHaveLength(1)
+    expect(plan.routes[0].segments[0]).toMatchObject({
+      to: { x: 10, y: 0, z: 0 },
+      routeRole: 'transition',
+      pipeDiameterMm: 110,
+      labelIntent: 'BIMPipe Ø110 WC transition',
+    })
+    expect(plan.routes[0].segments[0].from).not.toEqual(plan.routes[0].segments[0].to)
+    expect(plan.limitations).not.toContain(
       'Sanitary route skipped for fixture 901 because fixture point coincides with riser R1.',
     )
   })
@@ -218,9 +241,16 @@ describe('buildSanitaryRoutingDemoPlan', () => {
       demoConfig,
     )
 
-    expect(plan.routes.map((route) => route.fixtureExpressId)).toEqual([903])
-    expect(plan.routes[0].segments).toHaveLength(1)
-    expect(plan.limitations).toContain(
+    expect(plan.routes.map((route) => route.fixtureExpressId).sort()).toEqual([902, 903])
+    expect(plan.routes.find((route) => route.fixtureExpressId === 902)?.segments[0]).toMatchObject({
+      routeRole: 'transition',
+      pipeDiameterMm: 110,
+    })
+    expect(plan.routes.find((route) => route.fixtureExpressId === 903)?.segments[0]).toMatchObject({
+      routeRole: 'riserConnection',
+      pipeDiameterMm: 110,
+    })
+    expect(plan.limitations).not.toContain(
       'Sanitary route skipped for fixture 902 because fixture point coincides with riser R1.',
     )
   })

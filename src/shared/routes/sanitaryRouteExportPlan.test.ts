@@ -50,7 +50,7 @@ describe('sanitaryRouteExportPlan', () => {
     const plan = buildSanitaryRoutingDemoPlan(
       [
         fixture({ expressId: 201, kind: 'SINK', position: { x: 0, y: 0, z: 0 } }),
-        fixture({ expressId: 202, kind: 'BATH', position: { x: 8, y: 0, z: 2 } }),
+        fixture({ expressId: 202, kind: 'BATH', position: { x: 3, y: 0, z: 2 } }),
       ],
       [riser('R1', 10, 0)],
       demoConfig,
