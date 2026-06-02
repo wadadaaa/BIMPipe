@@ -194,6 +194,36 @@ describe('buildSanitaryRoutingDemoPlan', () => {
     )
   })
 
+  it('does not emit a zero-length segment when a fixture coincides with its riser', () => {
+    const plan = buildSanitaryRoutingDemoPlan(
+      [fixture({ expressId: 901, position: { x: 10, y: 0, z: 0 } })],
+      [riser('R1', 10, 0)],
+      demoConfig,
+    )
+
+    expect(plan.routes).toHaveLength(0)
+    expect(plan.limitations).toContain(
+      'Sanitary route skipped for fixture 901 because fixture point coincides with riser R1.',
+    )
+  })
+
+  it('keeps other fixtures routed when one fixture coincides with the riser', () => {
+    const plan = buildSanitaryRoutingDemoPlan(
+      [
+        fixture({ expressId: 902, position: { x: 10, y: 0, z: 0 } }),
+        fixture({ expressId: 903, position: { x: 2, y: 0, z: 0 } }),
+      ],
+      [riser('R1', 10, 0)],
+      demoConfig,
+    )
+
+    expect(plan.routes.map((route) => route.fixtureExpressId)).toEqual([903])
+    expect(plan.routes[0].segments).toHaveLength(1)
+    expect(plan.limitations).toContain(
+      'Sanitary route skipped for fixture 902 because fixture point coincides with riser R1.',
+    )
+  })
+
   it('uses a single main segment without branch limitation for one fixture per riser', () => {
     const plan = buildSanitaryRoutingDemoPlan(
       [fixture({ expressId: 301, position: { x: 2, y: 0, z: 0 } })],

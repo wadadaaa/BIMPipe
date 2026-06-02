@@ -1,7 +1,12 @@
 import { Matrix4, Vector3 } from 'three'
 import { Handle, type IfcAPI } from 'web-ifc'
 import type { Riser, Storey, StoreyId } from '@/domain/types'
-import type { SanitaryFixtureRoute, SanitaryPipeDiameterMm } from '@/shared/routes/buildSanitaryRoutes'
+import {
+  MIN_SANITARY_SEGMENT_PLAN_LENGTH,
+  type SanitaryFixtureRoute,
+  type SanitaryPipeDiameterMm,
+} from '@/shared/routes/buildSanitaryRoutes'
+import { planDistance } from '@/shared/routes/planGeometry'
 import {
   collectSanitaryExportSegments,
   diameterLabel,
@@ -75,6 +80,15 @@ export function writeSanitaryRouteElements(
       continue
     }
 
+    // Guard 1 (plan space): a segment whose endpoints coincide in plan (e.g. after route
+    // translation/deduplication) cannot become a valid pipe. Skip it with a note.
+    if (planDistance(exportSegment.segment.from, exportSegment.segment.to) < MIN_SANITARY_SEGMENT_PLAN_LENGTH) {
+      exportNotes?.push(
+        `Skipped sanitary route segment ${exportSegment.key} because its endpoints coincide in plan.`,
+      )
+      continue
+    }
+
     const storeyContext = resolveStoreyContext(exportSegment.storeyId)
     const { startElevation, endElevation } = segmentEndpointElevationsSourceUnits(
       exportSegment,
@@ -93,6 +107,15 @@ export function writeSanitaryRouteElements(
       exportSegment.segment.to,
       endElevation,
     )
+
+    // Guard 2 (post-transform): after converting to storey-local IFC coordinates the segment
+    // could still collapse to ~zero length. Skip rather than abort the whole export.
+    if (startLocal.distanceTo(endLocal) <= MIN_SANITARY_SEGMENT_PLAN_LENGTH) {
+      exportNotes?.push(
+        `Skipped sanitary route segment ${exportSegment.key} because it resolved to zero length in IFC coordinates.`,
+      )
+      continue
+    }
 
     const written = writeSlopedPipeSegment(
       api,

@@ -5,6 +5,11 @@ import { planDistance } from './planGeometry'
 
 export const DEMO_SANITARY_SLOPE = SLOPE
 
+// Minimum plan-view length (viewer units) for a sanitary route segment. Segments shorter than
+// this are degenerate (fixture point coincides with the riser) and would produce a zero-volume
+// IFC pipe, so they are dropped rather than emitted.
+export const MIN_SANITARY_SEGMENT_PLAN_LENGTH = 1e-6
+
 export type SanitaryPipeDiameterMm = 50 | 63 | 110
 
 export interface RouteSegment {
@@ -71,6 +76,7 @@ export function buildSanitaryRoutingDemoPlan(
   }
 
   const sourceRoutes: SanitaryFixtureRoute[] = []
+  const coincidentFixtures: { expressId: number; riserId: string }[] = []
 
   for (const { riser, members } of groupedByRiser.values()) {
     const farthest = [...members].sort((a, b) => {
@@ -86,6 +92,13 @@ export function buildSanitaryRoutingDemoPlan(
       const onMainLine = fixture.expressId === farthest.expressId
       const fixtureDiameter = fixtureDiameterForKind(fixture.kind)
       const mainDiameter = mainLineDiameterForKind(fixture.kind, hasBranches)
+
+      // A fixture sitting on (or within rounding distance of) its riser produces no pipe run.
+      // Skip the degenerate segment instead of emitting a zero-length pipe.
+      if (planDistance(fixturePos, riser.position) < MIN_SANITARY_SEGMENT_PLAN_LENGTH) {
+        coincidentFixtures.push({ expressId: fixture.expressId, riserId: riser.id })
+        continue
+      }
 
       // Both the main run and each branch run terminate at the riser: every fixture's pipe
       // reaches the stack. The farthest fixture owns the larger-diameter main line; the rest are
@@ -129,6 +142,11 @@ export function buildSanitaryRoutingDemoPlan(
       `Fixtures skipped because no same-storey riser is available: ${fixturesWithoutSameStoreyRiser
         .map((fixture) => fixture.expressId)
         .join(', ')}.`,
+    )
+  }
+  for (const { expressId, riserId } of coincidentFixtures) {
+    limitations.push(
+      `Sanitary route skipped for fixture ${expressId} because fixture point coincides with riser ${riserId}.`,
     )
   }
   if (routes.some((route) => route.segments.some((segment) => segment.kind === 'branch'))) {

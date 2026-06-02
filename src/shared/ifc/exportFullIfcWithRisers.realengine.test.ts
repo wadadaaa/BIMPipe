@@ -106,4 +106,40 @@ describe('exportFullIfcWithRisers against the real web-ifc engine', () => {
     expect(bytes).toBeInstanceOf(Uint8Array)
     expect(bytes.length).toBeGreaterThan(0)
   })
+
+  it('skips a zero-length route segment instead of aborting the export', async () => {
+    const { IfcAPI } = await import('web-ifc')
+    const api = new IfcAPI()
+    await api.Init()
+
+    const routesWithCoincident: SanitaryFixtureRoute[] = [
+      // Degenerate: fixture point coincides with the riser (from === to).
+      {
+        fixtureExpressId: 777,
+        fixtureName: 'WC-coincident',
+        fixtureKind: 'TOILETPAN',
+        riserId: 'r1-f2',
+        pipeDiameterMm: 110,
+        startHeightAboveFloorM: 0.2,
+        slope: 0.02,
+        segments: [{ from: { x: 1, y: 0, z: 1 }, to: { x: 1, y: 0, z: 1 }, kind: 'main', pipeDiameterMm: 110 }],
+      },
+      // Valid route that must still export.
+      ...sanitaryRoutes,
+    ]
+
+    const bytes = await exportFullIfcWithRisers(
+      api,
+      new TextEncoder().encode(MINIMAL_IFC),
+      70,
+      risers,
+      null,
+      routesWithCoincident,
+    )
+
+    expect(bytes).toBeInstanceOf(Uint8Array)
+    const text = new TextDecoder().decode(bytes)
+    expect(text).toContain('BIMPipe Sanitary Routes')
+    expect(text).toContain('BIMPipeSanitaryRoute')
+  })
 })
