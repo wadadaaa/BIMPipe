@@ -108,7 +108,7 @@ function buildSegmentLabel(
   const role = segmentLabelRole(segment.routeRole ?? segment.kind)
   const fixture = route.fixtureName.trim() || `#${route.fixtureExpressId}`
   const diameterLabel = `Ø${diameter}`
-  return `${segment.labelIntent ?? `BIMPipe ${role} ${diameterLabel}`} ${fixture} -> ${stackLabel}`
+  return `${segment.labelIntent ?? `BIMPipe ${role} ${diameterLabel}`} ${fixture} to ${stackLabel}`
 }
 
 export function diameterLabel(diameterMm: SanitaryPipeDiameterMm): string {

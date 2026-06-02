@@ -929,7 +929,7 @@ export function FloorViewer({
 
 function buildRoutePreviewLabel(segment: SanitaryFixtureRoute['segments'][number]): string {
   const diameter = segment.diameterMm ?? segment.pipeDiameterMm
-  const slope = typeof segment.slopePercent === 'number' ? `${segment.slopePercent.toFixed(1)}% ↘` : '2.0% ↘'
+  const slope = typeof segment.slopePercent === 'number' ? `${segment.slopePercent.toFixed(1)}%` : '2.0%'
   return `Ø${diameter} ${slope}`
 }
 
