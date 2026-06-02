@@ -552,7 +552,17 @@ function resolveBodyContext(api: IfcAPI, modelId: number): number {
   throw new Error('Could not resolve a Body representation context.')
 }
 
-function resolveLocalPlacementWorldMatrix(api: IfcAPI, modelId: number, placementId: number): Matrix4 {
+function resolveLocalPlacementWorldMatrix(
+  api: IfcAPI,
+  modelId: number,
+  placementId: number,
+  visited: Set<number> = new Set(),
+): Matrix4 {
+  if (visited.has(placementId)) {
+    throw new Error(`Circular IfcLocalPlacement chain detected at #${placementId}.`)
+  }
+  visited.add(placementId)
+
   const placement = api.GetLine(modelId, placementId, false) as {
     PlacementRelTo?: IfcHandle | null
     RelativePlacement?: IfcHandle | null
@@ -561,7 +571,7 @@ function resolveLocalPlacementWorldMatrix(api: IfcAPI, modelId: number, placemen
 
   const parentMatrix =
     placement.PlacementRelTo?.value != null
-      ? resolveLocalPlacementWorldMatrix(api, modelId, placement.PlacementRelTo.value)
+      ? resolveLocalPlacementWorldMatrix(api, modelId, placement.PlacementRelTo.value, visited)
       : new Matrix4()
 
   const relativePlacementId = placement.RelativePlacement?.value ?? null

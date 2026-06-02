@@ -1,21 +1,14 @@
-import type { MutableRefObject } from 'react'
 import type { Fixture, KitchenArea, Riser, Storey, StoreyId } from '@/domain/types'
 import type { FloorMeshes } from '@/shared/ifc/extractFloorMeshes'
-import { buildRiserStack } from '@/shared/routes/buildRiserStacks'
-import { getEligibleStoreyIdsForAutoRisers } from '@/shared/routes/floorClassification'
-import { suggestRiserPositions } from '@/shared/routes/suggestRisers'
-import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE } from '@/shared/routes/riserPlacementProfile'
+import { buildRiserStack } from './buildRiserStacks'
+import { getEligibleStoreyIdsForAutoRisers } from './floorClassification'
+import { suggestRiserPositions } from './suggestRisers'
+import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE } from './riserPlacementProfile'
 import {
   getDemoRuntimeConfig,
   isStoreyExcludedFromDemoScope,
   isStoreyIncludedInDemoScope,
 } from '@/shared/demoConfig'
-
-export function takeNextRiserLabel(nextRiserLabelRef: MutableRefObject<number>): string {
-  const label = `R${nextRiserLabelRef.current}`
-  nextRiserLabelRef.current += 1
-  return label
-}
 
 /**
  * Suggests riser positions from the fixtures/kitchens on the demo-scoped floors, then
@@ -27,6 +20,9 @@ export function takeNextRiserLabel(nextRiserLabelRef: MutableRefObject<number>):
  * in plan). A riser is a physical vertical shaft, so its stack spans every eligible floor of the
  * building, not just the demo-scoped floors — otherwise risers placed from floor 2 would vanish
  * when the user inspects an out-of-scope floor (e.g. קומה 3).
+ *
+ * `nextLabel` is injected by the caller (the page owns the label counter), keeping this a pure,
+ * dependency-free domain function.
  */
 export function buildSuggestedRisers(
   storeys: Storey[],
@@ -34,7 +30,7 @@ export function buildSuggestedRisers(
   fixtures: Fixture[],
   kitchens: KitchenArea[],
   floorMeshes: FloorMeshes | null,
-  nextRiserLabelRef: MutableRefObject<number>,
+  nextLabel: () => string,
   demoRuntime: ReturnType<typeof getDemoRuntimeConfig>,
 ): Riser[] {
   const ruleProfile = DEFAULT_RISER_PLACEMENT_RULE_PROFILE
@@ -68,12 +64,6 @@ export function buildSuggestedRisers(
   const positions = suggestRiserPositions(scopedFixtures, scopedKitchens, floorPlanBounds, ruleProfile)
 
   return positions.flatMap((position) =>
-    buildRiserStack(
-      targetStoreys,
-      sourceStoreyId,
-      position,
-      takeNextRiserLabel(nextRiserLabelRef),
-      'detected',
-    ),
+    buildRiserStack(targetStoreys, sourceStoreyId, position, nextLabel(), 'detected'),
   )
 }

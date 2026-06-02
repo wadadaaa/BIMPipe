@@ -15,7 +15,7 @@ import type { Fixture, KitchenArea, Riser, RiserId, Storey, StoreyId, SidebarTab
 import { buildRiserStack, removeRiserStack } from '@/shared/routes/buildRiserStacks'
 import { classifyFloors } from '@/shared/routes/floorClassification'
 import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE } from '@/shared/routes/riserPlacementProfile'
-import { buildSuggestedRisers, takeNextRiserLabel } from './buildSuggestedRisers'
+import { buildSuggestedRisers } from '@/shared/routes/buildSuggestedRisers'
 import { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
 import { buildDemoModeUploadError, getDemoRuntimeConfig, isStoreyIncludedInDemoScope } from '@/shared/demoConfig'
 import { buildSanitaryRoutingDemoPlan } from '@/shared/routes/buildSanitaryRoutes'
@@ -378,7 +378,7 @@ export function WorkspacePage({
           fixtures,
           kitchens,
           floorMeshes,
-          nextRiserLabelRef,
+          () => takeNextRiserLabel(nextRiserLabelRef),
           demoRuntime,
         ),
       )
@@ -647,6 +647,12 @@ export function WorkspacePage({
       rightPanel={rightPanel}
     />
   )
+}
+
+function takeNextRiserLabel(nextRiserLabelRef: MutableRefObject<number>): string {
+  const label = `R${nextRiserLabelRef.current}`
+  nextRiserLabelRef.current += 1
+  return label
 }
 
 function getNextRiserLabelNumber(risers: Riser[]): number {

@@ -166,6 +166,13 @@ export function writeSanitaryRouteElements(
     for (const group of typeGroups.values()) {
       writeSharedRoutePipeSegmentType(api, ifc, modelId, group, millimetresPerSourceUnit)
     }
+  } else {
+    // TODO(BIM-51): IFC4 export does not yet write an IfcPipeSegmentType / Pset_PipeSegmentTypeCommon
+    // (NominalDiameter at the type level). ADAM_10 is IFC2X3 so the demo is unaffected, but IFC4
+    // route elements currently carry only the occurrence pset.
+    exportNotes?.push(
+      'IFC4 sanitary route export omits IfcPipeSegmentType/NominalDiameter type psets (not yet implemented).',
+    )
   }
 
   return { elements, flowSegmentHandles }
@@ -500,6 +507,9 @@ function writeSharedRoutePipeSegmentType(
     group.exportSegment,
     millimetresPerSourceUnit,
   )
+  // The type is written first with empty HasPropertySets so the pset can reference it, then
+  // re-written with the pset handle. web-ifc's WriteLine is an upsert keyed by expressID, so the
+  // second call updates the existing line rather than creating a duplicate.
   pipeSegmentType.HasPropertySets = [handleRef(typePset.pset.expressID)]
   writeLabeledLine(api, modelId, 'sanitary route pipe type property sets', pipeSegmentType)
 }
@@ -737,7 +747,17 @@ export function createViewerPointToStoreyLocalResolver(
   }
 }
 
-function resolveLocalPlacementWorldMatrix(api: IfcAPI, modelId: number, placementId: number): Matrix4 {
+function resolveLocalPlacementWorldMatrix(
+  api: IfcAPI,
+  modelId: number,
+  placementId: number,
+  visited: Set<number> = new Set(),
+): Matrix4 {
+  if (visited.has(placementId)) {
+    throw new Error(`Circular IfcLocalPlacement chain detected at #${placementId}.`)
+  }
+  visited.add(placementId)
+
   const placement = api.GetLine(modelId, placementId, false) as {
     PlacementRelTo?: IfcHandle | null
     RelativePlacement?: IfcHandle | null
@@ -746,7 +766,7 @@ function resolveLocalPlacementWorldMatrix(api: IfcAPI, modelId: number, placemen
 
   const parentMatrix =
     placement.PlacementRelTo?.value != null
-      ? resolveLocalPlacementWorldMatrix(api, modelId, placement.PlacementRelTo.value)
+      ? resolveLocalPlacementWorldMatrix(api, modelId, placement.PlacementRelTo.value, visited)
       : new Matrix4()
 
   const relativePlacementId = placement.RelativePlacement?.value ?? null

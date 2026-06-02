@@ -27,17 +27,17 @@ const demoConfig: DemoConfig = {
   routing: { mode: 'demo', allowManualRiserSelection: true },
 }
 
+function makeLabeler(): () => string {
+  let n = 1
+  return () => `R${n++}`
+}
+
 describe('buildSuggestedRisers', () => {
   it('spans every eligible floor as one vertical stack even when the demo scope is a single floor', () => {
-    const risers = buildSuggestedRisers(
-      storeys,
-      2,
-      [toilet],
-      [],
-      null,
-      { current: 1 },
-      { enabled: true, config: demoConfig },
-    )
+    const risers = buildSuggestedRisers(storeys, 2, [toilet], [], null, makeLabeler(), {
+      enabled: true,
+      config: demoConfig,
+    })
 
     // Eligible floors: 1, 2, 3 (floor 4 is the penthouse, מרתף 1 is a basement — both excluded).
     // The riser is a vertical shaft, so it must appear on all eligible floors, not only קומה 2.
@@ -67,15 +67,10 @@ describe('buildSuggestedRisers', () => {
     }
     const adamToilet: Fixture = { ...toilet, storeyId: 14, position: { x: 100, y: 600, z: 100 } }
 
-    const risers = buildSuggestedRisers(
-      adamStoreys,
-      14,
-      [adamToilet],
-      [],
-      null,
-      { current: 1 },
-      { enabled: true, config: adamConfig },
-    )
+    const risers = buildSuggestedRisers(adamStoreys, 14, [adamToilet], [], null, makeLabeler(), {
+      enabled: true,
+      config: adamConfig,
+    })
 
     const floorIds = new Set(risers.map((riser) => riser.storeyId))
     // The shaft spans the residential floors. Crucially קומה 3 (15) is included — the floor where
@@ -91,15 +86,7 @@ describe('buildSuggestedRisers', () => {
   })
 
   it('keeps the same stack across floors when demo mode is disabled', () => {
-    const risers = buildSuggestedRisers(
-      storeys,
-      2,
-      [toilet],
-      [],
-      null,
-      { current: 1 },
-      { enabled: false },
-    )
+    const risers = buildSuggestedRisers(storeys, 2, [toilet], [], null, makeLabeler(), { enabled: false })
 
     expect(new Set(risers.map((riser) => riser.storeyId))).toEqual(new Set([1, 2, 3]))
     expect(new Set(risers.map((riser) => riser.stackId)).size).toBe(1)
