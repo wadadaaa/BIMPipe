@@ -354,16 +354,21 @@ function groupFixturesBySanitaryServiceZone(
     }
 
     const clusters = clustersByStorey.get(fixture.storeyId) ?? []
-    let targetCluster: Fixture[] | null = null
-    for (const cluster of clusters) {
-      if (cluster.some((member) => planDistance(member.position!, fixture.position!) <= SANITARY_ROOM_GROUPING_DISTANCE_PLAN_UNITS)) {
-        targetCluster = cluster
-        break
+    const matchingClusterIndexes = clusters
+      .map((cluster, index) => ({ cluster, index }))
+      .filter(({ cluster }) => cluster.some((member) => fixturesBelongToSameSanitaryServiceZone(member, fixture)))
+      .map(({ index }) => index)
+
+    if (matchingClusterIndexes.length === 0) {
+      clusters.push([fixture])
+    } else {
+      const targetCluster = clusters[matchingClusterIndexes[0]]
+      targetCluster.push(fixture)
+      for (const clusterIndex of matchingClusterIndexes.slice(1).reverse()) {
+        targetCluster.push(...clusters[clusterIndex])
+        clusters.splice(clusterIndex, 1)
       }
     }
-
-    if (targetCluster) targetCluster.push(fixture)
-    else clusters.push([fixture])
 
     clustersByStorey.set(fixture.storeyId, clusters)
   }
@@ -371,7 +376,10 @@ function groupFixturesBySanitaryServiceZone(
   const groups: RiserFixtureGroup[] = []
   for (const [storeyId, clusters] of clustersByStorey) {
     const sameStoreyRisers = risers.filter((riser) => riser.storeyId === storeyId)
-    clusters.forEach((cluster, index) => {
+    const sortedClusters = [...clusters].sort(
+      (left, right) => minFixtureExpressId(left) - minFixtureExpressId(right),
+    )
+    sortedClusters.forEach((cluster, index) => {
       const riser = findNearestRiserToFixtureCluster(cluster, sameStoreyRisers)
       groups.push({
         riser,
@@ -382,6 +390,14 @@ function groupFixturesBySanitaryServiceZone(
   }
 
   return { groups, fixturesWithoutSameStoreyRiser }
+}
+
+function fixturesBelongToSameSanitaryServiceZone(left: Fixture, right: Fixture): boolean {
+  return planDistance(left.position!, right.position!) <= SANITARY_ROOM_GROUPING_DISTANCE_PLAN_UNITS
+}
+
+function minFixtureExpressId(fixtures: Fixture[]): number {
+  return Math.min(...fixtures.map((fixture) => fixture.expressId))
 }
 
 function findNearestRiserToFixtureCluster(fixtures: Fixture[], risers: Riser[]): Riser {

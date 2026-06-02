@@ -124,6 +124,23 @@ describe('buildSanitaryRoutingDemoPlan', () => {
     )
   })
 
+  it('merges transitive nearby fixtures into one sanitary service zone', () => {
+    const plan = buildSanitaryRoutingDemoPlan(
+      [
+        fixture({ expressId: 131, kind: 'SINK', position: { x: 0, y: 0, z: 0 } }),
+        fixture({ expressId: 132, kind: 'BATH', position: { x: 14, y: 0, z: 0 } }),
+        fixture({ expressId: 133, kind: 'FLOORDRAIN', position: { x: 7, y: 0, z: 0 } }),
+      ],
+      [riser('R1', 20, 0)],
+      demoConfig,
+    )
+
+    expect(plan.debug.groups).toHaveLength(1)
+    expect(plan.debug.groups[0].fixtureIds.sort()).toEqual([131, 132, 133])
+    expect(plan.routes.some((route) => route.segments[0].routeRole === 'collectionMain')).toBe(true)
+    expect(plan.routes.filter((route) => route.segments[0].kind === 'branch')).toHaveLength(2)
+  })
+
   it('groups nearby toilets to one service-zone riser instead of direct nearest-riser lines', () => {
     const plan = buildSanitaryRoutingDemoPlan(
       [
