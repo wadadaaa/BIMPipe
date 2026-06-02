@@ -98,6 +98,32 @@ describe('buildSanitaryRoutingDemoPlan', () => {
     expect(plan.limitations).toContain('Grouped sanitary preview uses shared collection mains and 45° fixture branches where plan geometry allows.')
   })
 
+  it('emits a visible Ø50 transition when a small fixture lies on the collection main', () => {
+    const plan = buildSanitaryRoutingDemoPlan(
+      [
+        fixture({ expressId: 121, kind: 'SINK', position: { x: 0, y: 0, z: 0 } }),
+        fixture({ expressId: 122, kind: 'FLOORDRAIN', position: { x: 3, y: 0, z: 0 } }),
+      ],
+      [riser('R1', 10, 0)],
+      demoConfig,
+    )
+
+    expect(plan.routes.find((route) => route.fixtureExpressId === 121)?.segments[0]).toMatchObject({
+      kind: 'main',
+      routeRole: 'collectionMain',
+      pipeDiameterMm: 63,
+    })
+    expect(plan.routes.find((route) => route.fixtureExpressId === 122)?.segments[0]).toMatchObject({
+      kind: 'branch',
+      routeRole: 'transition',
+      pipeDiameterMm: 50,
+      labelIntent: 'BIMPipe Branch Ø50 transition',
+    })
+    expect(plan.routes.find((route) => route.fixtureExpressId === 122)?.segments[0].debugReason).toContain(
+      'instead of dropping the branch',
+    )
+  })
+
   it('groups nearby toilets to one service-zone riser instead of direct nearest-riser lines', () => {
     const plan = buildSanitaryRoutingDemoPlan(
       [
@@ -229,6 +255,7 @@ describe('buildSanitaryRoutingDemoPlan', () => {
     expect(plan.limitations).not.toContain(
       'Sanitary route skipped for fixture 901 because fixture point coincides with riser R1.',
     )
+    expect(plan.debug.skipped).not.toContain('Fixture 901 skipped: coincides with riser R1.')
   })
 
   it('keeps other fixtures routed when one fixture coincides with the riser', () => {
@@ -253,6 +280,7 @@ describe('buildSanitaryRoutingDemoPlan', () => {
     expect(plan.limitations).not.toContain(
       'Sanitary route skipped for fixture 902 because fixture point coincides with riser R1.',
     )
+    expect(plan.debug.skipped).not.toContain('Fixture 902 skipped: coincides with riser R1.')
   })
 
   it('uses a single main segment without branch limitation for one fixture per riser', () => {

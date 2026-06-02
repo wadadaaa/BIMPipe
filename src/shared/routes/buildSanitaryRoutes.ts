@@ -7,16 +7,15 @@ export const DEMO_SANITARY_SLOPE = SLOPE
 export const DEMO_SANITARY_SLOPE_PERCENT = DEMO_SANITARY_SLOPE * 100
 export const SANITARY_ROUTE_SYSTEM = 'BIMPipe Sanitary Routes'
 
-// Minimum plan-view length (viewer units) for a sanitary route segment. Segments shorter than
-// this are degenerate (fixture point coincides with the riser or main line) and would produce a
-// zero-volume IFC pipe, so they are dropped rather than emitted.
+// Minimum plan-view length (viewer units) for a sanitary route segment. Shorter geometry
+// is degenerate and is replaced by an explicit transition fallback before export/preview.
 export const MIN_SANITARY_SEGMENT_PLAN_LENGTH = 1e-6
 
 // Demo-room grouping is intentionally conservative: fixtures within this plan distance
 // are treated as one sanitary room/service zone and routed to one discharge riser so the
 // preview reads as a grouped bathroom layout rather than one tiny route per fixture.
-export const SANITARY_ROOM_GROUPING_DISTANCE = 8
-export const COINCIDENT_CONNECTOR_LENGTH = 0.75
+export const SANITARY_ROOM_GROUPING_DISTANCE_PLAN_UNITS = 8
+export const COINCIDENT_CONNECTOR_LENGTH_PLAN_UNITS = 0.75
 
 export type SanitaryPipeDiameterMm = 50 | 63 | 110
 export type SanitaryRouteRole =
@@ -120,13 +119,11 @@ export function buildSanitaryRoutingDemoPlan(
   )
 
   const sourceRoutes: SanitaryFixtureRoute[] = []
-  const coincidentFixtures: { expressId: number; riserId: string }[] = []
   const debugGroups: SanitaryRoutingDebugGroup[] = []
 
   for (const { riser, members, groupId } of groupedByServiceZone) {
-    const { routes, coincident, debugGroup } = buildRoutesForRiserGroup(riser, members, groupId)
+    const { routes, debugGroup } = buildRoutesForRiserGroup(riser, members, groupId)
     sourceRoutes.push(...routes)
-    coincidentFixtures.push(...coincident)
     debugGroups.push(debugGroup)
   }
 
@@ -149,11 +146,6 @@ export function buildSanitaryRoutingDemoPlan(
         .join(', ')}.`,
     )
   }
-  for (const { expressId, riserId } of coincidentFixtures) {
-    limitations.push(
-      `Sanitary route skipped for fixture ${expressId} because fixture point coincides with riser ${riserId}.`,
-    )
-  }
   if (routes.some((route) => route.segments.some((segment) => segment.routeRole === 'fixtureBranch'))) {
     limitations.push('Grouped sanitary preview uses shared collection mains and 45° fixture branches where plan geometry allows.')
   }
@@ -161,7 +153,7 @@ export function buildSanitaryRoutingDemoPlan(
     limitations.push('Single-floor demo sanitary routes are duplicated across matching riser stack floors for IFC export.')
   }
 
-  return { routes, limitations, debug: buildDebug(debugGroups, buildSkippedDebug(unsupportedKinds, fixturesWithoutSameStoreyRiser, coincidentFixtures), limitations) }
+  return { routes, limitations, debug: buildDebug(debugGroups, buildSkippedDebug(unsupportedKinds, fixturesWithoutSameStoreyRiser), limitations) }
 }
 
 function buildRoutesForRiserGroup(
@@ -170,11 +162,9 @@ function buildRoutesForRiserGroup(
   groupId: string,
 ): {
   routes: SanitaryFixtureRoute[]
-  coincident: { expressId: number; riserId: string }[]
   debugGroup: SanitaryRoutingDebugGroup
 } {
   const routes: SanitaryFixtureRoute[] = []
-  const coincident: { expressId: number; riserId: string }[] = []
   const decisions: string[] = [`Grouped sanitary service zone ${groupId} routes ${members.length} fixture(s) to riser ${riser.id}.`]
   let segmentCount = 0
   let branchCount = 0
@@ -310,24 +300,21 @@ function buildRoutesForRiserGroup(
         const join = computeFortyFiveDegreeJoinPoint(fixture.position!, collectionMain.position!, riser.position)
         const branchLength = planDistance(fixture.position!, join.point)
         const routeRole: SanitaryRouteRole = join.usedFallback ? 'transition' : 'fixtureBranch'
-        if (branchLength < MIN_SANITARY_SEGMENT_PLAN_LENGTH) {
-          const reason = `Skipped Ø50 branch for fixture ${fixture.expressId}: fixture already lies on the collection main.`
-          decisions.push(reason)
-          continue
-        }
-
+        const isOnCollectionMain = branchLength < MIN_SANITARY_SEGMENT_PLAN_LENGTH
         const segment = makeSegment({
-          from: fixture.position!,
-          to: join.point,
+          from: isOnCollectionMain ? makeVisibleConnectorStart(fixture, members, riser) : fixture.position!,
+          to: isOnCollectionMain ? fixture.position! : join.point,
           kind: 'branch',
-          routeRole,
+          routeRole: isOnCollectionMain ? 'transition' : routeRole,
           diameterMm: 50,
           fixture,
           riser,
-          labelIntent: routeRole === 'transition' ? 'BIMPipe Branch Ø50 transition' : 'BIMPipe Branch Ø50',
-          debugReason: join.usedFallback
-            ? `Fallback branch joins the collection main by projection because a 45° join could not be kept inside the main span.`
-            : `Ø50 branch joins the Ø63 main at an approximate 45° wye before flowing to riser ${riser.id}.`,
+          labelIntent: isOnCollectionMain || routeRole === 'transition' ? 'BIMPipe Branch Ø50 transition' : 'BIMPipe Branch Ø50',
+          debugReason: isOnCollectionMain
+            ? 'Fixture already lies on the Ø63 collection main; preview emits a short explicit Ø50 transition into the main instead of dropping the branch.'
+            : join.usedFallback
+              ? `Fallback branch joins the collection main by projection because a 45° join could not be kept inside the main span.`
+              : `Ø50 branch joins the Ø63 main at an approximate 45° wye before flowing to riser ${riser.id}.`,
         })
         routes.push(makeFixtureRoute(fixture, riser.id, 50, [segment]))
         segmentCount += 1
@@ -338,7 +325,6 @@ function buildRoutesForRiserGroup(
 
   return {
     routes,
-    coincident,
     debugGroup: {
       riserId: riser.id,
       fixtureIds: members.map((fixture) => fixture.expressId),
@@ -370,7 +356,7 @@ function groupFixturesBySanitaryServiceZone(
     const clusters = clustersByStorey.get(fixture.storeyId) ?? []
     let targetCluster: Fixture[] | null = null
     for (const cluster of clusters) {
-      if (cluster.some((member) => planDistance(member.position!, fixture.position!) <= SANITARY_ROOM_GROUPING_DISTANCE)) {
+      if (cluster.some((member) => planDistance(member.position!, fixture.position!) <= SANITARY_ROOM_GROUPING_DISTANCE_PLAN_UNITS)) {
         targetCluster = cluster
         break
       }
@@ -451,9 +437,9 @@ function makeVisibleConnectorStart(
   }
 
   return {
-    x: fixturePos.x + dx * COINCIDENT_CONNECTOR_LENGTH,
+    x: fixturePos.x + dx * COINCIDENT_CONNECTOR_LENGTH_PLAN_UNITS,
     y: fixturePos.y,
-    z: fixturePos.z + dz * COINCIDENT_CONNECTOR_LENGTH,
+    z: fixturePos.z + dz * COINCIDENT_CONNECTOR_LENGTH_PLAN_UNITS,
   }
 }
 
@@ -548,12 +534,10 @@ function computeFortyFiveDegreeJoinPoint(
 function buildSkippedDebug(
   unsupportedKinds: FixtureKind[],
   fixturesWithoutSameStoreyRiser: Fixture[],
-  coincidentFixtures: { expressId: number; riserId: string }[],
 ): string[] {
   return [
     ...Array.from(new Set(unsupportedKinds)).map((kind) => `Unsupported kind skipped: ${kind}.`),
     ...fixturesWithoutSameStoreyRiser.map((fixture) => `Fixture ${fixture.expressId} skipped: no same-storey riser.`),
-    ...coincidentFixtures.map(({ expressId, riserId }) => `Fixture ${expressId} skipped: coincides with riser ${riserId}.`),
   ]
 }
 

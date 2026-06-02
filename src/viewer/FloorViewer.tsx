@@ -76,6 +76,13 @@ export function FloorViewer({
   const routeLineRefsRef = useRef<Map<string, SVGLineElement>>(new Map())
   const routeLabelRefsRef = useRef<Map<string, SVGTextElement>>(new Map())
   const [routeProjectionStatus, setRouteProjectionStatus] = useState<{ failed: number; total: number }>({ failed: 0, total: 0 })
+  const routeProjectionStatusRef = useRef<{ failed: number; total: number }>({ failed: 0, total: 0 })
+  const animationCallbacksRef = useRef({
+    animateKitchenMarkers: () => {},
+    animateFixtureMarkers: () => {},
+    animateRiserMarkers: () => {},
+    animateRouteLines: () => {},
+  })
 
   // Fixture overlay: map of expressId → positioned div element
   const fixtureMarkerRefsRef = useRef<Map<number, HTMLDivElement>>(new Map())
@@ -97,6 +104,11 @@ export function FloorViewer({
   function scheduleRender() {
     scheduleRenderRef.current()
   }
+
+  animationCallbacksRef.current.animateKitchenMarkers = animateKitchenMarkers
+  animationCallbacksRef.current.animateFixtureMarkers = animateFixtureMarkers
+  animationCallbacksRef.current.animateRiserMarkers = animateRiserMarkers
+  animationCallbacksRef.current.animateRouteLines = animateRouteLines
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -143,10 +155,10 @@ export function FloorViewer({
     const renderScene = () => {
       renderQueuedRef.current = false
       renderer.render(scene, camera)
-      animateKitchenMarkers()
-      animateFixtureMarkers()
-      animateRiserMarkers()
-      animateRouteLines()
+      animationCallbacksRef.current.animateKitchenMarkers()
+      animationCallbacksRef.current.animateFixtureMarkers()
+      animationCallbacksRef.current.animateRiserMarkers()
+      animationCallbacksRef.current.animateRouteLines()
     }
 
     const queueRender = () => {
@@ -833,8 +845,8 @@ export function FloorViewer({
 
     const routeLines = routeLineRefsRef.current
     if (routeLines.size === 0) {
-      if (routeProjectionStatus.failed !== 0 || routeProjectionStatus.total !== 0) {
-        setRouteProjectionStatus({ failed: 0, total: 0 })
+      if (routeProjectionStatusRef.current.failed !== 0 || routeProjectionStatusRef.current.total !== 0) {
+        updateRouteProjectionStatus({ failed: 0, total: 0 })
       }
       return
     }
@@ -875,9 +887,14 @@ export function FloorViewer({
       positionRouteLabel(label, fromPt.x, fromPt.y, toPt.x, toPt.y)
     }
 
-    if (projectionFailures !== routeProjectionStatus.failed || routeLines.size !== routeProjectionStatus.total) {
-      setRouteProjectionStatus({ failed: projectionFailures, total: routeLines.size })
+    if (projectionFailures !== routeProjectionStatusRef.current.failed || routeLines.size !== routeProjectionStatusRef.current.total) {
+      updateRouteProjectionStatus({ failed: projectionFailures, total: routeLines.size })
     }
+  }
+
+  function updateRouteProjectionStatus(next: { failed: number; total: number }) {
+    routeProjectionStatusRef.current = next
+    setRouteProjectionStatus(next)
   }
 
   function positionOverlayMarker(el: HTMLDivElement, x: number, y: number, z: number) {
