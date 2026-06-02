@@ -759,7 +759,7 @@ export function FloorViewer({
       {!showOverlay && (
         <div className="floor-viewer__legend" aria-hidden="true">
           <span className="floor-viewer__legend-item floor-viewer__legend-item--fixture">
-            Amber = toilets
+            Amber = sanitary fixtures
           </span>
           <span className="floor-viewer__legend-item floor-viewer__legend-item--kitchen">
             Mint = kitchens

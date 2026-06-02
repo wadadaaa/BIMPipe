@@ -71,9 +71,9 @@ const KNOWN_KINDS = new Set<string>([
   'WASHHANDBASIN', 'SHOWER', 'FLOORDRAIN', 'FLOORTRAP', 'CISTERN', 'BIDET',
 ])
 
-// Keep an explicit exclusion hook for future false positives; BIM-58 treats showers
-// and floor drains/traps as routeable fixtures.
-const EXCLUDED_FIXTURE_PATTERN = /a^/
+// BIM-58 treats showers, shower trays, floor drains, and floor traps as routeable
+// sanitary fixtures. Keep this list empty by default and add only proven false positives.
+const EXCLUDED_FIXTURE_PATTERNS: RegExp[] = []
 const KITCHEN_PATTERN = /kitchen(?:ette)?|מטבח/i
 const EXPLICIT_WASH_BASIN_PATTERN = /wash.?hand.?basin|washbasin|hand.?basin|lavatory|כיור\s*רחצה/i
 
@@ -107,7 +107,7 @@ export function inferFixtureKindFromText(text: string): FixtureKind | null {
 }
 
 export function isExcludedFixtureText(text: string): boolean {
-  return EXCLUDED_FIXTURE_PATTERN.test(text)
+  return EXCLUDED_FIXTURE_PATTERNS.some((pattern) => pattern.test(text))
 }
 
 function isKitchenText(text: string): boolean {

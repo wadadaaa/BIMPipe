@@ -101,7 +101,7 @@ export function LandingPage({ theme, onToggleTheme }: LandingPageProps) {
           for your IFC.
         </h1>
         <p className="landing__lede">
-          Drop an architect's IFC. See every toilet and kitchen detected.
+          Drop an architect's IFC. See sanitary fixtures and kitchens detected.
           Place vertical risers in seconds. Hand a clean IFC back to Revit.
         </p>
         <div className="landing__hero-cta">
