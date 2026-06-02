@@ -560,15 +560,16 @@ export function FloorViewer({
             {sanitaryRoutes.flatMap((route) =>
               route.segments.map((segment, index) => (
                 <line
-                  key={`${route.fixtureExpressId}-${segment.kind}-${index}`}
+                  key={`${route.fixtureExpressId}-${segment.routeRole ?? segment.kind}-${index}`}
                   ref={(el) => {
-                    const lineKey = `${route.fixtureExpressId}-${segment.kind}-${index}`
+                    const lineKey = `${route.fixtureExpressId}-${segment.routeRole ?? segment.kind}-${index}`
                     if (el) routeLineRefsRef.current.set(lineKey, el)
                     else routeLineRefsRef.current.delete(lineKey)
                   }}
                   className={[
                     'floor-viewer__route-line',
                     segment.kind === 'main' ? 'floor-viewer__route-line--main' : 'floor-viewer__route-line--branch',
+                    segment.routeRole ? `floor-viewer__route-line--${segment.routeRole}` : '',
                   ].join(' ')}
                   data-route-from-x={String(segment.from.x)}
                   data-route-from-y={String(segment.from.y)}

@@ -68,10 +68,10 @@ export function getIfcElementPosition(
 
 const KNOWN_KINDS = new Set<string>([
   'BATH', 'SINK', 'TOILETPAN', 'URINAL',
-  'WASHHANDBASIN', 'CISTERN', 'BIDET',
+  'WASHHANDBASIN', 'SHOWER', 'FLOORDRAIN', 'FLOORTRAP', 'CISTERN', 'BIDET',
 ])
 
-const EXCLUDED_FIXTURE_PATTERN = /shower|מקלח(?:ת|ון)|אגנית/i
+const EXCLUDED_FIXTURE_PATTERN = /מקלח(?:ת|ון)|אגנית/i
 const KITCHEN_PATTERN = /kitchen(?:ette)?|מטבח/i
 const EXPLICIT_WASH_BASIN_PATTERN = /wash.?hand.?basin|washbasin|hand.?basin|lavatory|כיור\s*רחצה/i
 
@@ -89,6 +89,9 @@ const KEYWORD_MATCHERS: Array<[RegExp, FixtureKind]> = [
   [/wash.?hand.?basin|washbasin|hand.?basin|lavatory|כיור\s*רחצה|כיור/i, 'WASHHANDBASIN'],
   [/\bsink\b|kitchen sink/i, 'SINK'],
   [/\bbath(?!room)|bathtub|אמבט(?:יה)?/i, 'BATH'],
+  [/shower|מקלח(?:ת|ון)|אגנית/i, 'SHOWER'],
+  [/floor.?drain|drainage.?point|FD\b|נקז/i, 'FLOORDRAIN'],
+  [/floor.?trap|trap.?floor|FT\b|מחסום/i, 'FLOORTRAP'],
   [/urinal|משתנה/i, 'URINAL'],
   [/bidet|בידה/i, 'BIDET'],
   [/cistern|flush tank|ניאגר/i, 'CISTERN'],

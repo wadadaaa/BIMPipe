@@ -387,8 +387,8 @@ export function WorkspacePage({
     })
   }
 
-  const sanitaryRoutesForExport = useMemo(() => {
-    if (!demoRuntime.enabled) return []
+  const sanitaryRoutingPlanForExport = useMemo(() => {
+    if (!demoRuntime.enabled) return { routes: [], limitations: [], debug: null }
     // Risers span every eligible floor (the physical vertical shaft), but demo sanitary routing
     // stays on the demo-scoped floors. Scope the riser set used for routing so exported routes are
     // not duplicated up the whole shaft when fixtures only exist on the demo floors.
@@ -402,8 +402,10 @@ export function WorkspacePage({
       const storey = storeyById.get(riser.storeyId)
       return storey ? isStoreyIncludedInDemoScope(storey.name, config) : false
     })
-    return buildSanitaryRoutingDemoPlan(fixtures, scopedRisers, config).routes
+    return buildSanitaryRoutingDemoPlan(fixtures, scopedRisers, config)
   }, [demoRuntime, fixtures, risers, storeys])
+
+  const sanitaryRoutesForExport = sanitaryRoutingPlanForExport.routes
 
   async function handleDownloadIfc() {
     if (
@@ -459,6 +461,7 @@ export function WorkspacePage({
           ...fullExport.debugMapping,
           placementRuleProfile: DEFAULT_RISER_PLACEMENT_RULE_PROFILE,
           floorClassification,
+          sanitaryRoutingDebug: sanitaryRoutingPlanForExport.debug,
           validationReport: buildRiserValidationReport({
             exportRunId,
             timestamp,

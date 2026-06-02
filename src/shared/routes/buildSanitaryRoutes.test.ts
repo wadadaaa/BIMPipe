@@ -62,7 +62,7 @@ describe('buildSanitaryRoutingDemoPlan', () => {
     const plan = buildSanitaryRoutingDemoPlan(
       [
         fixture({ expressId: 601, kind: 'SINK', position: { x: 2, y: 0, z: 0 } }),
-        fixture({ expressId: 602, kind: 'BATH', position: { x: 8, y: 0, z: 0 } }),
+        fixture({ expressId: 602, kind: 'BATH', position: { x: 3, y: 0, z: 2 } }),
       ],
       [riser('R1', 10, 0)],
       demoConfig,
@@ -70,15 +70,15 @@ describe('buildSanitaryRoutingDemoPlan', () => {
 
     const sink = plan.routes.find((route) => route.fixtureExpressId === 601)
     const bath = plan.routes.find((route) => route.fixtureExpressId === 602)
-    expect(sink?.segments[0]).toMatchObject({ kind: 'main', pipeDiameterMm: 63 })
-    expect(bath?.segments[0]).toMatchObject({ kind: 'branch', pipeDiameterMm: 50 })
+    expect(sink?.segments[0]).toMatchObject({ kind: 'main', routeRole: 'collectionMain', pipeDiameterMm: 63 })
+    expect(bath?.segments[0]).toMatchObject({ kind: 'branch', routeRole: 'fixtureBranch', pipeDiameterMm: 50 })
   })
 
   it('uses farthest fixture as main line and branches closer fixtures', () => {
     const plan = buildSanitaryRoutingDemoPlan(
       [
-        fixture({ expressId: 101, position: { x: 0, y: 0, z: 0 } }),
-        fixture({ expressId: 102, position: { x: 6, y: 0, z: 0 } }),
+        fixture({ expressId: 101, kind: 'SINK', position: { x: 0, y: 0, z: 0 } }),
+        fixture({ expressId: 102, kind: 'BATH', position: { x: 3, y: 0, z: 2 } }),
       ],
       [riser('R1', 10, 0)],
       demoConfig,
@@ -91,10 +91,11 @@ describe('buildSanitaryRoutingDemoPlan', () => {
     expect(far?.segments[0].kind).toBe('main')
     expect(close?.segments).toHaveLength(1)
     expect(close?.segments[0].kind).toBe('branch')
-    // Both the main run and the branch run terminate at the riser position.
+    expect(close?.segments[0].routeRole).toBe('fixtureBranch')
+    // The main run terminates at the riser; the branch joins the shared main instead of drawing a direct fixture-to-riser line.
     expect(far?.segments[0].to).toEqual({ x: 10, y: 0, z: 0 })
-    expect(close?.segments[0].to).toEqual({ x: 10, y: 0, z: 0 })
-    expect(plan.limitations).toContain('Branch fixtures are drawn as a single straight branch run to the riser in plan view for the demo.')
+    expect(close?.segments[0].to).not.toEqual({ x: 10, y: 0, z: 0 })
+    expect(plan.limitations).toContain('Grouped sanitary preview uses shared collection mains and 45° fixture branches where plan geometry allows.')
   })
 
   it('assigns fixtures to their nearest same-storey riser when multiple risers exist', () => {
@@ -232,9 +233,19 @@ describe('buildSanitaryRoutingDemoPlan', () => {
     )
 
     expect(plan.routes).toHaveLength(1)
-    expect(plan.routes[0].segments).toEqual([
-      { from: { x: 2, y: 0, z: 0 }, to: { x: 10, y: 0, z: 0 }, kind: 'main', pipeDiameterMm: 110 },
-    ])
-    expect(plan.limitations).not.toContain('Branch fixtures are drawn as a single straight branch run to the riser in plan view for the demo.')
+    expect(plan.routes[0].segments[0]).toMatchObject({
+      from: { x: 2, y: 0, z: 0 },
+      to: { x: 10, y: 0, z: 0 },
+      kind: 'main',
+      routeRole: 'toiletRoute',
+      pipeDiameterMm: 110,
+      system: 'BIMPipe Sanitary Routes',
+      diameterMm: 110,
+      slopePercent: 2,
+      targetRiserId: 'R1',
+      sourceFixtureId: 301,
+      sourceFixtureType: 'TOILETPAN',
+    })
+    expect(plan.limitations).not.toContain('Grouped sanitary preview uses shared collection mains and 45° fixture branches where plan geometry allows.')
   })
 })
