@@ -84,26 +84,20 @@ export function buildSanitaryRoutingDemoPlan(
     for (const fixture of members) {
       const fixturePos = fixture.position!
       const onMainLine = fixture.expressId === farthest.expressId
-      const branchJunction = approximateBranchJunction(fixturePos, riser.position)
       const fixtureDiameter = fixtureDiameterForKind(fixture.kind)
       const mainDiameter = mainLineDiameterForKind(fixture.kind, hasBranches)
 
-      const segments: RouteSegment[] = []
-      if (!onMainLine) {
-        segments.push({
-          from: fixturePos,
-          to: branchJunction,
-          kind: 'branch',
-          pipeDiameterMm: fixtureDiameter,
-        })
-      } else {
-        segments.push({
+      // Both the main run and each branch run terminate at the riser: every fixture's pipe
+      // reaches the stack. The farthest fixture owns the larger-diameter main line; the rest are
+      // smaller-diameter branch runs that also tie into the riser.
+      const segments: RouteSegment[] = [
+        {
           from: fixturePos,
           to: riser.position,
-          kind: 'main',
-          pipeDiameterMm: mainDiameter,
-        })
-      }
+          kind: onMainLine ? 'main' : 'branch',
+          pipeDiameterMm: onMainLine ? mainDiameter : fixtureDiameter,
+        },
+      ]
 
       sourceRoutes.push({
         fixtureExpressId: fixture.expressId,
@@ -138,7 +132,7 @@ export function buildSanitaryRoutingDemoPlan(
     )
   }
   if (routes.some((route) => route.segments.some((segment) => segment.kind === 'branch'))) {
-    limitations.push('45° branches are approximated by a single branch segment in plan view for the demo.')
+    limitations.push('Branch fixtures are drawn as a single straight branch run to the riser in plan view for the demo.')
   }
   if (routes.length > sourceRoutes.length) {
     limitations.push('Single-floor demo sanitary routes are duplicated across matching riser stack floors for IFC export.')
@@ -268,15 +262,4 @@ function findNearestRiser(fixture: Fixture, risers: Riser[]): Riser {
   }
 
   return nearest
-}
-
-function approximateBranchJunction(
-  fixture: { x: number; y: number; z: number },
-  riser: { x: number; y: number; z: number },
-): { x: number; y: number; z: number } {
-  return {
-    x: (fixture.x + riser.x) / 2,
-    y: fixture.y,
-    z: (fixture.z + riser.z) / 2,
-  }
 }

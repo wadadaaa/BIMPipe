@@ -91,7 +91,10 @@ describe('buildSanitaryRoutingDemoPlan', () => {
     expect(far?.segments[0].kind).toBe('main')
     expect(close?.segments).toHaveLength(1)
     expect(close?.segments[0].kind).toBe('branch')
-    expect(plan.limitations).toContain('45° branches are approximated by a single branch segment in plan view for the demo.')
+    // Both the main run and the branch run terminate at the riser position.
+    expect(far?.segments[0].to).toEqual({ x: 10, y: 0, z: 0 })
+    expect(close?.segments[0].to).toEqual({ x: 10, y: 0, z: 0 })
+    expect(plan.limitations).toContain('Branch fixtures are drawn as a single straight branch run to the riser in plan view for the demo.')
   })
 
   it('assigns fixtures to their nearest same-storey riser when multiple risers exist', () => {
@@ -202,6 +205,6 @@ describe('buildSanitaryRoutingDemoPlan', () => {
     expect(plan.routes[0].segments).toEqual([
       { from: { x: 2, y: 0, z: 0 }, to: { x: 10, y: 0, z: 0 }, kind: 'main', pipeDiameterMm: 110 },
     ])
-    expect(plan.limitations).not.toContain('45° branches are approximated by a single branch segment in plan view for the demo.')
+    expect(plan.limitations).not.toContain('Branch fixtures are drawn as a single straight branch run to the riser in plan view for the demo.')
   })
 })
