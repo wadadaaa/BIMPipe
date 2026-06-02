@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { validateFile, MAX_FILE_SIZE } from './validateFile'
 
 function makeFile(name: string, size: number): File {
-  return new File([new ArrayBuffer(size)], name)
+  return { name, size } as File
 }
 
 describe('validateFile', () => {

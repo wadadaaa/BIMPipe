@@ -112,7 +112,7 @@ export function decideRiserStrategyPerToiletRoom(
 
           if (penthouseExceptionRule) {
             const penthouseReason = penthouseExceptionRule.reason
-              ? `inherits exception coverage from primary member: ${penthouseExceptionRule.reason}`
+              ? penthouseExceptionRule.reason
               : `penthouse is served by exception rule ${penthouseExceptionRule.ruleId}`
             reasons.push(penthouseReason)
             decision = createDecision(group, member, RISER_STRATEGY_DECISION.COVERED_BY_EXCEPTION_RULE, reasons, overlaps, {
@@ -133,7 +133,7 @@ export function decideRiserStrategyPerToiletRoom(
         }
       } else if (primaryEligibleAreaId !== member.areaId && primaryExceptionRule) {
         const inheritedReason = primaryExceptionRule.reason
-          ? `inherits exception coverage from primary member: ${primaryExceptionRule.reason}`
+          ? primaryExceptionRule.reason
           : `eligible non-primary member inherits exception coverage from primary member rule ${primaryExceptionRule.ruleId}`
         reasons.push(inheritedReason)
         decision = createDecision(group, member, RISER_STRATEGY_DECISION.COVERED_BY_EXCEPTION_RULE, reasons, overlaps, {

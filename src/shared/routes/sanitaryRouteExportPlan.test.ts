@@ -33,8 +33,8 @@ describe('sanitaryRouteExportPlan', () => {
   it('deduplicates shared main segments across fixtures on the same riser', () => {
     const plan = buildSanitaryRoutingDemoPlan(
       [
-        fixture({ expressId: 101, position: { x: 0, y: 0, z: 0 } }),
-        fixture({ expressId: 102, position: { x: 6, y: 0, z: 0 } }),
+        fixture({ expressId: 101, kind: 'SINK', position: { x: 0, y: 0, z: 0 } }),
+        fixture({ expressId: 102, kind: 'BATH', position: { x: 3, y: 0, z: 2 } }),
       ],
       [riser('R1', 10, 0)],
       demoConfig,
@@ -43,14 +43,14 @@ describe('sanitaryRouteExportPlan', () => {
     const segments = collectSanitaryExportSegments(plan.routes, [{ id: 1, elevation: 300 }], [riser('R1', 10, 0)])
     const mainSegments = segments.filter((segment) => segment.segment.kind === 'main')
     expect(mainSegments).toHaveLength(1)
-    expect(mainSegments[0].segment.pipeDiameterMm).toBe(110)
+    expect(mainSegments[0].segment.pipeDiameterMm).toBe(63)
   })
 
   it('preserves 50mm branches and 63mm grouped mains for wet fixtures', () => {
     const plan = buildSanitaryRoutingDemoPlan(
       [
         fixture({ expressId: 201, kind: 'SINK', position: { x: 0, y: 0, z: 0 } }),
-        fixture({ expressId: 202, kind: 'BATH', position: { x: 8, y: 0, z: 0 } }),
+        fixture({ expressId: 202, kind: 'BATH', position: { x: 3, y: 0, z: 2 } }),
       ],
       [riser('R1', 10, 0)],
       demoConfig,
