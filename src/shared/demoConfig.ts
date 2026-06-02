@@ -46,6 +46,12 @@ export function isStoreyIncludedInDemoScope(storeyName: string, config: DemoConf
   return included.has(normalizedStoreyName)
 }
 
+export function isStoreyExcludedFromDemoScope(storeyName: string, config: DemoConfig): boolean {
+  const normalizedStoreyName = normalizeDemoFloorName(storeyName)
+  const excluded = new Set(config.scope.excludedFloors.map(normalizeDemoFloorName))
+  return excluded.has(normalizedStoreyName)
+}
+
 export function normalizeDemoFloorName(value: string): string {
   return value.replace(/\u00a0/g, ' ').trim().normalize('NFC').toLowerCase()
 }
