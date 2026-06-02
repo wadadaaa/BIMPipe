@@ -185,3 +185,38 @@ When finishing a task, use:
 2. Files changed
 3. Validation performed
 4. Risks / follow-ups
+
+## Cursor Cloud specific instructions
+
+BIMPipe is a **client-only** Vite/React SPA. There is no backend, database, Docker, or docker-compose in this repo.
+
+### Services
+
+| Service | Command | URL |
+|---------|---------|-----|
+| Dev (required for browser E2E) | `pnpm dev` | http://localhost:5173 (`/app` is the workspace) |
+| Preview (optional) | `pnpm preview` | http://localhost:4173 (run `pnpm build` first) |
+
+Run long-lived dev servers in **tmux** (e.g. session `vite-dev-server`), not as one-shot background shells.
+
+### Validation (see root `package.json` scripts)
+
+- `pnpm lint` — ESLint
+- `pnpm test` — Vitest (`jsdom`; mocks `web-ifc`, no dev server needed)
+- `pnpm build` — `tsc -b` + Vite production build (this is the typecheck path; there is no `pnpm typecheck`)
+
+README mentions `pnpm typecheck`; that script does not exist in `package.json`.
+
+### IFC files for manual E2E
+
+Demo IFC assets (e.g. `ADAM_10.ifc`) are **not** in git. For upload/parse/viewer smoke tests, place a `.ifc` under `external/demo-assets/` (create the directory if needed) or use any suitable sample. The buildingSMART two-story residential sample (~40 KB) is enough to verify storey parsing and the floor viewer.
+
+`pnpm demo:adam10` expects `external/demo-assets/ADAM_10.ifc` and `DEMO_MODE=true` (see `demo/adam-10/README.md`).
+
+### web-ifc WASM
+
+`web-ifc` loads WASM from `public/` (`web-ifc.wasm`, `web-ifc-mt.wasm`). No extra install step beyond `pnpm install`.
+
+### Node
+
+Node **20+** per README; `.nvmrc` is `lts/*`. Vite 8 works best on Node 20.19+ or current LTS (22+).
