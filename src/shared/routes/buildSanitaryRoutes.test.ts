@@ -141,7 +141,7 @@ describe('buildSanitaryRoutingDemoPlan', () => {
     expect(plan.routes.filter((route) => route.segments[0].kind === 'branch')).toHaveLength(2)
   })
 
-  it('does not merge service zones across different nearest risers', () => {
+  it('groups one sanitary service zone before choosing its discharge riser', () => {
     const plan = buildSanitaryRoutingDemoPlan(
       [
         fixture({ expressId: 141, kind: 'SINK', position: { x: 0, y: 0, z: 0 } }),
@@ -151,13 +151,18 @@ describe('buildSanitaryRoutingDemoPlan', () => {
       demoConfig,
     )
 
-    expect(plan.debug.groups).toHaveLength(2)
-    expect(plan.routes.find((route) => route.fixtureExpressId === 141)?.riserId).toBe('R1')
-    expect(plan.routes.find((route) => route.fixtureExpressId === 142)?.riserId).toBe('R2')
-    expect(plan.routes.every((route) => route.segments[0].routeRole === 'transition')).toBe(true)
+    expect(plan.debug.groups).toHaveLength(1)
+    expect(plan.debug.groups[0]).toMatchObject({
+      fixtureIds: [141, 142],
+      riserId: 'R1',
+      collectionMainDiameterMm: 63,
+    })
+    expect(plan.routes.every((route) => route.riserId === 'R1')).toBe(true)
+    expect(plan.routes.some((route) => route.segments[0].routeRole === 'collectionMain')).toBe(true)
+    expect(plan.routes.some((route) => route.segments[0].routeRole === 'transition')).toBe(true)
   })
 
-  it('keeps nearby toilets on their own nearest risers instead of drawing a cross-riser trunk', () => {
+  it('keeps nearby toilets in one grouped service zone instead of defaulting to one route per riser', () => {
     const plan = buildSanitaryRoutingDemoPlan(
       [
         fixture({ expressId: 111, position: { x: 0, y: 0, z: 0 } }),
@@ -167,10 +172,11 @@ describe('buildSanitaryRoutingDemoPlan', () => {
       demoConfig,
     )
 
-    expect(plan.routes.find((route) => route.fixtureExpressId === 111)?.riserId).toBe('R1')
-    expect(plan.routes.find((route) => route.fixtureExpressId === 112)?.riserId).toBe('R2')
-    expect(plan.routes.every((route) => route.segments[0].routeRole === 'transition')).toBe(true)
-    expect(plan.debug.groups).toHaveLength(2)
+    expect(plan.debug.groups).toHaveLength(1)
+    expect(plan.debug.groups[0]).toMatchObject({ fixtureIds: [111, 112], riserId: 'R1' })
+    expect(plan.routes.every((route) => route.riserId === 'R1')).toBe(true)
+    expect(plan.routes.some((route) => route.segments[0].routeRole === 'riserConnection')).toBe(true)
+    expect(plan.routes.some((route) => route.segments[0].routeRole === 'transition')).toBe(true)
   })
 
   it('assigns fixtures to their nearest same-storey riser when multiple risers exist', () => {

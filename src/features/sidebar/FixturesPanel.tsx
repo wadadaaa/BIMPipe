@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Fixture } from '@/domain/types'
 import './FixturesPanel.css'
 
@@ -18,11 +18,24 @@ export function FixturesPanel({
   onPlaceRisers,
 }: FixturesPanelProps) {
   const [isFiring, setIsFiring] = useState(false)
+  const firingTimeoutRef = useRef<number | null>(null)
+
+  useEffect(() => () => {
+    if (firingTimeoutRef.current !== null) {
+      window.clearTimeout(firingTimeoutRef.current)
+    }
+  }, [])
 
   function handlePlaceRisers() {
     if (!onPlaceRisers || !canPlaceRisers) return
+    if (firingTimeoutRef.current !== null) {
+      window.clearTimeout(firingTimeoutRef.current)
+    }
     setIsFiring(true)
-    window.setTimeout(() => setIsFiring(false), 550)
+    firingTimeoutRef.current = window.setTimeout(() => {
+      setIsFiring(false)
+      firingTimeoutRef.current = null
+    }, 550)
     onPlaceRisers()
   }
 

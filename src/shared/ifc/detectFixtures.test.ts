@@ -311,6 +311,15 @@ describe('detectFixtures', () => {
     expect(result[0]).toMatchObject({ expressId: 304, kind: 'SHOWER' })
   })
 
+  it('includes Hebrew shower labels for sanitary routing', async () => {
+    const api = makeApi(
+      [{ relatingStoreyId: 1, elementIds: [305] }],
+      [asProxy(305, 'אגנית מקלחת')],
+    )
+    const result = await detectFixtures(api, 0, 1)
+    expect(result[0]).toMatchObject({ expressId: 305, kind: 'SHOWER' })
+  })
+
   it('includes IFCFURNISHINGELEMENT when its metadata matches a plumbing keyword', async () => {
     const api = makeApi(
       [{ relatingStoreyId: 5, elementIds: [401] }],

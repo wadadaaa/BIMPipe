@@ -71,7 +71,9 @@ const KNOWN_KINDS = new Set<string>([
   'WASHHANDBASIN', 'SHOWER', 'FLOORDRAIN', 'FLOORTRAP', 'CISTERN', 'BIDET',
 ])
 
-const EXCLUDED_FIXTURE_PATTERN = /מקלח(?:ת|ון)|אגנית/i
+// Keep an explicit exclusion hook for future false positives; BIM-58 treats showers
+// and floor drains/traps as routeable fixtures.
+const EXCLUDED_FIXTURE_PATTERN = /a^/
 const KITCHEN_PATTERN = /kitchen(?:ette)?|מטבח/i
 const EXPLICIT_WASH_BASIN_PATTERN = /wash.?hand.?basin|washbasin|hand.?basin|lavatory|כיור\s*רחצה/i
 

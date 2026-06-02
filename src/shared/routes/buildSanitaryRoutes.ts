@@ -101,7 +101,6 @@ interface RiserFixtureGroup {
 }
 
 interface ServiceZoneCluster {
-  riser: Riser
   members: Fixture[]
 }
 
@@ -368,19 +367,16 @@ function groupFixturesBySanitaryServiceZone(
       continue
     }
 
-    const targetRiser = findNearestRiser(fixture, sameStoreyRisers)
     const clusters = clustersByStorey.get(fixture.storeyId) ?? []
     const matchingClusterIndexes = clusters
       .map((cluster, index) => ({ cluster, index }))
-      .filter(
-        ({ cluster }) =>
-          cluster.riser.id === targetRiser.id &&
-          cluster.members.some((member) => fixturesBelongToSameSanitaryServiceZone(member, fixture)),
+      .filter(({ cluster }) =>
+        cluster.members.some((member) => fixturesBelongToSameSanitaryServiceZone(member, fixture)),
       )
       .map(({ index }) => index)
 
     if (matchingClusterIndexes.length === 0) {
-      clusters.push({ riser: targetRiser, members: [fixture] })
+      clusters.push({ members: [fixture] })
     } else {
       const targetCluster = clusters[matchingClusterIndexes[0]]
       targetCluster.members.push(fixture)
@@ -398,9 +394,10 @@ function groupFixturesBySanitaryServiceZone(
     const sortedClusters = [...clusters].sort(
       (left, right) => minFixtureExpressId(left.members) - minFixtureExpressId(right.members),
     )
+    const sameStoreyRisers = risers.filter((riser) => riser.storeyId === storeyId)
     sortedClusters.forEach((cluster, index) => {
       groups.push({
-        riser: cluster.riser,
+        riser: findNearestRiserToServiceZone(cluster.members, sameStoreyRisers),
         members: [...cluster.members].sort((left, right) => left.expressId - right.expressId),
         groupId: `${storeyId}-${index + 1}`,
       })
@@ -414,25 +411,16 @@ function fixturesBelongToSameSanitaryServiceZone(left: Fixture, right: Fixture):
   return planDistance(left.position!, right.position!) <= SANITARY_ROOM_GROUPING_DISTANCE_PLAN_UNITS
 }
 
-function minFixtureExpressId(fixtures: Fixture[]): number {
-  return Math.min(...fixtures.map((fixture) => fixture.expressId))
+function findNearestRiserToServiceZone(fixtures: Fixture[], risers: Riser[]): Riser {
+  const centroid = fixtureClusterCentroid(fixtures)
+  return [...risers].sort((left, right) => {
+    const distanceDelta = planDistance(centroid, left.position) - planDistance(centroid, right.position)
+    return distanceDelta === 0 ? left.id.localeCompare(right.id) : distanceDelta
+  })[0]
 }
 
-function findNearestRiser(fixture: Fixture, risers: Riser[]): Riser {
-  const fixturePos = fixture.position!
-  let nearest = risers[0]
-  let min = planDistance(fixturePos, nearest.position)
-
-  for (let index = 1; index < risers.length; index += 1) {
-    const candidate = risers[index]
-    const distance = planDistance(fixturePos, candidate.position)
-    if (distance < min) {
-      min = distance
-      nearest = candidate
-    }
-  }
-
-  return nearest
+function minFixtureExpressId(fixtures: Fixture[]): number {
+  return Math.min(...fixtures.map((fixture) => fixture.expressId))
 }
 
 function fixtureClusterCentroid(fixtures: Fixture[]): { x: number; y: number; z: number } {
