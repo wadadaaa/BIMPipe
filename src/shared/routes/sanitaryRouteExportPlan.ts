@@ -118,9 +118,6 @@ function routeRoleLabel(segment: RouteSegment): 'Branch' | 'Main' | 'Toilet' {
       return 'Main'
     case 'toiletRoute':
       return 'Toilet'
-    case 'riserConnection':
-    case 'transition':
-      return 'Main'
     case undefined:
       return segment.kind === 'branch' ? 'Branch' : 'Main'
   }

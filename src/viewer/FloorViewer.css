@@ -230,14 +230,6 @@
   stroke-dasharray: none;
 }
 
-.floor-viewer__route-line--riser-connection,
-.floor-viewer__route-line--transition {
-  stroke: #b6ecff;
-  stroke-width: 4.2;
-  opacity: 0.9;
-  stroke-dasharray: 10 7;
-}
-
 .floor-viewer__route-label {
   paint-order: stroke;
   stroke: rgba(4, 8, 14, 0.92);
@@ -253,12 +245,12 @@
   filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.85));
 }
 
-.floor-viewer__route-label--fixtureBranch {
+.floor-viewer__route-label--fixture-branch {
   fill: #ffe08a;
 }
 
-.floor-viewer__route-label--collectionMain,
-.floor-viewer__route-label--toiletRoute {
+.floor-viewer__route-label--collection-main,
+.floor-viewer__route-label--toilet-route {
   fill: #b9f2ff;
 }
 

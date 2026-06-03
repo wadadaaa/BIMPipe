@@ -19,12 +19,7 @@ export const MIN_SANITARY_SEGMENT_PLAN_LENGTH = 1e-6
 const SERVICE_ZONE_GROUP_DISTANCE = 18
 
 export type SanitaryPipeDiameterMm = 50 | 63 | 110
-export type SanitaryRouteRole =
-  | 'riserConnection'
-  | 'toiletRoute'
-  | 'collectionMain'
-  | 'fixtureBranch'
-  | 'transition'
+export type SanitaryRouteRole = 'toiletRoute' | 'collectionMain' | 'fixtureBranch'
 
 export interface RouteSegment {
   from: { x: number; y: number; z: number }
@@ -245,11 +240,6 @@ function buildServiceZoneGroups(fixtures: Fixture[]): ServiceZoneGroup[] {
 }
 
 function canAddFixtureToServiceZone(members: Fixture[], fixture: Fixture): boolean {
-  const isNearExistingMember = members.some(
-    (member) => planDistance(member.position!, fixture.position!) <= SERVICE_ZONE_GROUP_DISTANCE,
-  )
-  if (!isNearExistingMember) return false
-
   return members.every((member) => planDistance(member.position!, fixture.position!) <= SERVICE_ZONE_GROUP_DISTANCE)
 }
 
@@ -406,10 +396,6 @@ function roleLabel(routeRole: SanitaryRouteRole): string {
       return 'main'
     case 'fixtureBranch':
       return 'branch'
-    case 'riserConnection':
-      return 'riser'
-    case 'transition':
-      return 'transition'
   }
 }
 

@@ -586,8 +586,9 @@ export function FloorViewer({
                       }}
                       className={[
                         'floor-viewer__route-label',
-                        `floor-viewer__route-label--${segment.routeRole}`,
+                        routeLabelClassName(segment.routeRole),
                       ].join(' ')}
+                      style={{ opacity: 0 }}
                       data-route-from-x={String(segment.from.x)}
                       data-route-from-y={String(segment.from.y)}
                       data-route-from-z={String(segment.from.z)}
@@ -926,12 +927,21 @@ function routeLineClassName(routeRole: SanitaryFixtureRoute['segments'][number][
       return 'floor-viewer__route-line--main'
     case 'toiletRoute':
       return 'floor-viewer__route-line--toilet'
-    case 'riserConnection':
-      return 'floor-viewer__route-line--riser-connection'
-    case 'transition':
-      return 'floor-viewer__route-line--transition'
     default:
       return 'floor-viewer__route-line--main'
+  }
+}
+
+function routeLabelClassName(routeRole: SanitaryFixtureRoute['segments'][number]['routeRole']): string {
+  switch (routeRole) {
+    case 'fixtureBranch':
+      return 'floor-viewer__route-label--fixture-branch'
+    case 'collectionMain':
+      return 'floor-viewer__route-label--collection-main'
+    case 'toiletRoute':
+      return 'floor-viewer__route-label--toilet-route'
+    default:
+      return 'floor-viewer__route-label--main'
   }
 }
 
