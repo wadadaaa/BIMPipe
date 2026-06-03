@@ -941,7 +941,7 @@ function routeLabelClassName(routeRole: SanitaryFixtureRoute['segments'][number]
     case 'toiletRoute':
       return 'floor-viewer__route-label--toilet-route'
     default:
-      return 'floor-viewer__route-label--main'
+      return 'floor-viewer__route-label--collection-main'
   }
 }
 
