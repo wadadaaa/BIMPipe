@@ -11,8 +11,11 @@ export const DEMO_SANITARY_SLOPE_PERCENT = DEMO_SANITARY_SLOPE * 100
 // IFC pipe, so they are dropped rather than emitted.
 export const MIN_SANITARY_SEGMENT_PLAN_LENGTH = 1e-6
 
-// ADAM_10 does not currently expose room boundary polygons to this planner. This threshold keeps
-// the demo heuristic local to a bathroom/service zone instead of allowing building-wide trunks.
+// ADAM_10 does not currently expose room boundary polygons to this planner. Viewer coordinates are
+// model/source coordinates normalized into the floor viewer; for ADAM_10 this threshold is roughly
+// room-scale in plan view, not millimetres/metres. A candidate fixture must be within this distance
+// of an existing member AND keep the group's maximum pairwise diameter within the same cap. That
+// bounded-diameter check prevents greedy single-linkage chains (A-B-C) from merging distant zones.
 const SERVICE_ZONE_GROUP_DISTANCE = 18
 
 export type SanitaryPipeDiameterMm = 50 | 63 | 110
@@ -72,7 +75,7 @@ export interface SanitaryRoutingDebugGroup {
 export interface SanitaryRoutingPlan {
   routes: SanitaryFixtureRoute[]
   limitations: string[]
-  debugGroups?: SanitaryRoutingDebugGroup[]
+  debugGroups: SanitaryRoutingDebugGroup[]
 }
 
 // BIM-58 demo scope supports fixture classes that can participate in sanitary bathroom routing.
@@ -90,6 +93,11 @@ interface PlannedRouteDraft {
   routeGroupId: string
   targetRiser: Riser
   segments: RouteSegment[]
+}
+
+interface TargetRiserSelection {
+  riser: Riser
+  reason: string
 }
 
 export function buildSanitaryRoutingDemoPlan(
@@ -118,7 +126,8 @@ export function buildSanitaryRoutingDemoPlan(
       continue
     }
 
-    const targetRiser = selectTargetRiserForGroup(group, sameStoreyRisers)
+    const targetRiserSelection = selectTargetRiserForGroup(group, sameStoreyRisers)
+    const targetRiser = targetRiserSelection.riser
     const drafts = planServiceZoneRoutes(group, targetRiser)
     const skippedFixtureIds: number[] = []
     const fallbackReasons: string[] = []
@@ -161,7 +170,7 @@ export function buildSanitaryRoutingDemoPlan(
       storeyId: group.storeyId,
       fixtureIds: group.members.map((fixture) => fixture.expressId),
       targetRiserId: targetRiser.id,
-      targetRiserReason: 'Selected nearest same-storey riser to the derived bathroom/service-zone anchor.',
+      targetRiserReason: targetRiserSelection.reason,
       selectedMainFixtureId: selectedMain?.sourceFixtureId,
       branchCount,
       diameters: Array.from(
@@ -218,9 +227,7 @@ function buildServiceZoneGroups(fixtures: Fixture[]): ServiceZoneGroup[] {
     const storeyGroups: Fixture[][] = []
 
     for (const fixture of sorted) {
-      const existing = storeyGroups.find((members) =>
-        members.some((member) => planDistance(member.position!, fixture.position!) <= SERVICE_ZONE_GROUP_DISTANCE),
-      )
+      const existing = storeyGroups.find((members) => canAddFixtureToServiceZone(members, fixture))
       if (existing) existing.push(fixture)
       else storeyGroups.push([fixture])
     }
@@ -237,9 +244,20 @@ function buildServiceZoneGroups(fixtures: Fixture[]): ServiceZoneGroup[] {
   return groups
 }
 
-function selectTargetRiserForGroup(group: ServiceZoneGroup, risers: Riser[]): Riser {
+function canAddFixtureToServiceZone(members: Fixture[], fixture: Fixture): boolean {
+  const isNearExistingMember = members.some(
+    (member) => planDistance(member.position!, fixture.position!) <= SERVICE_ZONE_GROUP_DISTANCE,
+  )
+  if (!isNearExistingMember) return false
+
+  return members.every((member) => planDistance(member.position!, fixture.position!) <= SERVICE_ZONE_GROUP_DISTANCE)
+}
+
+function selectTargetRiserForGroup(group: ServiceZoneGroup, risers: Riser[]): TargetRiserSelection {
   const toilets = group.members.filter((fixture) => fixture.kind === 'TOILETPAN')
-  const anchor = centroid(toilets.length > 0 ? toilets : group.members)
+  const usesToiletCentroid = toilets.length > 0
+  const anchorFixtures = usesToiletCentroid ? toilets : group.members
+  const anchor = centroid(anchorFixtures)
   let nearest = risers[0]
   let min = planDistance(anchor, nearest.position)
 
@@ -252,7 +270,14 @@ function selectTargetRiserForGroup(group: ServiceZoneGroup, risers: Riser[]): Ri
     }
   }
 
-  return nearest
+  const anchorSource = usesToiletCentroid
+    ? `toilet centroid from ${toilets.length} toilet fixture${toilets.length === 1 ? '' : 's'}`
+    : `all-fixture centroid from ${group.members.length} fixtures`
+
+  return {
+    riser: nearest,
+    reason: `Selected nearest same-storey riser ${nearest.id} using ${anchorSource}; service zone has ${group.members.length} fixtures and ${toilets.length} toilet fixtures.`,
+  }
 }
 
 function planServiceZoneRoutes(group: ServiceZoneGroup, targetRiser: Riser): PlannedRouteDraft[] {
@@ -423,6 +448,8 @@ function projectPointOntoSegment(
   const lenSq = vx * vx + vz * vz
   if (lenSq < MIN_SANITARY_SEGMENT_PLAN_LENGTH) return end
   const rawT = (wx * vx + wz * vz) / lenSq
+  // Keep branch joins away from the collection-main endpoints so labels/segments stay visible and
+  // small fixture branches do not visually collapse into the riser or farthest fixture marker.
   const t = Math.min(0.85, Math.max(0.15, rawT))
   return {
     x: start.x + vx * t,

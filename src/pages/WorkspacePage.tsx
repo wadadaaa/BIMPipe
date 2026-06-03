@@ -471,9 +471,9 @@ export function WorkspacePage({
             risers,
           }),
           sanitaryRouteDebugGroups:
-            sanitaryRoutingPlanForExport.debugGroups && sanitaryRoutingPlanForExport.debugGroups.length > 0
+            sanitaryRoutingPlanForExport.debugGroups.length > 0
               ? sanitaryRoutingPlanForExport.debugGroups
-              : sanitaryRoutingPreview.debugGroups ?? [],
+              : sanitaryRoutingPreview.debugGroups,
           sanitaryRouteLimitations: [
             ...sanitaryRoutingPlanForExport.limitations,
             ...sanitaryRoutingPreview.limitations,
@@ -496,7 +496,7 @@ export function WorkspacePage({
 
 
   const sanitaryRoutingPreview = useMemo(() => {
-    if (!demoRuntime.enabled || selectedStoreyId === null) return { routes: [], limitations: [] }
+    if (!demoRuntime.enabled || selectedStoreyId === null) return { routes: [], limitations: [], debugGroups: [] }
     const floorFixtures = fixtures.filter((fixture) => fixture.storeyId === selectedStoreyId)
     const floorRisers = risers.filter((riser) => riser.storeyId === selectedStoreyId)
     return buildSanitaryRoutingDemoPlan(floorFixtures, floorRisers, demoRuntime.config)

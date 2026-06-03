@@ -75,7 +75,8 @@ describe('buildSanitaryRoutingDemoPlan', () => {
     const fixtureBranch = allSegments.find((segment) => segment.routeRole === 'fixtureBranch')
 
     expect(plan.debugGroups).toHaveLength(1)
-    expect(plan.debugGroups?.[0]).toMatchObject({ targetRiserId: 'R1', branchCount: 2 })
+    expect(plan.debugGroups[0]).toMatchObject({ targetRiserId: 'R1', branchCount: 2 })
+    expect(plan.debugGroups[0].targetRiserReason).toContain('toilet centroid from 1 toilet fixture')
     expect(toiletRoute).toMatchObject({ diameterMm: 110, slopePercent: 2, targetRiserId: 'R1' })
     expect(collectionMain).toMatchObject({ diameterMm: 63, slopePercent: 2, targetRiserId: 'R1' })
     expect(fixtureBranch).toMatchObject({ diameterMm: 50, slopePercent: 2, targetRiserId: 'R1' })
@@ -95,7 +96,41 @@ describe('buildSanitaryRoutingDemoPlan', () => {
 
     expect(new Set(plan.routes.map((route) => route.riserId))).toEqual(new Set(['R1']))
     expect(plan.routes.flatMap((route) => route.segments).every((segment) => segment.targetRiserId === 'R1')).toBe(true)
-    expect(plan.debugGroups?.[0].targetRiserReason).toContain('service-zone')
+    expect(plan.debugGroups[0].targetRiserReason).toContain('toilet centroid from 1 toilet fixture')
+  })
+
+  it('does not merge far-apart service zones through an intermediate fixture chain', () => {
+    const plan = buildSanitaryRoutingDemoPlan(
+      [
+        fixture({ expressId: 301, kind: 'SINK', position: { x: 0, y: 0, z: 0 } }),
+        fixture({ expressId: 302, kind: 'BATH', position: { x: 16, y: 0, z: 0 } }),
+        fixture({ expressId: 303, kind: 'WASHHANDBASIN', position: { x: 32, y: 0, z: 0 } }),
+      ],
+      [riser('R1', 0, 0), riser('R2', 40, 0)],
+      demoConfig,
+    )
+
+    expect(plan.debugGroups).toHaveLength(2)
+    expect(plan.debugGroups.map((group) => group.fixtureIds)).toEqual([[301, 302], [303]])
+    expect(plan.routes.find((route) => route.fixtureExpressId === 301)?.routeGroupId).toBe('storey-1-zone-1')
+    expect(plan.routes.find((route) => route.fixtureExpressId === 302)?.routeGroupId).toBe('storey-1-zone-1')
+    expect(plan.routes.find((route) => route.fixtureExpressId === 303)?.routeGroupId).toBe('storey-1-zone-2')
+    expect(new Set(plan.routes.map((route) => route.riserId))).toEqual(new Set(['R1', 'R2']))
+  })
+
+  it('documents all-fixture centroid riser selection when a service zone has no toilets', () => {
+    const plan = buildSanitaryRoutingDemoPlan(
+      [
+        fixture({ expressId: 351, kind: 'SINK', position: { x: 20, y: 0, z: 0 } }),
+        fixture({ expressId: 352, kind: 'BATH', position: { x: 24, y: 0, z: 0 } }),
+      ],
+      [riser('R1', 0, 0), riser('R2', 30, 0)],
+      demoConfig,
+    )
+
+    expect(plan.debugGroups[0]).toMatchObject({ targetRiserId: 'R2' })
+    expect(plan.debugGroups[0].targetRiserReason).toContain('all-fixture centroid from 2 fixtures')
+    expect(plan.debugGroups[0].targetRiserReason).toContain('0 toilet fixtures')
   })
 
   it('assigns distant service zones to independent target risers', () => {
