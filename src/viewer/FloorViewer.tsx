@@ -74,7 +74,15 @@ export function FloorViewer({
   const floorGroupRef = useRef<THREE.Group | null>(null)
   const projectionVecRef = useRef(new THREE.Vector3())
   const routeLineRefsRef = useRef<Map<string, SVGLineElement>>(new Map())
+  const routeLabelRefsRef = useRef<Map<string, SVGTextElement>>(new Map())
   const [routeProjectionStatus, setRouteProjectionStatus] = useState<{ failed: number; total: number }>({ failed: 0, total: 0 })
+  const routeProjectionStatusRef = useRef<{ failed: number; total: number }>({ failed: 0, total: 0 })
+  const animationCallbacksRef = useRef({
+    animateKitchenMarkers: () => {},
+    animateFixtureMarkers: () => {},
+    animateRiserMarkers: () => {},
+    animateRouteLines: () => {},
+  })
 
   // Fixture overlay: map of expressId → positioned div element
   const fixtureMarkerRefsRef = useRef<Map<number, HTMLDivElement>>(new Map())
@@ -96,6 +104,11 @@ export function FloorViewer({
   function scheduleRender() {
     scheduleRenderRef.current()
   }
+
+  animationCallbacksRef.current.animateKitchenMarkers = animateKitchenMarkers
+  animationCallbacksRef.current.animateFixtureMarkers = animateFixtureMarkers
+  animationCallbacksRef.current.animateRiserMarkers = animateRiserMarkers
+  animationCallbacksRef.current.animateRouteLines = animateRouteLines
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -142,10 +155,10 @@ export function FloorViewer({
     const renderScene = () => {
       renderQueuedRef.current = false
       renderer.render(scene, camera)
-      animateKitchenMarkers()
-      animateFixtureMarkers()
-      animateRiserMarkers()
-      animateRouteLines()
+      animationCallbacksRef.current.animateKitchenMarkers()
+      animationCallbacksRef.current.animateFixtureMarkers()
+      animationCallbacksRef.current.animateRiserMarkers()
+      animationCallbacksRef.current.animateRouteLines()
     }
 
     const queueRender = () => {
@@ -526,7 +539,7 @@ export function FloorViewer({
 
           {plottedFixtures.length > 0 && (
             <span className="floor-viewer__chip floor-viewer__chip--fixture">
-              {plottedFixtures.length} toilets
+              {plottedFixtures.length} fixtures
             </span>
           )}
 
@@ -558,26 +571,49 @@ export function FloorViewer({
         <>
           <svg className="floor-viewer__route-overlay" aria-hidden="true">
             {sanitaryRoutes.flatMap((route) =>
-              route.segments.map((segment, index) => (
-                <line
-                  key={`${route.fixtureExpressId}-${segment.kind}-${index}`}
-                  ref={(el) => {
-                    const lineKey = `${route.fixtureExpressId}-${segment.kind}-${index}`
-                    if (el) routeLineRefsRef.current.set(lineKey, el)
-                    else routeLineRefsRef.current.delete(lineKey)
-                  }}
-                  className={[
-                    'floor-viewer__route-line',
-                    segment.kind === 'main' ? 'floor-viewer__route-line--main' : 'floor-viewer__route-line--branch',
-                  ].join(' ')}
-                  data-route-from-x={String(segment.from.x)}
-                  data-route-from-y={String(segment.from.y)}
-                  data-route-from-z={String(segment.from.z)}
-                  data-route-to-x={String(segment.to.x)}
-                  data-route-to-y={String(segment.to.y)}
-                  data-route-to-z={String(segment.to.z)}
-                />
-              )),
+              route.segments.map((segment, index) => {
+                const routeKey = `${route.fixtureExpressId}-${segment.routeRole ?? segment.kind}-${index}`
+                const label = buildRoutePreviewLabel(segment)
+                return (
+                  <g key={routeKey}>
+                    <line
+                      ref={(el) => {
+                        if (el) routeLineRefsRef.current.set(routeKey, el)
+                        else routeLineRefsRef.current.delete(routeKey)
+                      }}
+                      className={[
+                        'floor-viewer__route-line',
+                        segment.kind === 'main' ? 'floor-viewer__route-line--main' : 'floor-viewer__route-line--branch',
+                        segment.routeRole ? `floor-viewer__route-line--${segment.routeRole}` : '',
+                      ].join(' ')}
+                      data-route-from-x={String(segment.from.x)}
+                      data-route-from-y={String(segment.from.y)}
+                      data-route-from-z={String(segment.from.z)}
+                      data-route-to-x={String(segment.to.x)}
+                      data-route-to-y={String(segment.to.y)}
+                      data-route-to-z={String(segment.to.z)}
+                    />
+                    <text
+                      ref={(el) => {
+                        if (el) routeLabelRefsRef.current.set(routeKey, el)
+                        else routeLabelRefsRef.current.delete(routeKey)
+                      }}
+                      className={[
+                        'floor-viewer__route-label',
+                        segment.kind === 'main' ? 'floor-viewer__route-label--main' : 'floor-viewer__route-label--branch',
+                      ].join(' ')}
+                      data-route-from-x={String(segment.from.x)}
+                      data-route-from-y={String(segment.from.y)}
+                      data-route-from-z={String(segment.from.z)}
+                      data-route-to-x={String(segment.to.x)}
+                      data-route-to-y={String(segment.to.y)}
+                      data-route-to-z={String(segment.to.z)}
+                    >
+                      {label}
+                    </text>
+                  </g>
+                )
+              }),
             )}
           </svg>
           {routeProjectionStatus.failed > 0 && (
@@ -723,7 +759,7 @@ export function FloorViewer({
       {!showOverlay && (
         <div className="floor-viewer__legend" aria-hidden="true">
           <span className="floor-viewer__legend-item floor-viewer__legend-item--fixture">
-            Amber = toilets
+            Amber = sanitary fixtures
           </span>
           <span className="floor-viewer__legend-item floor-viewer__legend-item--kitchen">
             Mint = kitchens
@@ -732,10 +768,10 @@ export function FloorViewer({
             Blue = risers
           </span>
           <span className="floor-viewer__legend-item floor-viewer__legend-item--route-main">
-            Cyan = main sanitary route
+            Cyan = Ø110/Ø63 main to riser
           </span>
           <span className="floor-viewer__legend-item floor-viewer__legend-item--route-branch">
-            Dashed amber = branch route
+            Dashed amber = Ø50/Ø110 branch + 2% slope
           </span>
           {isAddingFixture && (
             <span className="floor-viewer__legend-item floor-viewer__legend-item--fixture">
@@ -809,15 +845,15 @@ export function FloorViewer({
 
     const routeLines = routeLineRefsRef.current
     if (routeLines.size === 0) {
-      if (routeProjectionStatus.failed !== 0 || routeProjectionStatus.total !== 0) {
-        setRouteProjectionStatus({ failed: 0, total: 0 })
+      if (routeProjectionStatusRef.current.failed !== 0 || routeProjectionStatusRef.current.total !== 0) {
+        updateRouteProjectionStatus({ failed: 0, total: 0 })
       }
       return
     }
 
     let projectionFailures = 0
 
-    for (const [, line] of routeLines) {
+    for (const [routeKey, line] of routeLines) {
       const from = new THREE.Vector3(
         parseFloat(line.dataset['routeFromX'] ?? '0'),
         parseFloat(line.dataset['routeFromY'] ?? '0'),
@@ -828,6 +864,7 @@ export function FloorViewer({
         parseFloat(line.dataset['routeToY'] ?? '0'),
         parseFloat(line.dataset['routeToZ'] ?? '0'),
       )
+      const label = routeLabelRefsRef.current.get(routeKey)
 
       const fromPt = projectOverlayPointOnPlan(from, canvas, camera, planPlaneRef.current)
       const toPt = projectOverlayPointOnPlan(to, canvas, camera, planPlaneRef.current)
@@ -839,6 +876,7 @@ export function FloorViewer({
         line.setAttribute('y1', `${fallback.y1}`)
         line.setAttribute('x2', `${fallback.x2}`)
         line.setAttribute('y2', `${fallback.y2}`)
+        positionRouteLabel(label, routeKey, fallback.x1, fallback.y1, fallback.x2, fallback.y2)
         continue
       }
       line.style.opacity = ''
@@ -846,11 +884,17 @@ export function FloorViewer({
       line.setAttribute('y1', `${fromPt.y}`)
       line.setAttribute('x2', `${toPt.x}`)
       line.setAttribute('y2', `${toPt.y}`)
+      positionRouteLabel(label, routeKey, fromPt.x, fromPt.y, toPt.x, toPt.y)
     }
 
-    if (projectionFailures !== routeProjectionStatus.failed || routeLines.size !== routeProjectionStatus.total) {
-      setRouteProjectionStatus({ failed: projectionFailures, total: routeLines.size })
+    if (projectionFailures !== routeProjectionStatusRef.current.failed || routeLines.size !== routeProjectionStatusRef.current.total) {
+      updateRouteProjectionStatus({ failed: projectionFailures, total: routeLines.size })
     }
+  }
+
+  function updateRouteProjectionStatus(next: { failed: number; total: number }) {
+    routeProjectionStatusRef.current = next
+    setRouteProjectionStatus(next)
   }
 
   function positionOverlayMarker(el: HTMLDivElement, x: number, y: number, z: number) {
@@ -882,6 +926,44 @@ export function FloorViewer({
   }
 }
 
+
+function buildRoutePreviewLabel(segment: SanitaryFixtureRoute['segments'][number]): string {
+  const diameter = segment.diameterMm ?? segment.pipeDiameterMm
+  const slope = typeof segment.slopePercent === 'number' ? `${segment.slopePercent.toFixed(1)}%` : '2.0%'
+  return `Ø${diameter} ${slope}`
+}
+
+function positionRouteLabel(
+  label: SVGTextElement | undefined,
+  routeKey: string,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+) {
+  if (!label) return
+
+  const dx = x2 - x1
+  const dy = y2 - y1
+  const length = Math.hypot(dx, dy) || 1
+  const normal = { x: -dy / length, y: dx / length }
+  const stagger = (stableHash(routeKey) % 5) - 2
+  const offset = 10 + Math.abs(stagger) * 4
+  const side = stagger < 0 ? -1 : 1
+
+  label.setAttribute('x', `${(x1 + x2) / 2 + normal.x * offset * side}`)
+  label.setAttribute('y', `${(y1 + y2) / 2 + normal.y * offset * side}`)
+  label.style.opacity = '1'
+}
+
+function stableHash(value: string): number {
+  let hash = 0
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) - hash) + value.charCodeAt(index)
+    hash |= 0
+  }
+  return Math.abs(hash)
+}
 
 function projectOverlayPointOnPlan(
   world: THREE.Vector3,

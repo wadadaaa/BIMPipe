@@ -107,7 +107,7 @@ function makeApi(rels: RelLine[], fixtureLines: FixtureLine[], aggregateRels: Ag
         PredefinedType: fixture.predefinedType !== null ? { value: fixture.predefinedType } : null,
       }
     }),
-    GetFlatMesh: vi.fn((_modelId: number, _expressId: number) => ({
+    GetFlatMesh: vi.fn((_: number, _expressId: number) => ({
       geometries: {
         size: () => 1,
         get: () => {
@@ -120,12 +120,12 @@ function makeApi(rels: RelLine[], fixtureLines: FixtureLine[], aggregateRels: Ag
         },
       },
     })),
-    GetGeometry: vi.fn((_modelId: number, _geomExpressId: number) => ({
+    GetGeometry: vi.fn(() => ({
       GetVertexData: () => 0,
       GetVertexDataSize: () => UNIT_BOX_VERTS.length,
       delete: vi.fn(),
     })),
-    GetVertexArray: vi.fn((_ptr: number, _size: number) => UNIT_BOX_VERTS),
+    GetVertexArray: vi.fn(() => UNIT_BOX_VERTS),
   } as unknown as IfcAPI
 }
 
@@ -188,7 +188,7 @@ describe('detectFixtures', () => {
   })
 
   it('maps all known predefined types correctly', async () => {
-    const kinds = ['BATH', 'SINK', 'TOILETPAN', 'URINAL', 'WASHHANDBASIN', 'CISTERN', 'BIDET'] as const
+    const kinds = ['BATH', 'SINK', 'TOILETPAN', 'URINAL', 'WASHHANDBASIN', 'SHOWER', 'FLOORDRAIN', 'FLOORTRAP', 'CISTERN', 'BIDET'] as const
     const fixtures = kinds.map((kind, i) => asSanitary(i + 1, kind, kind))
     const api = makeApi(
       [{ relatingStoreyId: 1, elementIds: fixtures.map((f) => f.id) }],
@@ -226,13 +226,13 @@ describe('detectFixtures', () => {
     expect(result[0].kind).toBe('TOILETPAN')
   })
 
-  it('excludes typed shower terminals from IFC fixture detection', async () => {
+  it('includes typed shower terminals for sanitary routing', async () => {
     const api = makeApi(
       [{ relatingStoreyId: 1, elementIds: [12] }],
       [asSanitary(12, 'Shower-01', 'SHOWER')],
     )
     const result = await detectFixtures(api, 0, 1)
-    expect(result).toEqual([])
+    expect(result[0]).toMatchObject({ expressId: 12, kind: 'SHOWER' })
   })
 
   it('falls back to a placeholder name when Name is null', async () => {
@@ -288,6 +288,9 @@ describe('detectFixtures', () => {
       ['Urinal', 'URINAL'],
       ['Bidet', 'BIDET'],
       ['Cistern', 'CISTERN'],
+      ['Shower tray', 'SHOWER'],
+      ['Floor drain', 'FLOORDRAIN'],
+      ['Floor trap', 'FLOORTRAP'],
     ]
     for (const [name, expectedKind] of cases) {
       const api = makeApi(
@@ -299,13 +302,22 @@ describe('detectFixtures', () => {
     }
   })
 
-  it('excludes shower keywords from proxy fixture detection', async () => {
+  it('includes shower keywords from proxy fixture detection', async () => {
     const api = makeApi(
       [{ relatingStoreyId: 1, elementIds: [304] }],
       [asProxy(304, 'Shower tray')],
     )
     const result = await detectFixtures(api, 0, 1)
-    expect(result).toEqual([])
+    expect(result[0]).toMatchObject({ expressId: 304, kind: 'SHOWER' })
+  })
+
+  it('includes Hebrew shower labels for sanitary routing', async () => {
+    const api = makeApi(
+      [{ relatingStoreyId: 1, elementIds: [305] }],
+      [asProxy(305, 'אגנית מקלחת')],
+    )
+    const result = await detectFixtures(api, 0, 1)
+    expect(result[0]).toMatchObject({ expressId: 305, kind: 'SHOWER' })
   })
 
   it('includes IFCFURNISHINGELEMENT when its metadata matches a plumbing keyword', async () => {

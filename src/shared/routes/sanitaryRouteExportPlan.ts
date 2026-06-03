@@ -88,7 +88,7 @@ export function segmentEndpointElevationsSourceUnits(
 function segmentGeometryKey(segment: RouteSegment, riserId: string): string {
   const from = coordKey(segment.from)
   const to = coordKey(segment.to)
-  return `${riserId}|${from}->${to}|${segment.kind}|${segment.pipeDiameterMm}`
+  return `${riserId}|${segment.routeGroupId ?? 'ungrouped'}|${from}->${to}|${segment.routeRole ?? segment.kind}|${segment.pipeDiameterMm}`
 }
 
 function coordKey(point: { x: number; y: number; z: number }): string {
@@ -105,11 +105,20 @@ function buildSegmentLabel(
   stackLabel: string,
 ): string {
   const diameter = segment.pipeDiameterMm
-  const role = segment.kind === 'branch' ? 'Branch' : 'Main'
+  const role = segmentLabelRole(segment.routeRole ?? segment.kind)
   const fixture = route.fixtureName.trim() || `#${route.fixtureExpressId}`
-  return `BIMPipe ${role} ${diameter}mm ${fixture} -> ${stackLabel}`
+  const diameterLabel = `Ø${diameter}`
+  return `${segment.labelIntent ?? `BIMPipe ${role} ${diameterLabel}`} ${fixture} to ${stackLabel}`
 }
 
 export function diameterLabel(diameterMm: SanitaryPipeDiameterMm): string {
   return `PVC ${diameterMm}`
+}
+
+function segmentLabelRole(role: string): string {
+  if (role === 'fixtureBranch' || role === 'branch') return 'Branch'
+  if (role === 'toiletRoute') return 'Toilet'
+  if (role === 'riserConnection') return 'Riser Connection'
+  if (role === 'transition') return 'Transition'
+  return 'Main'
 }

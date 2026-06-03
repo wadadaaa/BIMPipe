@@ -143,7 +143,7 @@ export function writeSanitaryRouteElements(
     } else {
       typeGroups.set(groupKey, {
         diameter: exportSegment.segment.pipeDiameterMm,
-        kind: exportSegment.segment.kind,
+        kind: exportSegment.segment.routeRole ?? exportSegment.segment.kind,
         stackLabel: exportSegment.riserStackLabel,
         exportSegment,
         ownerHistory: storeyContext.ownerHistory,
@@ -385,7 +385,8 @@ function writeSlopedPipeSegment(
 
   const diameter = exportSegment.segment.pipeDiameterMm
   const routeElementType = schema === 'IFC2X3' ? IFCFLOWSEGMENT : IFCPIPESEGMENT
-  const tag = `${exportSegment.riserStackLabel}-${diameter}-${exportSegment.segment.kind}`
+  const routeRole = exportSegment.segment.routeRole ?? exportSegment.segment.kind
+  const tag = `${exportSegment.riserStackLabel}-${diameter}-${routeRole}`
 
   const routeElement = writeLabeledLine(api, modelId, 'sanitary route element', {
     expressID: -1,
@@ -396,7 +397,7 @@ function writeSlopedPipeSegment(
     Description: api.CreateIfcType(
       modelId,
       IFCLABEL,
-      `Sanitary ${exportSegment.segment.kind} route; ${(exportSegment.slope * 100).toFixed(1)}% slope toward riser.`,
+      `Sanitary ${routeRole} route; ${(exportSegment.slope * 100).toFixed(1)}% slope toward riser.`,
     ),
     ObjectType: api.CreateIfcType(modelId, IFCLABEL, 'BIMPipeSanitaryRoute'),
     ObjectPlacement: handleRef(localPlacement.expressID),
@@ -429,7 +430,7 @@ type RouteTypeGroup = {
 }
 
 function routeTypeGroupKey(exportSegment: SanitaryExportSegment): string {
-  return `${exportSegment.segment.pipeDiameterMm}|${exportSegment.segment.kind}|${exportSegment.riserStackLabel}`
+  return `${exportSegment.segment.pipeDiameterMm}|${exportSegment.segment.routeRole ?? exportSegment.segment.kind}|${exportSegment.riserStackLabel}`
 }
 
 // One shared PVC material is associated with every exported route element so Revit's
@@ -568,7 +569,32 @@ function writeRouteOccurrencePset(
   millimetresPerSourceUnit: number,
 ): void {
   const properties = [
+    writePropertySingleValue(api, ifc, modelId, 'System', api.GetTypeCodeFromName('IFCLABEL'), 'BIMPipe Sanitary Routes'),
     writePropertySingleValue(api, ifc, modelId, 'SystemType', api.GetTypeCodeFromName('IFCLABEL'), 'SANITARY'),
+    writePropertySingleValue(
+      api,
+      ifc,
+      modelId,
+      'RouteRole',
+      api.GetTypeCodeFromName('IFCLABEL'),
+      exportSegment.segment.routeRole ?? exportSegment.segment.kind,
+    ),
+    writePropertySingleValue(
+      api,
+      ifc,
+      modelId,
+      'RouteGroupId',
+      api.GetTypeCodeFromName('IFCLABEL'),
+      exportSegment.segment.routeGroupId ?? '',
+    ),
+    writePropertySingleValue(
+      api,
+      ifc,
+      modelId,
+      'TargetRiserId',
+      api.GetTypeCodeFromName('IFCLABEL'),
+      exportSegment.segment.targetRiserId ?? exportSegment.riserId,
+    ),
     writePropertySingleValue(
       api,
       ifc,
@@ -576,6 +602,14 @@ function writeRouteOccurrencePset(
       'Slope',
       api.GetTypeCodeFromName('IFCREAL'),
       exportSegment.slope,
+    ),
+    writePropertySingleValue(
+      api,
+      ifc,
+      modelId,
+      'SlopePercent',
+      api.GetTypeCodeFromName('IFCREAL'),
+      exportSegment.segment.slopePercent ?? exportSegment.slope * 100,
     ),
     writePropertySingleValue(
       api,
@@ -592,6 +626,30 @@ function writeRouteOccurrencePset(
       'NominalDiameter',
       api.GetTypeCodeFromName('IFCPOSITIVELENGTHMEASURE'),
       exportSegment.segment.pipeDiameterMm / millimetresPerSourceUnit,
+    ),
+    writePropertySingleValue(
+      api,
+      ifc,
+      modelId,
+      'DiameterMm',
+      api.GetTypeCodeFromName('IFCREAL'),
+      exportSegment.segment.diameterMm ?? exportSegment.segment.pipeDiameterMm,
+    ),
+    writePropertySingleValue(
+      api,
+      ifc,
+      modelId,
+      'SourceFixtureId',
+      api.GetTypeCodeFromName('IFCLABEL'),
+      String(exportSegment.segment.sourceFixtureId ?? exportSegment.fixtureExpressIds[0] ?? ''),
+    ),
+    writePropertySingleValue(
+      api,
+      ifc,
+      modelId,
+      'SourceFixtureType',
+      api.GetTypeCodeFromName('IFCLABEL'),
+      exportSegment.segment.sourceFixtureType ?? '',
     ),
   ]
   const pset = writePropertySet(api, ifc, modelId, ownerHistory, 'Pset_FlowSegmentOccurrence', properties)

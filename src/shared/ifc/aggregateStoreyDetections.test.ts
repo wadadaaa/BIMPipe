@@ -8,7 +8,7 @@ function storey(id: number, name: string, elevation: number): Storey {
 }
 
 describe('aggregateStoreyDetections', () => {
-  it('aggregates toilets and kitchens across all floors and marks eligibility', async () => {
+  it('aggregates sanitary fixtures and kitchens across all floors and marks eligibility', async () => {
     const storeys: Storey[] = [
       storey(1, 'Basement B1', -3),
       storey(2, 'Level 1', 0),
@@ -41,9 +41,12 @@ describe('aggregateStoreyDetections', () => {
       },
     )
 
-    expect(result.fixturesByStoreyId[2]).toHaveLength(1)
-    expect(result.fixturesByStoreyId[2][0].kind).toBe('TOILETPAN')
+    expect(result.fixturesByStoreyId[2]).toHaveLength(2)
+    expect(result.fixturesByStoreyId[2].map((fixture) => fixture.kind)).toEqual(['TOILETPAN', 'SINK'])
     expect(result.kitchensByStoreyId[4]).toHaveLength(1)
+
+    const levelOne = result.floors.find((entry) => entry.storeyId === 2)
+    expect(levelOne).toMatchObject({ fixtureCount: 2, toiletCount: 1, kitchenCount: 1 })
 
     expect(result.floors.map((entry) => [entry.storeyId, entry.floorClass, entry.eligibleForNewRisers])).toEqual([
       [1, 'basement', false],

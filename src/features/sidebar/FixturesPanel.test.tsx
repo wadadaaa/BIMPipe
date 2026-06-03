@@ -17,15 +17,15 @@ function makeFixture(overrides: Partial<Fixture> = {}): Fixture {
 describe('FixturesPanel', () => {
   it('shows a loading indicator while detecting', () => {
     render(<FixturesPanel fixtures={[]} isLoading={true} />)
-    expect(screen.getByText(/finding toilets/i)).toBeInTheDocument()
+    expect(screen.getByText(/finding sanitary fixtures/i)).toBeInTheDocument()
   })
 
-  it('shows the empty state when no toilets are found', () => {
+  it('shows the empty state when no sanitary fixtures are found', () => {
     render(<FixturesPanel fixtures={[]} isLoading={false} />)
-    expect(screen.getByText(/no toilets were detected/i)).toBeInTheDocument()
+    expect(screen.getByText(/no sanitary fixtures were detected/i)).toBeInTheDocument()
   })
 
-  it('renders the detected toilet list and count', () => {
+  it('renders the detected sanitary fixture list and count', () => {
     render(
       <FixturesPanel
         fixtures={[
@@ -38,11 +38,11 @@ describe('FixturesPanel', () => {
 
     expect(screen.getByText('WC-01')).toBeInTheDocument()
     expect(screen.getByText('WC-02')).toBeInTheDocument()
-    expect(screen.getByText('Toilets')).toBeInTheDocument()
+    expect(screen.getByText('Sanitary fixtures')).toBeInTheDocument()
     expect(screen.getAllByText('2').length).toBeGreaterThan(0)
   })
 
-  it('shows when a detected toilet has no plan point', () => {
+  it('shows when a detected sanitary fixture has no plan point', () => {
     render(
       <FixturesPanel
         fixtures={[makeFixture({ expressId: 1, position: null })]}

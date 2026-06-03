@@ -68,10 +68,12 @@ export function getIfcElementPosition(
 
 const KNOWN_KINDS = new Set<string>([
   'BATH', 'SINK', 'TOILETPAN', 'URINAL',
-  'WASHHANDBASIN', 'CISTERN', 'BIDET',
+  'WASHHANDBASIN', 'SHOWER', 'FLOORDRAIN', 'FLOORTRAP', 'CISTERN', 'BIDET',
 ])
 
-const EXCLUDED_FIXTURE_PATTERN = /shower|מקלח(?:ת|ון)|אגנית/i
+// BIM-58 treats showers, shower trays, floor drains, and floor traps as routeable
+// sanitary fixtures. Keep this list empty by default and add only proven false positives.
+const EXCLUDED_FIXTURE_PATTERNS: RegExp[] = []
 const KITCHEN_PATTERN = /kitchen(?:ette)?|מטבח/i
 const EXPLICIT_WASH_BASIN_PATTERN = /wash.?hand.?basin|washbasin|hand.?basin|lavatory|כיור\s*רחצה/i
 
@@ -89,6 +91,9 @@ const KEYWORD_MATCHERS: Array<[RegExp, FixtureKind]> = [
   [/wash.?hand.?basin|washbasin|hand.?basin|lavatory|כיור\s*רחצה|כיור/i, 'WASHHANDBASIN'],
   [/\bsink\b|kitchen sink/i, 'SINK'],
   [/\bbath(?!room)|bathtub|אמבט(?:יה)?/i, 'BATH'],
+  [/shower|מקלח(?:ת|ון)|אגנית/i, 'SHOWER'],
+  [/floor.?drain|drainage.?point|FD\b|נקז/i, 'FLOORDRAIN'],
+  [/floor.?trap|trap.?floor|FT\b|מחסום/i, 'FLOORTRAP'],
   [/urinal|משתנה/i, 'URINAL'],
   [/bidet|בידה/i, 'BIDET'],
   [/cistern|flush tank|ניאגר/i, 'CISTERN'],
@@ -102,7 +107,7 @@ export function inferFixtureKindFromText(text: string): FixtureKind | null {
 }
 
 export function isExcludedFixtureText(text: string): boolean {
-  return EXCLUDED_FIXTURE_PATTERN.test(text)
+  return EXCLUDED_FIXTURE_PATTERNS.some((pattern) => pattern.test(text))
 }
 
 function isKitchenText(text: string): boolean {

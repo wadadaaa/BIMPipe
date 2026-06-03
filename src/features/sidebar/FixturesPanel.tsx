@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Fixture } from '@/domain/types'
 import './FixturesPanel.css'
 
@@ -18,11 +18,24 @@ export function FixturesPanel({
   onPlaceRisers,
 }: FixturesPanelProps) {
   const [isFiring, setIsFiring] = useState(false)
+  const firingTimeoutRef = useRef<number | null>(null)
+
+  useEffect(() => () => {
+    if (firingTimeoutRef.current !== null) {
+      window.clearTimeout(firingTimeoutRef.current)
+    }
+  }, [])
 
   function handlePlaceRisers() {
     if (!onPlaceRisers || !canPlaceRisers) return
+    if (firingTimeoutRef.current !== null) {
+      window.clearTimeout(firingTimeoutRef.current)
+    }
     setIsFiring(true)
-    window.setTimeout(() => setIsFiring(false), 550)
+    firingTimeoutRef.current = window.setTimeout(() => {
+      setIsFiring(false)
+      firingTimeoutRef.current = null
+    }, 550)
     onPlaceRisers()
   }
 
@@ -31,7 +44,7 @@ export function FixturesPanel({
       <div className="fixtures-panel">
         <div className="fixtures-panel__loading">
           <span className="fixtures-panel__loading-dot" />
-          Finding toilets...
+          Finding sanitary fixtures...
         </div>
       </div>
     )
@@ -40,8 +53,8 @@ export function FixturesPanel({
   if (fixtures.length === 0) {
     return (
       <div className="fixtures-panel__empty">
-        <span className="fixtures-panel__empty-icon">WC</span>
-        <p>No toilets were detected on this floor.</p>
+        <span className="fixtures-panel__empty-icon">FX</span>
+        <p>No sanitary fixtures were detected on this floor.</p>
       </div>
     )
   }
@@ -97,7 +110,7 @@ export function FixturesPanel({
               {canPlaceRisers
                 ? hasRisers
                   ? 'Replace auto risers using the latest detection'
-                  : 'Auto-place one riser per toilet and outer kitchen corner'
+                  : 'Auto-place risers from sanitary fixtures and outer kitchen corners'
                 : 'No fixtures with plan coordinates yet'}
             </span>
           </span>
@@ -120,7 +133,7 @@ export function FixturesPanel({
 
       <div className="fixtures-panel__group">
         <div className="fixtures-panel__group-header">
-          <span className="fixtures-panel__group-label">Toilets</span>
+          <span className="fixtures-panel__group-label">Sanitary fixtures</span>
           <span className="fixtures-panel__group-count">{fixtures.length}</span>
         </div>
         <ul className="fixtures-panel__list">

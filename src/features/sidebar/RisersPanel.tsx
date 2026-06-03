@@ -55,7 +55,7 @@ export function RisersPanel({
           disabled={!canSuggest}
           title={
             canSuggest
-              ? 'Auto-place one riser per toilet and one outer-corner riser per kitchen.'
+              ? 'Auto-place risers from sanitary fixture groups and outer kitchen corners.'
               : 'Open a floor with fixtures or kitchens first'
           }
         >
@@ -103,7 +103,7 @@ export function RisersPanel({
               <path d="M12 8v4l2.5 2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </span>
-          <p>No risers placed yet. Use Suggest to generate one riser per toilet and one per kitchen, or place them manually.</p>
+          <p>No risers placed yet. Use Suggest to generate risers for sanitary fixture groups and kitchens, or place them manually.</p>
         </div>
       ) : (
         <div className="risers-panel__list">
