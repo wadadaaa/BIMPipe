@@ -261,7 +261,10 @@ describe('WorkspacePage', () => {
       anchorClick.mock.contexts.map((link) => (link as HTMLAnchorElement).download),
     ).toEqual(['tower-2-full.ifc', 'tower-2-full-riser-mapping.json'])
 
-    const downloadedDebugBlob = (URL.createObjectURL as ReturnType<typeof vi.fn>).mock.calls[1][0] as Blob
+    const downloadedFileNames = anchorClick.mock.contexts.map((link) => (link as HTMLAnchorElement).download)
+    const debugDownloadIndex = downloadedFileNames.indexOf('tower-2-full-riser-mapping.json')
+    expect(debugDownloadIndex).toBeGreaterThanOrEqual(0)
+    const downloadedDebugBlob = (URL.createObjectURL as ReturnType<typeof vi.fn>).mock.calls[debugDownloadIndex][0] as Blob
     const downloadedDebugJson = JSON.parse(await downloadedDebugBlob.text()) as {
       sanitaryRouteDebugGroups?: Array<{
         routeGroupId: string
@@ -272,6 +275,7 @@ describe('WorkspacePage', () => {
         skippedFixtureIds: number[]
         fallbackReasons: string[]
       }>
+      sanitaryRouteLimitations?: string[]
     }
     expect(downloadedDebugJson.sanitaryRouteDebugGroups).toEqual(
       expect.arrayContaining([
@@ -285,6 +289,9 @@ describe('WorkspacePage', () => {
         }),
       ]),
     )
+    expect(downloadedDebugJson.sanitaryRouteLimitations).toEqual([
+      ...new Set(downloadedDebugJson.sanitaryRouteLimitations ?? []),
+    ])
   })
 
   it('does not auto-open negative floor labels like קומה -2 when there is no above-ground floor 2', async () => {

@@ -474,10 +474,9 @@ export function WorkspacePage({
             sanitaryRoutingPlanForExport.debugGroups.length > 0
               ? sanitaryRoutingPlanForExport.debugGroups
               : sanitaryRoutingPreview.debugGroups,
-          sanitaryRouteLimitations: [
-            ...sanitaryRoutingPlanForExport.limitations,
-            ...sanitaryRoutingPreview.limitations,
-          ],
+          sanitaryRouteLimitations: Array.from(
+            new Set([...sanitaryRoutingPlanForExport.limitations, ...sanitaryRoutingPreview.limitations]),
+          ),
         },
         buildExportDebugFileName(modelFileName, selectedStorey?.name ?? null),
       )

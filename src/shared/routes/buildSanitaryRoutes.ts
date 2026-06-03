@@ -14,7 +14,7 @@ export const MIN_SANITARY_SEGMENT_PLAN_LENGTH = 1e-6
 // ADAM_10 does not currently expose room boundary polygons to this planner. Viewer coordinates are
 // model/source coordinates normalized into the floor viewer; for ADAM_10 this threshold is roughly
 // room-scale in plan view, not millimetres/metres. A candidate fixture must be within this distance
-// of an existing member AND keep the group's maximum pairwise diameter within the same cap. That
+// of every existing member, keeping the group's maximum pairwise diameter within the same cap. That
 // bounded-diameter check prevents greedy single-linkage chains (A-B-C) from merging distant zones.
 const SERVICE_ZONE_GROUP_DISTANCE = 18
 
@@ -400,6 +400,8 @@ function roleLabel(routeRole: SanitaryRouteRole): string {
 }
 
 function centroid(fixtures: Fixture[]): { x: number; y: number; z: number } {
+  if (fixtures.length === 0) throw new Error('centroid: empty fixture list')
+
   const total = fixtures.reduce(
     (acc, fixture) => ({
       x: acc.x + fixture.position!.x,
