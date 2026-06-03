@@ -16,7 +16,10 @@ export const MIN_SANITARY_SEGMENT_PLAN_LENGTH = 1e-6
 // room-scale in plan view, not millimetres/metres. A candidate fixture must be within this distance
 // of every existing member, keeping the group's maximum pairwise diameter within the same cap. That
 // bounded-diameter check prevents greedy single-linkage chains (A-B-C) from merging distant zones.
+// If demo sanitary routing is enabled for another model, expose a limitation instead of silently
+// treating this ADAM_10-calibrated viewer-coordinate distance as a production room-boundary rule.
 const SERVICE_ZONE_GROUP_DISTANCE = 18
+const SERVICE_ZONE_DISTANCE_MODEL_HINT = 'ADAM_10'
 
 export type SanitaryPipeDiameterMm = 50 | 63 | 110
 export type SanitaryRouteRole = 'toiletRoute' | 'collectionMain' | 'fixtureBranch'
@@ -186,6 +189,11 @@ export function buildSanitaryRoutingDemoPlan(
     .map((fixture) => fixture.kind)
 
   const limitations: string[] = []
+  if (!isServiceZoneDistanceCalibratedForModel(config.model.fileName)) {
+    limitations.push(
+      `Sanitary service-zone grouping uses an ${SERVICE_ZONE_DISTANCE_MODEL_HINT}-calibrated viewer-coordinate distance; verify grouping before using this demo heuristic with ${config.model.fileName}.`,
+    )
+  }
   if (unsupportedKinds.length > 0) {
     limitations.push(`Unsupported fixture kinds skipped: ${Array.from(new Set(unsupportedKinds)).join(', ')}.`)
   }
@@ -237,6 +245,16 @@ function buildServiceZoneGroups(fixtures: Fixture[]): ServiceZoneGroup[] {
   }
 
   return groups
+}
+
+function isServiceZoneDistanceCalibratedForModel(fileName: string): boolean {
+  const normalizedBaseName = fileName
+    .split(/[\\/]/)
+    .pop()!
+    .replace(/\.[^.]+$/, '')
+    .trim()
+    .toLowerCase()
+  return normalizedBaseName === SERVICE_ZONE_DISTANCE_MODEL_HINT.toLowerCase()
 }
 
 function canAddFixtureToServiceZone(members: Fixture[], fixture: Fixture): boolean {

@@ -224,6 +224,28 @@ describe('buildSanitaryRoutingDemoPlan', () => {
     expect(plan.limitations[0]).toContain('Unsupported fixture kinds skipped: URINAL')
   })
 
+  it('warns when the ADAM_10-calibrated service-zone distance is used for another demo model', () => {
+    const plan = buildSanitaryRoutingDemoPlan([fixture({ expressId: 601 })], [riser('R1', 10, 0)], {
+      ...demoConfig,
+      model: { ...demoConfig.model, fileName: 'OTHER_MODEL.ifc' },
+    })
+
+    expect(plan.limitations).toContain(
+      'Sanitary service-zone grouping uses an ADAM_10-calibrated viewer-coordinate distance; verify grouping before using this demo heuristic with OTHER_MODEL.ifc.',
+    )
+  })
+
+  it('does not treat arbitrary filenames containing ADAM_10 as the calibrated demo model', () => {
+    const plan = buildSanitaryRoutingDemoPlan([fixture({ expressId: 602 })], [riser('R1', 10, 0)], {
+      ...demoConfig,
+      model: { ...demoConfig.model, fileName: 'NOT_ADAM_10.ifc' },
+    })
+
+    expect(plan.limitations).toContain(
+      'Sanitary service-zone grouping uses an ADAM_10-calibrated viewer-coordinate distance; verify grouping before using this demo heuristic with NOT_ADAM_10.ifc.',
+    )
+  })
+
   it('does not duplicate routes when unsupported fixtures occupy other storeys', () => {
     const plan = buildSanitaryRoutingDemoPlan(
       [
