@@ -111,7 +111,7 @@ export function decideRiserStrategyPerToiletRoom(
           const penthouseExceptionRule = exceptionRule ?? primaryExceptionRule
 
           if (penthouseExceptionRule) {
-            const penthouseReason = penthouseExceptionRule.reason
+              ? `inherits exception coverage from primary member: ${penthouseExceptionRule.reason}`
               ? penthouseExceptionRule.reason
               : `penthouse is served by exception rule ${penthouseExceptionRule.ruleId}`
             reasons.push(penthouseReason)
