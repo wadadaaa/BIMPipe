@@ -56,7 +56,7 @@ export async function aggregateStoreyDetections(
       services.detectKitchens(api, webIfcModelId, storey.id),
     ])
 
-    fixturesByStoreyId[storey.id] = fixtures.filter((fixture) => fixture.kind === 'TOILETPAN')
+    fixturesByStoreyId[storey.id] = fixtures
     kitchensByStoreyId[storey.id] = kitchens
   }
 
@@ -65,7 +65,7 @@ export async function aggregateStoreyDetections(
     const floorClass = classification?.class ?? 'standard'
     const fixtures = fixturesByStoreyId[storey.id] ?? []
     const kitchens = kitchensByStoreyId[storey.id] ?? []
-    const toiletCount = fixtures.length
+    const toiletCount = fixtures.filter((fixture) => fixture.kind === 'TOILETPAN').length
     const eligibleForNewRisers = isEligibleForNewRisers(floorClass, profile)
 
     return {
