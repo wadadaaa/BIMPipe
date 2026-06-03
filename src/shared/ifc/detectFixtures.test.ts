@@ -120,12 +120,12 @@ function makeApi(rels: RelLine[], fixtureLines: FixtureLine[], aggregateRels: Ag
         },
       },
     })),
-    GetGeometry: vi.fn((_modelId: number, _geomExpressId: number) => ({
+    GetGeometry: vi.fn(() => ({
       GetVertexData: () => 0,
       GetVertexDataSize: () => UNIT_BOX_VERTS.length,
       delete: vi.fn(),
     })),
-    GetVertexArray: vi.fn((_ptr: number, _size: number) => UNIT_BOX_VERTS),
+    GetVertexArray: vi.fn(() => UNIT_BOX_VERTS),
   } as unknown as IfcAPI
 }
 

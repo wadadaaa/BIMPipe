@@ -38,6 +38,22 @@ vi.mock('@/shared/ifc/exportFullIfcWithRisers', () => ({
   exportFullIfcWithRisersWithDebug: mocks.exportFullIfcWithRisersWithDebug,
 }))
 
+vi.mock('@/shared/demoConfig', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/shared/demoConfig')>()
+  return {
+    ...actual,
+    getDemoRuntimeConfig: () => ({
+      enabled: true as const,
+      config: {
+        name: 'ADAM_10 test demo',
+        model: { fileName: 'tower.ifc', schema: 'IFC2X3', source: 'test', assetPath: 'test' },
+        scope: { includedFloors: ['קומה 2'], excludedFloors: [] },
+        routing: { mode: 'demo' as const, allowManualRiserSelection: true },
+      },
+    }),
+  }
+})
+
 vi.mock('@/viewer/FloorViewer', () => ({
   FloorViewer: ({
     fixtures,
@@ -244,6 +260,31 @@ describe('WorkspacePage', () => {
     expect(
       anchorClick.mock.contexts.map((link) => (link as HTMLAnchorElement).download),
     ).toEqual(['tower-2-full.ifc', 'tower-2-full-riser-mapping.json'])
+
+    const downloadedDebugBlob = (URL.createObjectURL as ReturnType<typeof vi.fn>).mock.calls[1][0] as Blob
+    const downloadedDebugJson = JSON.parse(await downloadedDebugBlob.text()) as {
+      sanitaryRouteDebugGroups?: Array<{
+        routeGroupId: string
+        targetRiserId: string
+        selectedMain?: unknown
+        branchCount: number
+        diameters: number[]
+        skippedFixtureIds: number[]
+        fallbackReasons: string[]
+      }>
+    }
+    expect(downloadedDebugJson.sanitaryRouteDebugGroups).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          routeGroupId: expect.any(String),
+          targetRiserId: expect.any(String),
+          branchCount: expect.any(Number),
+          diameters: expect.any(Array),
+          skippedFixtureIds: expect.any(Array),
+          fallbackReasons: expect.any(Array),
+        }),
+      ]),
+    )
   })
 
   it('does not auto-open negative floor labels like קומה -2 when there is no above-ground floor 2', async () => {

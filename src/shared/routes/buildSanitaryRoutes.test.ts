@@ -58,46 +58,47 @@ describe('buildSanitaryRoutingDemoPlan', () => {
     expect(sink).toMatchObject({ pipeDiameterMm: 50, startHeightAboveFloorM: 0.15, slope: DEMO_SANITARY_SLOPE })
   })
 
-  it('uses 63mm collection main lines when grouped wet fixtures branch', () => {
+  it('generates one grouped service-zone layout with explicit roles, diameters, slope, and debug output', () => {
     const plan = buildSanitaryRoutingDemoPlan(
       [
-        fixture({ expressId: 601, kind: 'SINK', position: { x: 2, y: 0, z: 0 } }),
-        fixture({ expressId: 602, kind: 'BATH', position: { x: 8, y: 0, z: 0 } }),
+        fixture({ expressId: 101, kind: 'TOILETPAN', position: { x: 0, y: 0, z: 0 } }),
+        fixture({ expressId: 102, kind: 'SINK', position: { x: 2, y: 0, z: 4 } }),
+        fixture({ expressId: 103, kind: 'BATH', position: { x: 6, y: 0, z: 3 } }),
       ],
-      [riser('R1', 10, 0)],
+      [riser('R1', 10, 0), riser('R2', 100, 0)],
       demoConfig,
     )
 
-    const sink = plan.routes.find((route) => route.fixtureExpressId === 601)
-    const bath = plan.routes.find((route) => route.fixtureExpressId === 602)
-    expect(sink?.segments[0]).toMatchObject({ kind: 'main', pipeDiameterMm: 63 })
-    expect(bath?.segments[0]).toMatchObject({ kind: 'branch', pipeDiameterMm: 50 })
+    const allSegments = plan.routes.flatMap((route) => route.segments)
+    const toiletRoute = allSegments.find((segment) => segment.routeRole === 'toiletRoute')
+    const collectionMain = allSegments.find((segment) => segment.routeRole === 'collectionMain')
+    const fixtureBranch = allSegments.find((segment) => segment.routeRole === 'fixtureBranch')
+
+    expect(plan.debugGroups).toHaveLength(1)
+    expect(plan.debugGroups?.[0]).toMatchObject({ targetRiserId: 'R1', branchCount: 2 })
+    expect(toiletRoute).toMatchObject({ diameterMm: 110, slopePercent: 2, targetRiserId: 'R1' })
+    expect(collectionMain).toMatchObject({ diameterMm: 63, slopePercent: 2, targetRiserId: 'R1' })
+    expect(fixtureBranch).toMatchObject({ diameterMm: 50, slopePercent: 2, targetRiserId: 'R1' })
+    expect(fixtureBranch?.to).not.toEqual({ x: 10, y: 0, z: 0 })
+    expect(new Set(plan.routes.map((route) => route.routeGroupId))).toEqual(new Set(['storey-1-zone-1']))
   })
 
-  it('uses farthest fixture as main line and branches closer fixtures', () => {
+  it('keeps nearby fixtures grouped to one target riser instead of creating a cross-riser trunk', () => {
     const plan = buildSanitaryRoutingDemoPlan(
       [
-        fixture({ expressId: 101, position: { x: 0, y: 0, z: 0 } }),
-        fixture({ expressId: 102, position: { x: 6, y: 0, z: 0 } }),
+        fixture({ expressId: 201, kind: 'TOILETPAN', position: { x: 1, y: 0, z: 0 } }),
+        fixture({ expressId: 202, kind: 'SINK', position: { x: 4, y: 0, z: 3 } }),
       ],
-      [riser('R1', 10, 0)],
+      [riser('R1', 0, 0), riser('R2', 7, 3)],
       demoConfig,
     )
 
-    const far = plan.routes.find((route) => route.fixtureExpressId === 101)
-    const close = plan.routes.find((route) => route.fixtureExpressId === 102)
-
-    expect(far?.segments).toHaveLength(1)
-    expect(far?.segments[0].kind).toBe('main')
-    expect(close?.segments).toHaveLength(1)
-    expect(close?.segments[0].kind).toBe('branch')
-    // Both the main run and the branch run terminate at the riser position.
-    expect(far?.segments[0].to).toEqual({ x: 10, y: 0, z: 0 })
-    expect(close?.segments[0].to).toEqual({ x: 10, y: 0, z: 0 })
-    expect(plan.limitations).toContain('Branch fixtures are drawn as a single straight branch run to the riser in plan view for the demo.')
+    expect(new Set(plan.routes.map((route) => route.riserId))).toEqual(new Set(['R1']))
+    expect(plan.routes.flatMap((route) => route.segments).every((segment) => segment.targetRiserId === 'R1')).toBe(true)
+    expect(plan.debugGroups?.[0].targetRiserReason).toContain('service-zone')
   })
 
-  it('assigns fixtures to their nearest same-storey riser when multiple risers exist', () => {
+  it('assigns distant service zones to independent target risers', () => {
     const plan = buildSanitaryRoutingDemoPlan(
       [
         fixture({ expressId: 201, position: { x: 1, y: 0, z: 0 } }),
@@ -129,6 +130,21 @@ describe('buildSanitaryRoutingDemoPlan', () => {
       kind: 'main',
       pipeDiameterMm: 110,
     })
+
+    const targetsByGroup = new Map<string, Set<string>>()
+    for (const route of plan.routes) {
+      expect(route.routeGroupId).toBeDefined()
+      expect(route.targetRiserId).toBe(route.riserId)
+      const targets = targetsByGroup.get(route.routeGroupId!) ?? new Set<string>()
+      targets.add(route.targetRiserId!)
+      targetsByGroup.set(route.routeGroupId!, targets)
+      for (const segment of route.segments) {
+        expect(segment.routeGroupId).toBe(route.routeGroupId)
+        expect(segment.targetRiserId).toBe(route.targetRiserId)
+      }
+    }
+    expect([...targetsByGroup.values()].every((targets) => targets.size === 1)).toBe(true)
+    expect(new Set(plan.routes.map((route) => route.routeGroupId))).toHaveProperty('size', 3)
     expect(plan.limitations).toContain('Single-floor demo sanitary routes are duplicated across matching riser stack floors for IFC export.')
   })
 
@@ -232,9 +248,16 @@ describe('buildSanitaryRoutingDemoPlan', () => {
     )
 
     expect(plan.routes).toHaveLength(1)
-    expect(plan.routes[0].segments).toEqual([
-      { from: { x: 2, y: 0, z: 0 }, to: { x: 10, y: 0, z: 0 }, kind: 'main', pipeDiameterMm: 110 },
-    ])
+    expect(plan.routes[0].segments).toHaveLength(1)
+    expect(plan.routes[0].segments[0]).toMatchObject({
+      from: { x: 2, y: 0, z: 0 },
+      to: { x: 10, y: 0, z: 0 },
+      kind: 'main',
+      pipeDiameterMm: 110,
+      routeRole: 'toiletRoute',
+      diameterMm: 110,
+      slopePercent: 2,
+    })
     expect(plan.limitations).not.toContain('Branch fixtures are drawn as a single straight branch run to the riser in plan view for the demo.')
   })
 })

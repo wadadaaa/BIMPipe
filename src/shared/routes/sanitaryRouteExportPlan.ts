@@ -104,9 +104,17 @@ function buildSegmentLabel(
   segment: RouteSegment,
   stackLabel: string,
 ): string {
-  const diameter = segment.pipeDiameterMm
-  const role = segment.kind === 'branch' ? 'Branch' : 'Main'
   const fixture = route.fixtureName.trim() || `#${route.fixtureExpressId}`
+  const diameter = segment.diameterMm ?? segment.pipeDiameterMm
+  const role = segment.routeRole === 'fixtureBranch'
+    ? 'Branch'
+    : segment.routeRole === 'collectionMain'
+      ? 'Main'
+      : segment.routeRole === 'toiletRoute'
+        ? 'Toilet'
+        : segment.kind === 'branch'
+          ? 'Branch'
+          : 'Main'
   return `BIMPipe ${role} ${diameter}mm ${fixture} -> ${stackLabel}`
 }
 
