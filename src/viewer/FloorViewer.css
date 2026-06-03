@@ -223,6 +223,37 @@
   stroke-dasharray: 18 10;
 }
 
+.floor-viewer__route-line--toilet {
+  stroke: #3de0ff;
+  stroke-width: 5.4;
+  opacity: 1;
+  stroke-dasharray: none;
+}
+
+.floor-viewer__route-label {
+  paint-order: stroke;
+  stroke: rgba(4, 8, 14, 0.92);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+  fill: #eaffff;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-anchor: middle;
+  dominant-baseline: central;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.85));
+}
+
+.floor-viewer__route-label--fixture-branch {
+  fill: #ffe08a;
+}
+
+.floor-viewer__route-label--collection-main,
+.floor-viewer__route-label--toilet-route {
+  fill: #b9f2ff;
+}
+
 /* ── Fixture overlay ── */
 .floor-viewer__fixture-overlay {
   position: absolute;

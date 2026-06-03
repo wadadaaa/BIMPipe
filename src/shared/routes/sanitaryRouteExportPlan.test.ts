@@ -30,7 +30,7 @@ function riser(id: string, x: number, z: number, storeyId = 1): Riser {
 }
 
 describe('sanitaryRouteExportPlan', () => {
-  it('deduplicates shared main segments across fixtures on the same riser', () => {
+  it('preserves grouped toilet route segments for fixtures in the same service zone', () => {
     const plan = buildSanitaryRoutingDemoPlan(
       [
         fixture({ expressId: 101, position: { x: 0, y: 0, z: 0 } }),
@@ -41,28 +41,39 @@ describe('sanitaryRouteExportPlan', () => {
     )
 
     const segments = collectSanitaryExportSegments(plan.routes, [{ id: 1, elevation: 300 }], [riser('R1', 10, 0)])
-    const mainSegments = segments.filter((segment) => segment.segment.kind === 'main')
-    expect(mainSegments).toHaveLength(1)
-    expect(mainSegments[0].segment.pipeDiameterMm).toBe(110)
+    const toiletSegments = segments.filter((segment) => segment.segment.routeRole === 'toiletRoute')
+    expect(toiletSegments).toHaveLength(2)
+    expect(toiletSegments.every((segment) => segment.segment.diameterMm === 110)).toBe(true)
   })
 
   it('preserves 50mm branches and 63mm grouped mains for wet fixtures', () => {
     const plan = buildSanitaryRoutingDemoPlan(
       [
         fixture({ expressId: 201, kind: 'SINK', position: { x: 0, y: 0, z: 0 } }),
-        fixture({ expressId: 202, kind: 'BATH', position: { x: 8, y: 0, z: 0 } }),
+        fixture({ expressId: 202, kind: 'BATH', position: { x: 8, y: 0, z: 3 } }),
       ],
       [riser('R1', 10, 0)],
       demoConfig,
     )
 
     const segments = collectSanitaryExportSegments(plan.routes, [{ id: 1, elevation: 300 }], [riser('R1', 10, 0)])
-    expect(segments.some((segment) => segment.segment.kind === 'branch' && segment.segment.pipeDiameterMm === 50)).toBe(
-      true,
-    )
-    expect(segments.some((segment) => segment.segment.kind === 'main' && segment.segment.pipeDiameterMm === 63)).toBe(
-      true,
-    )
+    const branch = segments.find((segment) => segment.segment.routeRole === 'fixtureBranch')
+    const main = segments.find((segment) => segment.segment.routeRole === 'collectionMain')
+
+    expect(branch?.segment).toMatchObject({
+      routeRole: 'fixtureBranch',
+      diameterMm: 50,
+      slopePercent: 2,
+      targetRiserId: 'R1',
+      routeGroupId: 'storey-1-zone-1',
+    })
+    expect(main?.segment).toMatchObject({
+      routeRole: 'collectionMain',
+      diameterMm: 63,
+      slopePercent: 2,
+      targetRiserId: 'R1',
+      routeGroupId: 'storey-1-zone-1',
+    })
   })
 
   it('keeps coincident segments from different risers separate during export collection', () => {

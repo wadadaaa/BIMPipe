@@ -74,6 +74,7 @@ export function FloorViewer({
   const floorGroupRef = useRef<THREE.Group | null>(null)
   const projectionVecRef = useRef(new THREE.Vector3())
   const routeLineRefsRef = useRef<Map<string, SVGLineElement>>(new Map())
+  const routeLabelRefsRef = useRef<Map<string, SVGTextElement>>(new Map())
   const [routeProjectionStatus, setRouteProjectionStatus] = useState<{ failed: number; total: number }>({ failed: 0, total: 0 })
 
   // Fixture overlay: map of expressId → positioned div element
@@ -558,26 +559,48 @@ export function FloorViewer({
         <>
           <svg className="floor-viewer__route-overlay" aria-hidden="true">
             {sanitaryRoutes.flatMap((route) =>
-              route.segments.map((segment, index) => (
-                <line
-                  key={`${route.fixtureExpressId}-${segment.kind}-${index}`}
-                  ref={(el) => {
-                    const lineKey = `${route.fixtureExpressId}-${segment.kind}-${index}`
-                    if (el) routeLineRefsRef.current.set(lineKey, el)
-                    else routeLineRefsRef.current.delete(lineKey)
-                  }}
-                  className={[
-                    'floor-viewer__route-line',
-                    segment.kind === 'main' ? 'floor-viewer__route-line--main' : 'floor-viewer__route-line--branch',
-                  ].join(' ')}
-                  data-route-from-x={String(segment.from.x)}
-                  data-route-from-y={String(segment.from.y)}
-                  data-route-from-z={String(segment.from.z)}
-                  data-route-to-x={String(segment.to.x)}
-                  data-route-to-y={String(segment.to.y)}
-                  data-route-to-z={String(segment.to.z)}
-                />
-              )),
+              route.segments.map((segment, index) => {
+                const routeKey = `${route.fixtureExpressId}-${segment.routeRole}-${index}`
+                return (
+                  <g key={routeKey}>
+                    <line
+                      ref={(el) => {
+                        if (el) routeLineRefsRef.current.set(routeKey, el)
+                        else routeLineRefsRef.current.delete(routeKey)
+                      }}
+                      className={[
+                        'floor-viewer__route-line',
+                        routeLineClassName(segment.routeRole),
+                      ].join(' ')}
+                      data-route-from-x={String(segment.from.x)}
+                      data-route-from-y={String(segment.from.y)}
+                      data-route-from-z={String(segment.from.z)}
+                      data-route-to-x={String(segment.to.x)}
+                      data-route-to-y={String(segment.to.y)}
+                      data-route-to-z={String(segment.to.z)}
+                    />
+                    <text
+                      ref={(el) => {
+                        if (el) routeLabelRefsRef.current.set(routeKey, el)
+                        else routeLabelRefsRef.current.delete(routeKey)
+                      }}
+                      className={[
+                        'floor-viewer__route-label',
+                        routeLabelClassName(segment.routeRole),
+                      ].join(' ')}
+                      style={{ opacity: 0 }}
+                      data-route-from-x={String(segment.from.x)}
+                      data-route-from-y={String(segment.from.y)}
+                      data-route-from-z={String(segment.from.z)}
+                      data-route-to-x={String(segment.to.x)}
+                      data-route-to-y={String(segment.to.y)}
+                      data-route-to-z={String(segment.to.z)}
+                    >
+                      {segment.label}
+                    </text>
+                  </g>
+                )
+              }),
             )}
           </svg>
           {routeProjectionStatus.failed > 0 && (
@@ -808,16 +831,18 @@ export function FloorViewer({
     if (!canvas || !camera) return
 
     const routeLines = routeLineRefsRef.current
+    const routeLabels = routeLabelRefsRef.current
     if (routeLines.size === 0) {
       if (routeProjectionStatus.failed !== 0 || routeProjectionStatus.total !== 0) {
         setRouteProjectionStatus({ failed: 0, total: 0 })
       }
+      for (const [, label] of routeLabels) label.style.opacity = '0'
       return
     }
 
     let projectionFailures = 0
 
-    for (const [, line] of routeLines) {
+    for (const [key, line] of routeLines) {
       const from = new THREE.Vector3(
         parseFloat(line.dataset['routeFromX'] ?? '0'),
         parseFloat(line.dataset['routeFromY'] ?? '0'),
@@ -839,6 +864,12 @@ export function FloorViewer({
         line.setAttribute('y1', `${fallback.y1}`)
         line.setAttribute('x2', `${fallback.x2}`)
         line.setAttribute('y2', `${fallback.y2}`)
+        const label = routeLabels.get(key)
+        if (label) {
+          label.style.opacity = '0.75'
+          label.setAttribute('x', `${(fallback.x1 + fallback.x2) / 2}`)
+          label.setAttribute('y', `${(fallback.y1 + fallback.y2) / 2 - 8}`)
+        }
         continue
       }
       line.style.opacity = ''
@@ -846,6 +877,12 @@ export function FloorViewer({
       line.setAttribute('y1', `${fromPt.y}`)
       line.setAttribute('x2', `${toPt.x}`)
       line.setAttribute('y2', `${toPt.y}`)
+      const label = routeLabels.get(key)
+      if (label) {
+        label.style.opacity = ''
+        label.setAttribute('x', `${(fromPt.x + toPt.x) / 2}`)
+        label.setAttribute('y', `${(fromPt.y + toPt.y) / 2 - 10}`)
+      }
     }
 
     if (projectionFailures !== routeProjectionStatus.failed || routeLines.size !== routeProjectionStatus.total) {
@@ -879,6 +916,32 @@ export function FloorViewer({
     const sy = ((-vec.y + 1) / 2) * canvas.clientHeight
     el.style.opacity = '1'
     el.style.transform = `translate(${sx}px, ${sy}px) translate(-50%, -50%)`
+  }
+}
+
+function routeLineClassName(routeRole: SanitaryFixtureRoute['segments'][number]['routeRole']): string {
+  switch (routeRole) {
+    case 'fixtureBranch':
+      return 'floor-viewer__route-line--branch'
+    case 'collectionMain':
+      return 'floor-viewer__route-line--main'
+    case 'toiletRoute':
+      return 'floor-viewer__route-line--toilet'
+    default:
+      return 'floor-viewer__route-line--main'
+  }
+}
+
+function routeLabelClassName(routeRole: SanitaryFixtureRoute['segments'][number]['routeRole']): string {
+  switch (routeRole) {
+    case 'fixtureBranch':
+      return 'floor-viewer__route-label--fixture-branch'
+    case 'collectionMain':
+      return 'floor-viewer__route-label--collection-main'
+    case 'toiletRoute':
+      return 'floor-viewer__route-label--toilet-route'
+    default:
+      return 'floor-viewer__route-label--collection-main'
   }
 }
 

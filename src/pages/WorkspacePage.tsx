@@ -387,8 +387,8 @@ export function WorkspacePage({
     })
   }
 
-  const sanitaryRoutesForExport = useMemo(() => {
-    if (!demoRuntime.enabled) return []
+  const sanitaryRoutingPlanForExport = useMemo(() => {
+    if (!demoRuntime.enabled) return { routes: [], limitations: [], debugGroups: [] }
     // Risers span every eligible floor (the physical vertical shaft), but demo sanitary routing
     // stays on the demo-scoped floors. Scope the riser set used for routing so exported routes are
     // not duplicated up the whole shaft when fixtures only exist on the demo floors.
@@ -402,8 +402,10 @@ export function WorkspacePage({
       const storey = storeyById.get(riser.storeyId)
       return storey ? isStoreyIncludedInDemoScope(storey.name, config) : false
     })
-    return buildSanitaryRoutingDemoPlan(fixtures, scopedRisers, config).routes
+    return buildSanitaryRoutingDemoPlan(fixtures, scopedRisers, config)
   }, [demoRuntime, fixtures, risers, storeys])
+
+  const sanitaryRoutesForExport = sanitaryRoutingPlanForExport.routes
 
   async function handleDownloadIfc() {
     if (
@@ -468,6 +470,13 @@ export function WorkspacePage({
             detectionAggregation: detectionDebugRef.current,
             risers,
           }),
+          sanitaryRouteDebugGroups:
+            sanitaryRoutingPlanForExport.debugGroups.length > 0
+              ? sanitaryRoutingPlanForExport.debugGroups
+              : sanitaryRoutingPreview.debugGroups,
+          sanitaryRouteLimitations: Array.from(
+            new Set([...sanitaryRoutingPlanForExport.limitations, ...sanitaryRoutingPreview.limitations]),
+          ),
         },
         buildExportDebugFileName(modelFileName, selectedStorey?.name ?? null),
       )
@@ -486,7 +495,7 @@ export function WorkspacePage({
 
 
   const sanitaryRoutingPreview = useMemo(() => {
-    if (!demoRuntime.enabled || selectedStoreyId === null) return { routes: [], limitations: [] }
+    if (!demoRuntime.enabled || selectedStoreyId === null) return { routes: [], limitations: [], debugGroups: [] }
     const floorFixtures = fixtures.filter((fixture) => fixture.storeyId === selectedStoreyId)
     const floorRisers = risers.filter((riser) => riser.storeyId === selectedStoreyId)
     return buildSanitaryRoutingDemoPlan(floorFixtures, floorRisers, demoRuntime.config)

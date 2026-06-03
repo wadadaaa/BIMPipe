@@ -104,10 +104,23 @@ function buildSegmentLabel(
   segment: RouteSegment,
   stackLabel: string,
 ): string {
-  const diameter = segment.pipeDiameterMm
-  const role = segment.kind === 'branch' ? 'Branch' : 'Main'
   const fixture = route.fixtureName.trim() || `#${route.fixtureExpressId}`
+  const diameter = segment.diameterMm ?? segment.pipeDiameterMm
+  const role = routeRoleLabel(segment)
   return `BIMPipe ${role} ${diameter}mm ${fixture} -> ${stackLabel}`
+}
+
+function routeRoleLabel(segment: RouteSegment): 'Branch' | 'Main' | 'Toilet' {
+  switch (segment.routeRole) {
+    case 'fixtureBranch':
+      return 'Branch'
+    case 'collectionMain':
+      return 'Main'
+    case 'toiletRoute':
+      return 'Toilet'
+    case undefined:
+      return segment.kind === 'branch' ? 'Branch' : 'Main'
+  }
 }
 
 export function diameterLabel(diameterMm: SanitaryPipeDiameterMm): string {
