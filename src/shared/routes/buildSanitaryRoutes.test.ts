@@ -75,7 +75,7 @@ describe('buildSanitaryRoutingDemoPlan', () => {
     const fixtureBranch = allSegments.find((segment) => segment.routeRole === 'fixtureBranch')
 
     expect(plan.debugGroups).toHaveLength(1)
-    expect(plan.debugGroups[0]).toMatchObject({ targetRiserId: 'R1', branchCount: 2 })
+    expect(plan.debugGroups[0]).toMatchObject({ targetRiserId: 'R1', branchCount: 1 })
     expect(plan.debugGroups[0].targetRiserReason).toContain('toilet centroid from 1 toilet fixture')
     expect(toiletRoute).toMatchObject({ diameterMm: 110, slopePercent: 2, targetRiserId: 'R1' })
     expect(collectionMain).toMatchObject({ diameterMm: 63, slopePercent: 2, targetRiserId: 'R1' })

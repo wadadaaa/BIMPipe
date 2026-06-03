@@ -26,6 +26,11 @@ export type SanitaryRouteRole = 'toiletRoute' | 'collectionMain' | 'fixtureBranc
 
 export interface RouteSegment {
   from: { x: number; y: number; z: number }
+  /**
+   * Preview endpoint for this segment. For fixtureBranch routes, this point may be clamped for
+   * plan-view label readability and may keep the branch elevation instead of the collection-main
+   * elevation; IFC pipe-fitting export must recompute the exact connected junction geometry.
+   */
   to: { x: number; y: number; z: number }
   /** Legacy preview/export style: collection/toilet/riser runs are main, small fixture runs are branch. */
   kind: 'main' | 'branch'
@@ -158,8 +163,9 @@ export function buildSanitaryRoutingDemoPlan(
 
     const groupSegments = drafts.flatMap((draft) => draft.segments)
     const selectedMain = groupSegments.find((segment) => segment.routeRole === 'collectionMain')
-    const branchCount = group.members.filter((fixture) => fixture.kind !== 'TOILETPAN').length
-    if (branchCount === 1 && !selectedMain) {
+    const branchCount = groupSegments.filter((segment) => segment.routeRole === 'fixtureBranch').length
+    const smallFixtureCount = group.members.filter((fixture) => fixture.kind !== 'TOILETPAN').length
+    if (smallFixtureCount === 1 && !selectedMain) {
       fallbackReasons.push('Single small fixture in service zone; Ø63 collection main is not applicable.')
     }
 
@@ -456,8 +462,9 @@ function projectPointOntoSegment(
   const rawT = (wx * vx + wz * vz) / lenSq
   // VIEWER-ONLY: keep branch joins away from collection-main endpoints so labels/segments stay
   // visible and small fixture branches do not visually collapse into the riser or farthest fixture
-  // marker. IFC pipe-fitting export must recompute the real geometric intersection instead of
-  // consuming these clamped preview coordinates as connected pipe endpoints.
+  // marker. The returned point keeps the branch fixture elevation for plan-view rendering; IFC
+  // pipe-fitting export must recompute the exact connected 3-D intersection instead of consuming
+  // these clamped preview coordinates as connected pipe endpoints.
   const t = Math.min(0.85, Math.max(0.15, rawT))
   return {
     x: start.x + vx * t,
@@ -557,7 +564,7 @@ function routeKey(route: SanitaryFixtureRoute): string {
     route.fixtureExpressId,
     route.fixtureKind,
     route.riserId,
-    route.routeGroupId,
+    route.routeGroupId ?? '',
     ...route.segments.map(
       (segment) => `${segment.routeRole}:${segment.diameterMm}:${pointKey(segment.from)}->${pointKey(segment.to)}`,
     ),
