@@ -204,9 +204,9 @@ export function buildSanitaryRoutingDemoPlan(
         .join(', ')}.`,
     )
   }
-  for (const { expressId, riserId } of coincidentFixtures) {
+  for (const { expressId, riserId, routeGroupId } of coincidentFixtures) {
     limitations.push(
-      `Sanitary route skipped for fixture ${expressId} because fixture point coincides with riser ${riserId}.`,
+      `Sanitary route skipped for fixture ${expressId} in route group ${routeGroupId} because fixture point coincides with riser ${riserId}.`,
     )
   }
   if (routes.length > sourceRoutes.length) {
@@ -454,8 +454,10 @@ function projectPointOntoSegment(
   const lenSq = vx * vx + vz * vz
   if (lenSq < MIN_SANITARY_SEGMENT_PLAN_LENGTH) return end
   const rawT = (wx * vx + wz * vz) / lenSq
-  // Keep branch joins away from the collection-main endpoints so labels/segments stay visible and
-  // small fixture branches do not visually collapse into the riser or farthest fixture marker.
+  // VIEWER-ONLY: keep branch joins away from collection-main endpoints so labels/segments stay
+  // visible and small fixture branches do not visually collapse into the riser or farthest fixture
+  // marker. IFC pipe-fitting export must recompute the real geometric intersection instead of
+  // consuming these clamped preview coordinates as connected pipe endpoints.
   const t = Math.min(0.85, Math.max(0.15, rawT))
   return {
     x: start.x + vx * t,

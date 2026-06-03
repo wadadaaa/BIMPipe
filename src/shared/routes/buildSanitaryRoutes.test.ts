@@ -276,7 +276,7 @@ describe('buildSanitaryRoutingDemoPlan', () => {
 
     expect(plan.routes).toHaveLength(0)
     expect(plan.limitations).toContain(
-      'Sanitary route skipped for fixture 901 because fixture point coincides with riser R1.',
+      'Sanitary route skipped for fixture 901 in route group storey-1-zone-1 because fixture point coincides with riser R1.',
     )
   })
 
@@ -293,7 +293,7 @@ describe('buildSanitaryRoutingDemoPlan', () => {
     expect(plan.routes.map((route) => route.fixtureExpressId)).toEqual([903])
     expect(plan.routes[0].segments).toHaveLength(1)
     expect(plan.limitations).toContain(
-      'Sanitary route skipped for fixture 902 because fixture point coincides with riser R1.',
+      'Sanitary route skipped for fixture 902 in route group storey-1-zone-1 because fixture point coincides with riser R1.',
     )
   })
 
