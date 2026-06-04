@@ -35,9 +35,8 @@ export function buildSanitaryRouteSummary(routes: SanitaryFixtureRoute[]): Sanit
 }
 
 function firstDiameterMm(segments: SanitaryRouteSegment[]): number | null {
-  return segments.find((segment) => segment.pipeDiameterMm ?? segment.diameterMm)?.pipeDiameterMm
-    ?? segments.find((segment) => segment.pipeDiameterMm ?? segment.diameterMm)?.diameterMm
-    ?? null
+  const segment = segments.find((candidate) => (candidate.pipeDiameterMm ?? candidate.diameterMm) != null)
+  return segment?.pipeDiameterMm ?? segment?.diameterMm ?? null
 }
 
 function formatDiameterLabel(diameterMm: number): string {

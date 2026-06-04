@@ -320,7 +320,7 @@ export function FloorViewer({
 
   useEffect(() => {
     scheduleRender()
-  }, [floorMeshes, plottedFixtures, plottedKitchens, visibleRisers, visibleSanitaryRoutes])
+  }, [floorMeshes, plottedFixtures, plottedKitchens, risers, sanitaryRoutes, sanitaryViewMode, visibleRisers, visibleSanitaryRoutes])
 
   const raycaster = useRef(new THREE.Raycaster())
   const pointer = useRef(new THREE.Vector2())
