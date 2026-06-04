@@ -630,7 +630,7 @@ export function WorkspacePage({
       sanitaryRouteLimitations={sanitaryRoutingPreview.limitations}
       demoFlowEnabled={demoRuntime.enabled}
       demoFloorOpened={demoFloorOpened}
-      sanitaryRouteCount={sanitaryRoutingPreview.routes.length}
+      sanitaryRouteCount={sanitaryRoutesForExport.length}
     />
   )
 

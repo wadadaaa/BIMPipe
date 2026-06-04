@@ -36,9 +36,15 @@ export function RisersPanel({
   demoFloorOpened = false,
   sanitaryRouteCount = 0,
 }: RisersPanelProps) {
-  const positionedFixtureCount = fixtures.filter((fixture) => fixture.position !== null).length
-  const positionedKitchenCount = kitchens.filter((kitchen) => kitchen.position !== null).length
-  const canSuggest = positionedFixtureCount > 0 || positionedKitchenCount > 0
+  const canSuggest =
+    fixtures.some((fixture) => fixture.position !== null) ||
+    kitchens.some((kitchen) => kitchen.position !== null)
+  const positionedFixtureCount = demoFlowEnabled
+    ? fixtures.filter((fixture) => fixture.position !== null).length
+    : 0
+  const positionedKitchenCount = demoFlowEnabled
+    ? kitchens.filter((kitchen) => kitchen.position !== null).length
+    : 0
   const isDownloadingFullIfc = downloadMode === 'full'
   const hasRoutePreview = sanitaryRouteCount > 0
   const demoBlocker = !demoFloorOpened
