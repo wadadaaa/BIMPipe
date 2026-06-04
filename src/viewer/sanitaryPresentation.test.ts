@@ -50,6 +50,15 @@ describe('sanitary presentation helpers', () => {
     })
   })
 
+  it('summarizes mixed route slopes as an intent range', () => {
+    const mixedSlopeRoutes = [
+      routes[0],
+      { ...routes[0], fixtureExpressId: 2, slope: 0.015 },
+    ] as SanitaryFixtureRoute[]
+
+    expect(buildSanitaryRouteSummary(mixedSlopeRoutes).slopeIntentLabel).toBe('1.5–2.0% route intent')
+  })
+
   it('keeps per-role diameter defaults when a route role is absent', () => {
     const branchOnlyRoutes = [
       {

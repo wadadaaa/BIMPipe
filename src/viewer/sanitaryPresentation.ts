@@ -5,6 +5,12 @@ export type SanitaryPresentationMode = 'before' | 'after'
 
 type SanitaryRouteSegment = SanitaryFixtureRoute['segments'][number]
 
+export interface SanitaryPresentationState {
+  hasPresentation: boolean
+  visibleRoutes: SanitaryFixtureRoute[]
+  visibleRisers: Riser[]
+}
+
 export interface SanitaryRouteSummary {
   totalSegments: number
   toiletSegments: number
@@ -30,7 +36,7 @@ export function buildSanitaryRouteSummary(routes: SanitaryFixtureRoute[]): Sanit
     toiletDiameterLabel: formatDiameterLabel(firstDiameterMm(toiletSegments) ?? 110),
     branchDiameterLabel: formatDiameterLabel(firstDiameterMm(branchSegments) ?? 50),
     collectionMainDiameterLabel: formatDiameterLabel(firstDiameterMm(collectionMainSegments) ?? 63),
-    slopeIntentLabel: formatSlopeIntentLabel(routes[0]?.slope ?? 0.02),
+    slopeIntentLabel: formatSlopeIntentLabel(routes.map((route) => route.slope)),
   }
 }
 
@@ -43,8 +49,16 @@ function formatDiameterLabel(diameterMm: number): string {
   return `${diameterMm} mm`
 }
 
-function formatSlopeIntentLabel(slope: number): string {
-  return `${(slope * 100).toFixed(1)}% route intent`
+function formatSlopeIntentLabel(slopes: number[]): string {
+  const usableSlopes = slopes.length > 0 ? slopes : [0.02]
+  const slopePercents = usableSlopes.map((slope) => slope * 100)
+  const min = Math.min(...slopePercents)
+  const max = Math.max(...slopePercents)
+  const formattedMin = min.toFixed(1)
+  const formattedMax = max.toFixed(1)
+  return formattedMin === formattedMax
+    ? `${formattedMin}% route intent`
+    : `${formattedMin}–${formattedMax}% route intent`
 }
 
 export function getSanitaryPresentationState({
@@ -55,7 +69,7 @@ export function getSanitaryPresentationState({
   mode: SanitaryPresentationMode
   risers: Riser[]
   routes: SanitaryFixtureRoute[]
-}) {
+}): SanitaryPresentationState {
   const hasPresentation = routes.length > 0
   return {
     hasPresentation,
