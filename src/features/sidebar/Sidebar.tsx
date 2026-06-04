@@ -203,6 +203,7 @@ export function Sidebar({
               <PlacementValidationPanel
                 report={validationReport}
                 detectionAggregation={detectionAggregation}
+                demoFlowEnabled={demoFlowEnabled}
               />
             )}
           </section>
