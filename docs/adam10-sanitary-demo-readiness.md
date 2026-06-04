@@ -2,6 +2,13 @@
 
 This report validates the ADAM_10 sanitary routing demo after the grouped routing, IFC export, and UI polish work landed.
 
+Upstream feature dependencies are already on `main`:
+
+- BIM-58 grouped bathroom drainage routing: merged before BIM-57/BIM-53.
+- BIM-57 sanitary route IFC export: PR #46.
+- BIM-52 simple ADAM_10 sanitary demo flow: PR #47.
+- BIM-53 sanitary route demo polish: PR #48.
+
 ## Scope
 
 Validated the PRD plumbing path only:
@@ -17,12 +24,26 @@ Out of scope: sprinklers, fire protection, production code-compliance review, an
 
 ## Latest validation evidence
 
+The smoke artifacts are generated under `.hermes/` and are intentionally not committed because they include local IFC-derived screenshots and downloaded model output. Reviewers can reproduce them with the same command sequence below when the ADAM_10 demo asset is available locally.
+
+Local evidence from the BIM-54 validation run:
+
 - Screenshot smoke run: `/opt/bimpipe/.hermes/screenshots/BIM-54/20260604T154352Z/`
 - Smoke report: `/opt/bimpipe/.hermes/screenshots/BIM-54/20260604T154352Z/report.md`
 - Exported debug mapping: `/opt/bimpipe/.hermes/screenshots/BIM-54/20260604T154352Z/downloads/ADAM_10-2-full-riser-mapping.json`
 - Exported IFC: `/opt/bimpipe/.hermes/screenshots/BIM-54/20260604T154352Z/downloads/ADAM_10-2-full.ifc`
 
-Automated smoke checks passed for:
+Reproduction command sequence used for the validation run:
+
+```bash
+cd /opt/bimpipe-worktrees/BIM-54
+DEMO_MODE=true DEMO_CONFIG=demo/adam-10/demo.config.json npm run dev -- --host 127.0.0.1
+node /tmp/bimpipe-smoke-playwright/bim54-demo-readiness-smoke.js
+```
+
+The script loads `/opt/bimpipe/.hermes/demo-assets/ADAM_10/ADAM_10.ifc`, captures the before/after/export screenshots, clicks **Download IFC**, and records the downloaded IFC plus route/debug mapping in the smoke output directory.
+
+Automated smoke summary from `/opt/bimpipe/.hermes/screenshots/BIM-54/20260604T154352Z/smoke-result.json`:
 
 - ADAM_10 IFC loaded and floor opened.
 - Seven toilets and seven risers visible in the demo flow.
@@ -50,7 +71,7 @@ Automated smoke checks passed for:
 ## Demo-ready presentation path
 
 1. Open `/app` with demo mode enabled.
-2. Upload `/opt/bimpipe/.hermes/demo-assets/ADAM_10/ADAM_10.ifc`.
+2. Upload the agreed ADAM_10 IFC demo asset. In Hermes validation runs this is `/opt/bimpipe/.hermes/demo-assets/ADAM_10/ADAM_10.ifc`; presenters should use the equivalent agreed local copy.
 3. Wait until the included default floor opens and the viewer reports ready.
 4. Open **Toilets** and confirm the seven detected toilets.
 5. Click **Place risers**.
