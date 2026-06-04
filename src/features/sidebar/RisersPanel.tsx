@@ -92,7 +92,7 @@ export function RisersPanel({
       {demoFlowEnabled && (
         <section className="risers-panel__demo-flow" aria-label="Sanitary demo flow">
           <div className="risers-panel__demo-flow-header">
-            <span className="risers-panel__demo-kicker">Investor demo flow</span>
+            <span className="risers-panel__demo-kicker">Route demo flow</span>
             <strong>{demoBlocker ? 'Action needed' : 'Ready to export'}</strong>
           </div>
           <ol className="risers-panel__demo-steps">
@@ -144,7 +144,7 @@ export function RisersPanel({
         </p>
       )}
 
-      {sanitaryRouteLimitations.length > 0 && (
+      {sanitaryRouteLimitations.length > 0 && !demoFlowEnabled && (
         <div className="risers-panel__hint" role="status">
           <strong>Sanitary routing preview notes</strong>
           <ul className="risers-panel__limitations">
@@ -180,7 +180,9 @@ export function RisersPanel({
             >
               <span className="risers-panel__item-marker">{riser.stackLabel}</span>
               <span className="risers-panel__item-coords">
-                {fmt(riser.position.x)}, {fmt(riser.position.z)}
+                {demoFlowEnabled
+                  ? describeRiserLocation(riser, fixtures, kitchens)
+                  : `${fmt(riser.position.x)} m, ${fmt(riser.position.z)} m`}
               </span>
               <span className="risers-panel__item-source" title="Riser source">
                 {riser.source ?? "placed"}
@@ -203,6 +205,28 @@ export function RisersPanel({
 
 function fmt(n: number): string {
   return n.toFixed(1)
+}
+
+function describeRiserLocation(riser: Riser, fixtures: Fixture[], kitchens: KitchenArea[]): string {
+  const anchors = [
+    ...fixtures
+      .filter((fixture) => fixture.position !== null)
+      .map((fixture, index) => ({ label: `WC-${index + 1}`, x: fixture.position!.x, z: fixture.position!.z })),
+    ...kitchens
+      .filter((kitchen) => kitchen.position !== null)
+      .map((kitchen, index) => ({ label: `Kitchen-${index + 1}`, x: kitchen.position!.x, z: kitchen.position!.z })),
+  ]
+
+  const nearest = anchors
+    .map((anchor) => ({
+      ...anchor,
+      distance: Math.hypot(riser.position.x - anchor.x, riser.position.z - anchor.z),
+    }))
+    .sort((a, b) => a.distance - b.distance)[0]
+
+  const coordinateFallback = `${fmt(riser.position.x)} m, ${fmt(riser.position.z)} m`
+  if (!nearest) return coordinateFallback
+  return `near ${nearest.label} · ${fmt(nearest.distance)} m`
 }
 
 function DemoStep({ done, label, detail }: { done: boolean; label: string; detail: string }) {

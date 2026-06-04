@@ -2,18 +2,45 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
-describe('FloorViewer route label styles', () => {
-  it('only returns route label modifier classes that are defined in CSS', () => {
+describe('FloorViewer sanitary route presentation styles', () => {
+  it('only returns route label and line modifier classes that are defined in CSS', () => {
     const component = readFileSync('src/viewer/FloorViewer.tsx', 'utf8')
     const stylesheet = readFileSync('src/viewer/FloorViewer.css', 'utf8')
-    const returnedRouteLabelClasses = Array.from(
-      component.matchAll(/['"](floor-viewer__route-label--[a-z-]+)['"]/g),
+    const returnedRouteClasses = Array.from(
+      component.matchAll(/['"](floor-viewer__route-(?:label|line)--[a-z-]+)['"]/g),
       ([, className]) => className,
     )
 
-    expect(returnedRouteLabelClasses).not.toHaveLength(0)
-    for (const className of returnedRouteLabelClasses) {
+    expect(returnedRouteClasses).not.toHaveLength(0)
+    for (const className of returnedRouteClasses) {
       expect(stylesheet, `${className} should be defined in FloorViewer.css`).toContain(`.${className}`)
     }
+  })
+
+  it('keeps a neutral before-after sanitary demo surface in the viewer', () => {
+    const component = readFileSync('src/viewer/FloorViewer.tsx', 'utf8')
+    const stylesheet = readFileSync('src/viewer/FloorViewer.css', 'utf8')
+
+    expect(component).toContain('floor-viewer__sanitary-compare')
+    expect(component).toContain('Route demo view')
+    expect(component).toContain('Detected fixture inputs and selected risers. Generated routes are hidden for comparison.')
+    expect(component).toContain('Generated sanitary routes are shown with pipe diameters and slope design.')
+    expect(component).toContain('Before')
+    expect(component).toContain('After')
+    expect(component).toContain('routeFactCards')
+    expect(component).toContain('No route breakdown available yet.')
+    expect(component).toContain('slopeIntentLabel')
+    expect(component).toContain('routeSegmentCountLabel')
+    expect(stylesheet).toContain('.floor-viewer__sanitary-compare')
+    expect(stylesheet).toContain('.floor-viewer__sanitary-toggle')
+  })
+
+  it('does not contain investor-facing product copy', () => {
+    const productSources = [
+      readFileSync('src/viewer/FloorViewer.tsx', 'utf8'),
+      readFileSync('src/features/sidebar/RisersPanel.tsx', 'utf8'),
+    ].join('\n')
+
+    expect(productSources).not.toMatch(/investor/i)
   })
 })

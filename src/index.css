@@ -18,6 +18,11 @@
   --accent-border: rgba(103, 221, 255, 0.28);
   --accent-glow: rgba(103, 221, 255, 0.15);
   --accent-warm: #ffc768;
+  --brand: #ffb45f;
+  --brand-bg: rgba(255, 180, 95, 0.14);
+  --brand-bg-strong: rgba(255, 180, 95, 0.20);
+  --brand-border: rgba(255, 180, 95, 0.36);
+  --brand-glow: rgba(255, 180, 95, 0.22);
   --danger: #ff7a88;
   --danger-bg: rgba(255, 122, 136, 0.10);
   --hover-bg: rgba(255, 255, 255, 0.05);
@@ -85,6 +90,11 @@
   --accent-border: rgba(14, 135, 187, 0.28);
   --accent-glow: rgba(14, 135, 187, 0.14);
   --accent-warm: #b97a1c;
+  --brand: #c96f1a;
+  --brand-bg: rgba(201, 111, 26, 0.12);
+  --brand-bg-strong: rgba(201, 111, 26, 0.18);
+  --brand-border: rgba(201, 111, 26, 0.28);
+  --brand-glow: rgba(201, 111, 26, 0.16);
   --danger: #d94d64;
   --danger-bg: rgba(217, 77, 100, 0.10);
   --hover-bg: rgba(10, 10, 10, 0.04);

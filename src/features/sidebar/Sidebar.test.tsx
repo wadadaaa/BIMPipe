@@ -142,4 +142,81 @@ describe('Sidebar', () => {
     expect(screen.getByLabelText('Sanitary demo flow')).toHaveTextContent('Ready to export')
     expect(screen.getByText('ADAM_10 floor opened').closest('li')).toHaveClass('risers-panel__demo-step--done')
   })
+
+  it('keeps demo decisions free of raw constants, debug copy, and zero-only rows', () => {
+    const validationReport = {
+      floorClassifications: [{ storeyId: 2, class: 'standard' }],
+      placementDecisions: [],
+      validationIssues: [
+        {
+          code: 'VERTICAL_GROUPING_NOT_AVAILABLE',
+          severity: 'warning',
+          message: 'Vertical wet-room grouping is unavailable in current flow; grouping and strategy sections are partial.',
+        },
+      ],
+      summary: {
+        processedFloorCount: 1,
+        skippedFloorCount: 0,
+        newlyAddedRiserCount: 7,
+        reusedRiserGroupCount: 0,
+        coordinationIssueCount: 0,
+      },
+    }
+
+    render(
+      <Sidebar
+        activeTab="validation"
+        onTabChange={vi.fn()}
+        selectedStoreyName="קומה 2"
+        validationReport={validationReport as never}
+        detectionAggregation={null}
+        demoFlowEnabled
+      />,
+    )
+
+    const panel = screen.getByRole('tabpanel')
+    expect(panel).not.toHaveTextContent('VERTICAL_GROUPING_NOT_AVAILABLE')
+    expect(panel).not.toHaveTextContent(/debug/i)
+    expect(panel).not.toHaveTextContent(/Reused riser groups/i)
+    expect(panel).toHaveTextContent('New risers: 7')
+  })
+
+  it('labels demo riser positions by nearby fixture instead of raw coordinates', () => {
+    render(
+      <Sidebar
+        activeTab="risers"
+        onTabChange={vi.fn()}
+        selectedStoreyName="02"
+        fixtures={[
+          { expressId: 1, name: 'אסלה תלויה', kind: 'TOILETPAN', storeyId: 2, position: { x: 100, y: 0, z: 200 } },
+        ]}
+        risers={[
+          { id: 'r1', stackId: 'stack-1', stackLabel: 'R1', storeyId: 2, position: { x: 125, y: 0, z: 220 } },
+        ]}
+        demoFlowEnabled
+      />,
+    )
+
+    expect(screen.getByText(/near WC-1/i)).toBeInTheDocument()
+    expect(screen.queryByText(/125\.0 m, 220\.0 m/)).not.toBeInTheDocument()
+  })
+
+  it('keeps exact riser coordinates visible outside demo mode', () => {
+    render(
+      <Sidebar
+        activeTab="risers"
+        onTabChange={vi.fn()}
+        selectedStoreyName="02"
+        fixtures={[
+          { expressId: 1, name: 'אסלה תלויה', kind: 'TOILETPAN', storeyId: 2, position: { x: 100, y: 0, z: 200 } },
+        ]}
+        risers={[
+          { id: 'r1', stackId: 'stack-1', stackLabel: 'R1', storeyId: 2, position: { x: 125, y: 0, z: 220 } },
+        ]}
+      />,
+    )
+
+    expect(screen.getByText('125.0 m, 220.0 m')).toBeInTheDocument()
+    expect(screen.queryByText(/near WC-1/i)).not.toBeInTheDocument()
+  })
 })

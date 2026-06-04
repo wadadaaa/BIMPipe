@@ -599,6 +599,7 @@ export function WorkspacePage({
           onRiserMove={handleMoveRiser}
           onSwitch3D={storeys.length > 0 ? handleSwitch3D : undefined}
           sanitaryRoutes={sanitaryRoutingPreview.routes}
+          demoFlowEnabled={demoRuntime.enabled}
         />
       </ViewTransition>
     </Suspense>

@@ -809,6 +809,100 @@
   pointer-events: none;
 }
 
+.floor-viewer__sanitary-compare {
+  position: absolute;
+  right: 14px;
+  bottom: 64px;
+  z-index: 6;
+  width: min(360px, calc(100% - 28px));
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid var(--accent-border);
+  background: linear-gradient(180deg, var(--overlay-bg-hover), var(--overlay-bg-strong));
+  box-shadow: var(--shadow);
+  color: var(--text-h);
+  backdrop-filter: blur(18px);
+}
+
+.floor-viewer__sanitary-compare-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.floor-viewer__sanitary-kicker {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.floor-viewer__sanitary-toggle {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-strong);
+}
+
+.floor-viewer__sanitary-toggle-btn {
+  min-width: 58px;
+  border: 0;
+  border-radius: 999px;
+  padding: 5px 10px;
+  color: var(--text);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.floor-viewer__sanitary-toggle-btn--active {
+  color: var(--bg);
+  background: linear-gradient(180deg, var(--accent), var(--accent-strong));
+  box-shadow: 0 0 18px var(--accent-glow);
+}
+
+.floor-viewer__sanitary-caption {
+  margin: 9px 0 10px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.floor-viewer__sanitary-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+
+.floor-viewer__sanitary-facts div {
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
+}
+
+.floor-viewer__sanitary-facts .floor-viewer__sanitary-fact--slope {
+  grid-column: span 2;
+}
+
+.floor-viewer__sanitary-facts dt {
+  margin: 0 0 3px;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.floor-viewer__sanitary-facts dd {
+  margin: 0;
+  color: var(--text);
+  font-size: 10px;
+}
+
 .floor-viewer__legend-item--route-main {
   border-color: rgba(37, 199, 255, 0.45);
   color: #98e9ff;

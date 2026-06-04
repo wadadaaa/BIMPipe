@@ -23,14 +23,14 @@
 .topbar__mark {
   width: 20px;
   height: 20px;
-  color: var(--accent);
+  color: var(--brand);
   flex-shrink: 0;
 }
 
 .topbar__wordmark {
   font-size: 12px;
   font-weight: 800;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.13em;
   text-transform: uppercase;
   color: var(--text-h);
 }
