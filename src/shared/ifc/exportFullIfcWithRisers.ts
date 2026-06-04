@@ -349,9 +349,6 @@ async function exportFullIfcWithRisersInternal(
     )
     if (debugMapping) {
       debugMapping.sanitaryRouteExport = sanitaryRouteExport.debugSummary
-      for (const skippedSegment of sanitaryRouteExport.debugSummary.skippedSegments) {
-        debugMapping.notes.push(`Skipped sanitary route segment ${skippedSegment.key}: ${skippedSegment.reason}`)
-      }
     }
     if (sanitaryRouteExport.flowSegmentHandles.length > 0) {
       writeSanitaryRouteSystemAssignment(

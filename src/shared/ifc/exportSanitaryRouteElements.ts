@@ -70,13 +70,16 @@ export function writeSanitaryRouteElements(
 ): { elements: WrittenSanitaryRoute[]; flowSegmentHandles: IfcHandle[]; debugSummary: SanitaryRouteExportDebugSummary } {
   const skippedSegments: SanitaryExportSkippedSegment[] = []
   const exportSegments = collectSanitaryExportSegments(routes, storeys, risers, skippedSegments)
+  const pushSkippedNote = (skipped: SanitaryExportSkippedSegment) => {
+    exportNotes?.push(`Skipped sanitary route segment ${skipped.key}: ${skipped.reason}`)
+  }
   if (exportNotes) {
     exportNotes.push(
       `Received ${routes.length} sanitary route(s) for export; collected ${exportSegments.length} export segment(s).`,
     )
   }
+  for (const skipped of skippedSegments) pushSkippedNote(skipped)
   if (exportSegments.length === 0) {
-    for (const skipped of skippedSegments) exportNotes?.push(`Skipped sanitary route segment ${skipped.key}: ${skipped.reason}`)
     return {
       elements: [],
       flowSegmentHandles: [],
@@ -100,15 +103,14 @@ export function writeSanitaryRouteElements(
     const storeyElevation = storeyElevationById.get(exportSegment.storeyId)
     if (typeof storeyElevation !== 'number' || !Number.isFinite(storeyElevation)) {
       const reason = `Storey #${exportSegment.storeyId} has no elevation.`
-      skippedSegments.push({
+      const skipped = {
         key: exportSegment.key,
         fixtureExpressId: exportSegment.fixtureExpressIds[0] ?? -1,
         riserId: exportSegment.riserId,
         reason,
-      })
-      exportNotes?.push(
-        `Skipped sanitary route segment ${exportSegment.key} because ${reason}`,
-      )
+      }
+      skippedSegments.push(skipped)
+      pushSkippedNote(skipped)
       continue
     }
 
@@ -116,15 +118,14 @@ export function writeSanitaryRouteElements(
     // translation/deduplication) cannot become a valid pipe. Skip it with a note.
     if (planDistance(exportSegment.segment.from, exportSegment.segment.to) < MIN_SANITARY_SEGMENT_PLAN_LENGTH) {
       const reason = 'Its endpoints coincide in plan.'
-      skippedSegments.push({
+      const skipped = {
         key: exportSegment.key,
         fixtureExpressId: exportSegment.fixtureExpressIds[0] ?? -1,
         riserId: exportSegment.riserId,
         reason,
-      })
-      exportNotes?.push(
-        `Skipped sanitary route segment ${exportSegment.key} because ${reason}`,
-      )
+      }
+      skippedSegments.push(skipped)
+      pushSkippedNote(skipped)
       continue
     }
 
@@ -151,15 +152,14 @@ export function writeSanitaryRouteElements(
     // could still collapse to ~zero length. Skip rather than abort the whole export.
     if (startLocal.distanceTo(endLocal) <= MIN_SANITARY_SEGMENT_PLAN_LENGTH) {
       const reason = 'It resolved to zero length in IFC coordinates.'
-      skippedSegments.push({
+      const skipped = {
         key: exportSegment.key,
         fixtureExpressId: exportSegment.fixtureExpressIds[0] ?? -1,
         riserId: exportSegment.riserId,
         reason,
-      })
-      exportNotes?.push(
-        `Skipped sanitary route segment ${exportSegment.key} because ${reason}`,
-      )
+      }
+      skippedSegments.push(skipped)
+      pushSkippedNote(skipped)
       continue
     }
 

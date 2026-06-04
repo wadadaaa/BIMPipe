@@ -910,6 +910,14 @@ describe('exportFullIfcWithRisers', () => {
         expect.stringContaining('Exported 1 sanitary route pipe segment(s)'),
       ]),
     )
+    const skippedRouteNotes = result.debugMapping.notes.filter((note) => note.includes('Skipped sanitary route segment'))
+    expect(new Set(skippedRouteNotes).size).toBe(skippedRouteNotes.length)
+    for (const skipped of result.debugMapping.sanitaryRouteExport?.skippedSegments ?? []) {
+      const notesForSkippedSegment = skippedRouteNotes.filter(
+        (note) => note.includes(skipped.key) && note.includes(skipped.reason),
+      )
+      expect(notesForSkippedSegment).toHaveLength(1)
+    }
   })
 
   it('exports sanitary route pipe segments when demo routes are provided', async () => {

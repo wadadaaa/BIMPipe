@@ -476,9 +476,11 @@ export function WorkspacePage({
     return buildSanitaryRoutingDemoPlan(floorFixtures, floorRisers, demoRuntime.config)
   }, [demoRuntime, fixtures, risers, selectedStoreyId])
 
-  // Export the same route plan currently shown in the viewer. Do not recompute a separate export
-  // plan here: duplicate/independent planning can drift from the preview and hide missing routes in
-  // the downloaded IFC/debug JSON.
+  // Export the same selected-floor route plan currently shown in the viewer. Download IFC is scoped
+  // to the active included demo floor (`selectedStoreyId`); `buildSanitaryRoutingDemoPlan` can still
+  // duplicate that floor's routes across same-stack demo risers when the plan requires it. Do not
+  // recompute a separate all-demo-floor export plan here: duplicate/independent planning can drift
+  // from the preview and hide missing routes in the downloaded IFC/debug JSON.
   const sanitaryRoutesForExport = sanitaryRoutingPreview.routes
 
   const selectedStorey = storeys.find((storey) => storey.id === selectedStoreyId) ?? null
