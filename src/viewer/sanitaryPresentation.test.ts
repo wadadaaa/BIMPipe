@@ -43,6 +43,30 @@ describe('sanitary presentation helpers', () => {
       toiletSegments: 1,
       branchSegments: 1,
       collectionMainSegments: 1,
+      toiletDiameterLabel: '110 mm',
+      branchDiameterLabel: '50 mm',
+      collectionMainDiameterLabel: '63 mm',
+      slopeIntentLabel: '2.0% route intent',
+    })
+  })
+
+  it('keeps per-role diameter defaults when a route role is absent', () => {
+    const branchOnlyRoutes = [
+      {
+        ...routes[0],
+        segments: [
+          { from: { x: 0, y: 0, z: 0 }, to: { x: 1, y: 0, z: 1 }, kind: 'branch', pipeDiameterMm: 50, routeRole: 'fixtureBranch', diameterMm: 50 },
+        ],
+      },
+    ] as SanitaryFixtureRoute[]
+
+    expect(buildSanitaryRouteSummary(branchOnlyRoutes)).toMatchObject({
+      toiletSegments: 0,
+      toiletDiameterLabel: '110 mm',
+      branchSegments: 1,
+      branchDiameterLabel: '50 mm',
+      collectionMainSegments: 0,
+      collectionMainDiameterLabel: '63 mm',
     })
   })
 })

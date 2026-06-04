@@ -658,20 +658,20 @@ export function FloorViewer({
               </p>
               <dl className="floor-viewer__sanitary-facts" aria-label="Sanitary route legend">
                 <div>
-                  <dt>110 mm toilet</dt>
+                  <dt>{sanitaryRouteSummary.toiletDiameterLabel} toilet</dt>
                   <dd>{sanitaryRouteSummary.toiletSegments} routes</dd>
                 </div>
                 <div>
-                  <dt>63 mm main line</dt>
+                  <dt>{sanitaryRouteSummary.collectionMainDiameterLabel} main line</dt>
                   <dd>{sanitaryRouteSummary.collectionMainSegments} mains</dd>
                 </div>
                 <div>
-                  <dt>50 mm branch</dt>
+                  <dt>{sanitaryRouteSummary.branchDiameterLabel} branch</dt>
                   <dd>{sanitaryRouteSummary.branchSegments} branches</dd>
                 </div>
                 <div>
-                  <dt>2.0% slope toward riser</dt>
-                  <dd>{sanitaryRouteSummary.totalSegments} labelled segments</dd>
+                  <dt>{sanitaryRouteSummary.slopeIntentLabel}</dt>
+                  <dd>applies to {sanitaryRouteSummary.totalSegments} segment(s)</dd>
                 </div>
               </dl>
             </section>
