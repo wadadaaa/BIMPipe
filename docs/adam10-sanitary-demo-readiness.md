@@ -24,7 +24,7 @@ Out of scope: sprinklers, fire protection, production code-compliance review, an
 
 ## Latest validation evidence
 
-The smoke artifacts are generated under `.hermes/` and are intentionally not committed because they include local IFC-derived screenshots and downloaded model output. Reviewers can reproduce them with the same command sequence below when the ADAM_10 demo asset is available locally.
+The smoke artifacts are generated under `.hermes/` and are intentionally not committed because they include local IFC-derived screenshots and downloaded model output. Paths below are machine-local to the Hermes validation environment; adapt them to your checkout/worktree when rerunning the flow.
 
 Local evidence from the BIM-54 validation run:
 
@@ -37,11 +37,11 @@ Reproduction command sequence used for the validation run:
 
 ```bash
 cd /opt/bimpipe-worktrees/BIM-54
-DEMO_MODE=true DEMO_CONFIG=demo/adam-10/demo.config.json npm run dev -- --host 127.0.0.1
+DEMO_MODE=true DEMO_CONFIG=demo/adam-10/demo.config.json pnpm dev -- --host 127.0.0.1
 node /tmp/bimpipe-smoke-playwright/bim54-demo-readiness-smoke.js
 ```
 
-The script loads `/opt/bimpipe/.hermes/demo-assets/ADAM_10/ADAM_10.ifc`, captures the before/after/export screenshots, clicks **Download IFC**, and records the downloaded IFC plus route/debug mapping in the smoke output directory.
+The smoke script was local Hermes validation tooling, not a product script committed to the repo. It loads `/opt/bimpipe/.hermes/demo-assets/ADAM_10/ADAM_10.ifc`, captures the before/after/export screenshots, clicks **Download IFC**, and records the downloaded IFC plus route/debug mapping in the smoke output directory.
 
 Automated smoke summary from `/opt/bimpipe/.hermes/screenshots/BIM-54/20260604T154352Z/smoke-result.json`:
 
