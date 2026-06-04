@@ -180,7 +180,9 @@ export function RisersPanel({
             >
               <span className="risers-panel__item-marker">{riser.stackLabel}</span>
               <span className="risers-panel__item-coords">
-                {describeRiserLocation(riser, fixtures, kitchens)}
+                {demoFlowEnabled
+                  ? describeRiserLocation(riser, fixtures, kitchens)
+                  : `${fmt(riser.position.x)} m, ${fmt(riser.position.z)} m`}
               </span>
               <span className="risers-panel__item-source" title="Riser source">
                 {riser.source ?? "placed"}

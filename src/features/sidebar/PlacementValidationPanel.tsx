@@ -21,7 +21,7 @@ function getUserFacingIssue(
     return {
       key: issue.code,
       label: 'Vertical grouping',
-      message: 'In progress for future multi-floor strategy review.',
+      message: 'Vertical grouping is not available in the current placement flow.',
     }
   }
 
