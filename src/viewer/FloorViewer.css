@@ -809,6 +809,96 @@
   pointer-events: none;
 }
 
+.floor-viewer__sanitary-compare {
+  position: absolute;
+  right: 14px;
+  bottom: 64px;
+  z-index: 6;
+  width: min(360px, calc(100% - 28px));
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(103, 221, 255, 0.30);
+  background: linear-gradient(180deg, rgba(5, 16, 28, 0.94), rgba(3, 9, 16, 0.88));
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.42);
+  color: #e8f8ff;
+  backdrop-filter: blur(18px);
+}
+
+.floor-viewer__sanitary-compare-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.floor-viewer__sanitary-kicker {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #8ee8ff;
+}
+
+.floor-viewer__sanitary-toggle {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.floor-viewer__sanitary-toggle-btn {
+  min-width: 58px;
+  border: 0;
+  border-radius: 999px;
+  padding: 5px 10px;
+  color: rgba(232, 248, 255, 0.68);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.floor-viewer__sanitary-toggle-btn--active {
+  color: #03111b;
+  background: linear-gradient(180deg, #9beaff, #38c7ff);
+  box-shadow: 0 0 18px rgba(56, 199, 255, 0.32);
+}
+
+.floor-viewer__sanitary-caption {
+  margin: 9px 0 10px;
+  color: rgba(232, 248, 255, 0.78);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.floor-viewer__sanitary-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+
+.floor-viewer__sanitary-facts div {
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.floor-viewer__sanitary-facts dt {
+  margin: 0 0 3px;
+  color: #b9f2ff;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.floor-viewer__sanitary-facts dd {
+  margin: 0;
+  color: rgba(232, 248, 255, 0.78);
+  font-size: 10px;
+}
+
 .floor-viewer__legend-item--route-main {
   border-color: rgba(37, 199, 255, 0.45);
   color: #98e9ff;

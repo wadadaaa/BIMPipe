@@ -6,6 +6,11 @@ import type { SanitaryFixtureRoute } from '@/shared/routes/buildSanitaryRoutes'
 import type { FloorMeshes } from '@/shared/ifc/extractFloorMeshes'
 import type { Fixture, FixtureKind, KitchenArea, Riser, RiserId } from '@/domain/types'
 import { ViewTransition } from '@/shared/reactViewTransition'
+import {
+  buildSanitaryRouteSummary,
+  getSanitaryPresentationState,
+  type SanitaryPresentationMode,
+} from './sanitaryPresentation'
 import './FloorViewer.css'
 
 const HOVER_ACCENT = new THREE.Color(0xffb45f)
@@ -76,6 +81,7 @@ export function FloorViewer({
   const routeLineRefsRef = useRef<Map<string, SVGLineElement>>(new Map())
   const routeLabelRefsRef = useRef<Map<string, SVGTextElement>>(new Map())
   const [routeProjectionStatus, setRouteProjectionStatus] = useState<{ failed: number; total: number }>({ failed: 0, total: 0 })
+  const [sanitaryViewMode, setSanitaryViewMode] = useState<SanitaryPresentationMode>('after')
 
   // Fixture overlay: map of expressId → positioned div element
   const fixtureMarkerRefsRef = useRef<Map<number, HTMLDivElement>>(new Map())
@@ -303,10 +309,18 @@ export function FloorViewer({
     () => buildKitchenMarkerLabels(plottedKitchens),
     [plottedKitchens],
   )
+  const sanitaryRouteSummary = useMemo(() => buildSanitaryRouteSummary(sanitaryRoutes), [sanitaryRoutes])
+  const sanitaryPresentationState = useMemo(
+    () => getSanitaryPresentationState({ mode: sanitaryViewMode, risers, routes: sanitaryRoutes }),
+    [risers, sanitaryRoutes, sanitaryViewMode],
+  )
+  const hasSanitaryPresentation = sanitaryPresentationState.hasPresentation
+  const visibleSanitaryRoutes = sanitaryPresentationState.visibleRoutes
+  const visibleRisers = sanitaryPresentationState.visibleRisers
 
   useEffect(() => {
     scheduleRender()
-  }, [floorMeshes, plottedFixtures, plottedKitchens, risers, sanitaryRoutes])
+  }, [floorMeshes, plottedFixtures, plottedKitchens, visibleRisers, visibleSanitaryRoutes])
 
   const raycaster = useRef(new THREE.Raycaster())
   const pointer = useRef(new THREE.Vector2())
@@ -537,15 +551,15 @@ export function FloorViewer({
             </span>
           )}
 
-          {risers.length > 0 && (
+          {visibleRisers.length > 0 && (
             <span className="floor-viewer__chip floor-viewer__chip--riser">
-              {risers.length} risers
+              {visibleRisers.length} risers
             </span>
           )}
 
-          {sanitaryRoutes.length > 0 && (
+          {visibleSanitaryRoutes.length > 0 && (
             <span className="floor-viewer__chip floor-viewer__chip--route">
-              {sanitaryRoutes.length} sanitary {sanitaryRoutes.length === 1 ? 'route' : 'routes'}
+              {visibleSanitaryRoutes.length} sanitary {visibleSanitaryRoutes.length === 1 ? 'route' : 'routes'}
             </span>
           )}
 
@@ -558,7 +572,7 @@ export function FloorViewer({
       {!showOverlay && (
         <>
           <svg className="floor-viewer__route-overlay" aria-hidden="true">
-            {sanitaryRoutes.flatMap((route) =>
+            {visibleSanitaryRoutes.flatMap((route) =>
               route.segments.map((segment, index) => {
                 const routeKey = `${route.fixtureExpressId}-${segment.routeRole}-${index}`
                 return (
@@ -607,6 +621,60 @@ export function FloorViewer({
             <div className="floor-viewer__route-debug" role="status">
               Preview limitation: {routeProjectionStatus.failed} / {routeProjectionStatus.total} route segments could not be projected exactly. Showing fallback guide lines.
             </div>
+          )}
+          {hasSanitaryPresentation && (
+            <section className="floor-viewer__sanitary-compare" aria-label="Sanitary before-after presentation">
+              <div className="floor-viewer__sanitary-compare-head">
+                <span className="floor-viewer__sanitary-kicker">Investor demo view</span>
+                <div className="floor-viewer__sanitary-toggle" role="group" aria-label="Compare sanitary output">
+                  <button
+                    type="button"
+                    className={[
+                      'floor-viewer__sanitary-toggle-btn',
+                      sanitaryViewMode === 'before' ? 'floor-viewer__sanitary-toggle-btn--active' : '',
+                    ].filter(Boolean).join(' ')}
+                    aria-pressed={sanitaryViewMode === 'before'}
+                    onClick={() => setSanitaryViewMode('before')}
+                  >
+                    Before
+                  </button>
+                  <button
+                    type="button"
+                    className={[
+                      'floor-viewer__sanitary-toggle-btn',
+                      sanitaryViewMode === 'after' ? 'floor-viewer__sanitary-toggle-btn--active' : '',
+                    ].filter(Boolean).join(' ')}
+                    aria-pressed={sanitaryViewMode === 'after'}
+                    onClick={() => setSanitaryViewMode('after')}
+                  >
+                    After
+                  </button>
+                </div>
+              </div>
+              <p className="floor-viewer__sanitary-caption">
+                {sanitaryViewMode === 'before'
+                  ? 'Before: detected fixture inputs and selected risers, with generated routes hidden for comparison.'
+                  : 'After: selected risers and sanitary routes highlighted over the dimmed model for presentation.'}
+              </p>
+              <dl className="floor-viewer__sanitary-facts" aria-label="Sanitary route legend">
+                <div>
+                  <dt>110 mm toilet</dt>
+                  <dd>{sanitaryRouteSummary.toiletSegments} routes</dd>
+                </div>
+                <div>
+                  <dt>63 mm main line</dt>
+                  <dd>{sanitaryRouteSummary.collectionMainSegments} mains</dd>
+                </div>
+                <div>
+                  <dt>50 mm branch</dt>
+                  <dd>{sanitaryRouteSummary.branchSegments} branches</dd>
+                </div>
+                <div>
+                  <dt>2.0% slope toward riser</dt>
+                  <dd>{sanitaryRouteSummary.totalSegments} labelled segments</dd>
+                </div>
+              </dl>
+            </section>
           )}
           <div className="floor-viewer__fixture-overlay" aria-hidden="true">
             {plottedFixtures.map((fixture, index) => {
@@ -698,7 +766,7 @@ export function FloorViewer({
 
           {/* Riser markers — positioned imperatively in the rAF loop via data-* attributes */}
           <div className="floor-viewer__riser-overlay" aria-hidden="true">
-            {risers.map((riser, index) => (
+            {visibleRisers.map((riser, index) => (
               <div
                 key={riser.id}
                 className="floor-viewer__riser-pin"
@@ -944,7 +1012,6 @@ function routeLabelClassName(routeRole: SanitaryFixtureRoute['segments'][number]
       return 'floor-viewer__route-label--collection-main'
   }
 }
-
 
 function projectOverlayPointOnPlan(
   world: THREE.Vector3,
