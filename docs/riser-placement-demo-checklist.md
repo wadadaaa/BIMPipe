@@ -30,3 +30,4 @@ Use this checklist when presenting the current demo slice.
 
 - Placement decision details may be unavailable in the current UI flow for some runs; the Decisions panel and `validationReport.validationIssues` explicitly call this out.
 - Manual IFC validation still requires the external agreed demo model file (no large IFC fixture is committed in repo).
+- For the ADAM_10 sanitary routing readiness report, fallback path, and latest screenshot smoke evidence, see [`adam10-sanitary-demo-readiness.md`](./adam10-sanitary-demo-readiness.md).
