@@ -50,7 +50,7 @@ export function RisersPanel({
   const demoBlocker = !demoFloorOpened
     ? 'Open an included ADAM_10 demo floor before placing risers.'
     : !canSuggest
-      ? 'Confirm detected sanitary fixtures before placing risers.'
+      ? 'No sanitary fixture positions detected on this floor yet.'
     : risers.length === 0
       ? 'Place risers before sanitary routing can preview or export routes.'
       : !hasRoutePreview
