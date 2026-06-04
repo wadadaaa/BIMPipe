@@ -484,6 +484,10 @@ export function WorkspacePage({
   const sanitaryRoutesForExport = sanitaryRoutingPreview.routes
 
   const selectedStorey = storeys.find((storey) => storey.id === selectedStoreyId) ?? null
+  const demoFloorOpened =
+    demoRuntime.enabled && selectedStorey !== null
+      ? isStoreyIncludedInDemoScope(selectedStorey.name, demoRuntime.config)
+      : false
   const shouldLoadViewer =
     isExtractingGeometry || geometryError !== null || floorMeshes !== null
 
@@ -624,6 +628,9 @@ export function WorkspacePage({
       validationReport={validationReport}
       detectionAggregation={detectionDebugRef.current}
       sanitaryRouteLimitations={sanitaryRoutingPreview.limitations}
+      demoFlowEnabled={demoRuntime.enabled}
+      demoFloorOpened={demoFloorOpened}
+      sanitaryRouteCount={sanitaryRoutingPreview.routes.length}
     />
   )
 

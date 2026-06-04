@@ -106,4 +106,40 @@ describe('Sidebar', () => {
 
     expect(screen.getByRole('button', { name: /^download ifc$/i })).toBeDisabled()
   })
+
+  it('shows the ADAM_10 demo floor step only when an included demo floor is open', () => {
+    const fixture = { expressId: 1, name: 'WC-01', kind: 'TOILETPAN' as const, storeyId: 2, position: { x: 1, y: 0, z: 2 } }
+    const riser = { id: 'r1', stackId: 'stack-1', stackLabel: 'R1', storeyId: 2, position: { x: 3, y: 0, z: 4 } }
+    const { rerender } = render(
+      <Sidebar
+        activeTab="risers"
+        onTabChange={vi.fn()}
+        selectedStoreyName="03"
+        fixtures={[fixture]}
+        risers={[riser]}
+        demoFlowEnabled
+        demoFloorOpened={false}
+        sanitaryRouteCount={1}
+      />,
+    )
+
+    expect(screen.getByLabelText('Sanitary demo flow')).toHaveTextContent('Open an included ADAM_10 demo floor')
+    expect(screen.getByText('ADAM_10 floor opened').closest('li')).not.toHaveClass('risers-panel__demo-step--done')
+
+    rerender(
+      <Sidebar
+        activeTab="risers"
+        onTabChange={vi.fn()}
+        selectedStoreyName="קומה 2"
+        fixtures={[fixture]}
+        risers={[riser]}
+        demoFlowEnabled
+        demoFloorOpened
+        sanitaryRouteCount={1}
+      />,
+    )
+
+    expect(screen.getByLabelText('Sanitary demo flow')).toHaveTextContent('Ready to export')
+    expect(screen.getByText('ADAM_10 floor opened').closest('li')).toHaveClass('risers-panel__demo-step--done')
+  })
 })

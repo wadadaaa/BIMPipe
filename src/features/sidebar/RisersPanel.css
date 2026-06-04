@@ -316,3 +316,118 @@
   margin: 6px 0 0;
   padding-left: 16px;
 }
+
+.risers-panel__demo-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(103, 221, 255, 0.22);
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(103, 221, 255, 0.08), rgba(120, 255, 198, 0.04));
+}
+
+.risers-panel__demo-flow-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-h);
+}
+
+.risers-panel__demo-kicker {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.risers-panel__demo-steps,
+.risers-panel__demo-assumptions {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.risers-panel__demo-steps {
+  display: grid;
+  gap: 7px;
+}
+
+.risers-panel__demo-step {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 7px;
+  color: var(--text-soft);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.risers-panel__demo-step--done {
+  color: var(--text);
+}
+
+.risers-panel__demo-step-dot {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  color: var(--text-soft);
+  font-size: 10px;
+}
+
+.risers-panel__demo-step--done .risers-panel__demo-step-dot {
+  border-color: var(--success-border);
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+
+.risers-panel__demo-step strong,
+.risers-panel__demo-step small {
+  display: block;
+}
+
+.risers-panel__demo-step small {
+  margin-top: 1px;
+  color: var(--text-soft);
+}
+
+.risers-panel__demo-blocker,
+.risers-panel__demo-ready {
+  margin: 0;
+  padding: 8px 9px;
+  border-radius: 9px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.risers-panel__demo-blocker {
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  background: rgba(245, 158, 11, 0.08);
+  color: #f8d38b;
+}
+
+.risers-panel__demo-ready {
+  border: 1px solid var(--success-border);
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+
+.risers-panel__demo-assumptions {
+  display: grid;
+  gap: 4px;
+  color: var(--text-soft);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.risers-panel__demo-assumptions li::before {
+  content: '•';
+  margin-right: 6px;
+  color: var(--accent);
+}

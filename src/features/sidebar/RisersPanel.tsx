@@ -14,6 +14,9 @@ interface RisersPanelProps {
   downloadError?: string | null
   onDownloadFullIfc?: () => void
   sanitaryRouteLimitations?: string[]
+  demoFlowEnabled?: boolean
+  demoFloorOpened?: boolean
+  sanitaryRouteCount?: number
 }
 
 export function RisersPanel({
@@ -29,11 +32,24 @@ export function RisersPanel({
   downloadError = null,
   onDownloadFullIfc = () => {},
   sanitaryRouteLimitations = [],
+  demoFlowEnabled = false,
+  demoFloorOpened = false,
+  sanitaryRouteCount = 0,
 }: RisersPanelProps) {
-  const canSuggest =
-    fixtures.some((fixture) => fixture.position !== null) ||
-    kitchens.some((kitchen) => kitchen.position !== null)
+  const positionedFixtureCount = fixtures.filter((fixture) => fixture.position !== null).length
+  const positionedKitchenCount = kitchens.filter((kitchen) => kitchen.position !== null).length
+  const canSuggest = positionedFixtureCount > 0 || positionedKitchenCount > 0
   const isDownloadingFullIfc = downloadMode === 'full'
+  const hasRoutePreview = sanitaryRouteCount > 0
+  const demoBlocker = !demoFloorOpened
+    ? 'Open an included ADAM_10 demo floor before placing risers.'
+    : !canSuggest
+      ? 'Confirm detected sanitary fixtures before placing risers.'
+    : risers.length === 0
+      ? 'Place risers before sanitary routing can preview or export routes.'
+      : !hasRoutePreview
+        ? 'Sanitary routing is waiting for valid fixture-to-riser geometry.'
+        : null
 
   return (
     <div className="risers-panel">
@@ -65,6 +81,44 @@ export function RisersPanel({
 
       {isAddingRiser && (
         <p className="risers-panel__hint">Click on the floor plan to place a riser, then drag it to the exact corner if needed.</p>
+      )}
+
+      {demoFlowEnabled && (
+        <section className="risers-panel__demo-flow" aria-label="Sanitary demo flow">
+          <div className="risers-panel__demo-flow-header">
+            <span className="risers-panel__demo-kicker">Investor demo flow</span>
+            <strong>{demoBlocker ? 'Action needed' : 'Ready to export'}</strong>
+          </div>
+          <ol className="risers-panel__demo-steps">
+            <DemoStep done={demoFloorOpened} label="ADAM_10 floor opened" detail="Use an included demo floor before routing." />
+            <DemoStep
+              done={canSuggest}
+              label="Sanitary inputs checked"
+              detail={`${positionedFixtureCount} toilet(s), ${positionedKitchenCount} kitchen area(s) with plan points`}
+            />
+            <DemoStep
+              done={risers.length > 0}
+              label="Risers selected"
+              detail={risers.length > 0 ? `${risers.length} selected/placed riser(s)` : 'Use Place risers from Toilets, Suggest here, or add one manually.'}
+            />
+            <DemoStep
+              done={hasRoutePreview}
+              label="Route preview generated"
+              detail={hasRoutePreview ? `${sanitaryRouteCount} route(s) visible in preview/export` : 'Routes appear after valid risers and fixture inputs.'}
+            />
+          </ol>
+          {demoBlocker ? (
+            <p className="risers-panel__demo-blocker" role="status">{demoBlocker}</p>
+          ) : (
+            <p className="risers-panel__demo-ready" role="status">Sanitary route preview is ready for IFC export.</p>
+          )}
+          <ul className="risers-panel__demo-assumptions">
+            <li>WC routes use Ø110 intent.</li>
+            <li>Small fixtures use Ø50 branches into Ø63 collection mains where needed.</li>
+            <li>Horizontal sanitary routes carry 2.0% slope toward the riser.</li>
+            <li>Grouped branches prefer approximately 45° joins where geometry allows.</li>
+          </ul>
+        </section>
       )}
 
       <div className="risers-panel__download-actions">
@@ -143,6 +197,18 @@ export function RisersPanel({
 
 function fmt(n: number): string {
   return n.toFixed(1)
+}
+
+function DemoStep({ done, label, detail }: { done: boolean; label: string; detail: string }) {
+  return (
+    <li className={['risers-panel__demo-step', done ? 'risers-panel__demo-step--done' : ''].filter(Boolean).join(' ')}>
+      <span className="risers-panel__demo-step-dot" aria-hidden="true">{done ? '✓' : '•'}</span>
+      <span>
+        <strong>{label}</strong>
+        <small>{detail}</small>
+      </span>
+    </li>
+  )
 }
 
 function DownloadIcon({ spinning }: { spinning: boolean }) {

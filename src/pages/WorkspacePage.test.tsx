@@ -184,6 +184,13 @@ describe('WorkspacePage', () => {
     await screen.findByLabelText('Remove riser R2')
     await screen.findByLabelText('Remove riser R3')
 
+    expect(screen.getByLabelText('Sanitary demo flow')).toHaveTextContent('Investor demo flow')
+    expect(screen.getByLabelText('Sanitary demo flow')).toHaveTextContent('Sanitary inputs checked')
+    expect(screen.getByLabelText('Sanitary demo flow')).toHaveTextContent('Risers selected')
+    expect(screen.getByLabelText('Sanitary demo flow')).toHaveTextContent('Route preview generated')
+    expect(screen.getByLabelText('Sanitary demo flow')).toHaveTextContent('WC routes use Ø110 intent')
+    expect(screen.getByLabelText('Sanitary demo flow')).toHaveTextContent('2.0% slope toward the riser')
+
     expect(screen.getByTestId('floor-viewer')).toHaveTextContent('fixtures:2')
     expect(screen.getByTestId('floor-viewer')).toHaveTextContent('kitchens:1')
     expect(screen.getByTestId('floor-viewer')).toHaveTextContent('risers:3')
