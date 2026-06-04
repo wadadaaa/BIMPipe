@@ -39,6 +39,7 @@ interface FloorViewerProps {
   onRiserMove?: (id: RiserId, pos: { x: number; y: number; z: number }) => void
   onSwitch3D?: () => void
   sanitaryRoutes?: SanitaryFixtureRoute[]
+  demoFlowEnabled?: boolean
 }
 
 export function FloorViewer({
@@ -64,6 +65,7 @@ export function FloorViewer({
   onRiserMove = () => {},
   onSwitch3D,
   sanitaryRoutes = [],
+  demoFlowEnabled = false,
 }: FloorViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
@@ -320,7 +322,7 @@ export function FloorViewer({
 
   useEffect(() => {
     scheduleRender()
-  }, [floorMeshes, plottedFixtures, plottedKitchens, risers, sanitaryRoutes])
+  }, [floorMeshes, plottedFixtures, plottedKitchens, risers, sanitaryRoutes, sanitaryViewMode])
 
   useEffect(() => {
     const frameId = requestAnimationFrame(() => {
@@ -328,7 +330,7 @@ export function FloorViewer({
     })
     return () => cancelAnimationFrame(frameId)
     // Overlay projection must run when Before/After mounts or clears SVG routes;
-    // the Three.js render effect intentionally excludes sanitaryViewMode.
+    // route animation helpers are stable across the current viewer lifecycle.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sanitaryViewMode, visibleSanitaryRoutes])
 
@@ -632,7 +634,7 @@ export function FloorViewer({
               Preview limitation: {routeProjectionStatus.failed} / {routeProjectionStatus.total} route segments could not be projected exactly. Showing fallback guide lines.
             </div>
           )}
-          {hasSanitaryPresentation && (
+          {hasSanitaryPresentation && demoFlowEnabled && (
             <section className="floor-viewer__sanitary-compare" aria-label="Sanitary before-after presentation">
               <div className="floor-viewer__sanitary-compare-head">
                 <span className="floor-viewer__sanitary-kicker">Investor demo view</span>
@@ -680,8 +682,8 @@ export function FloorViewer({
                   <dd>{sanitaryRouteSummary.branchSegments} branches</dd>
                 </div>
                 <div>
-                  <dt>{sanitaryRouteSummary.slopeIntentLabel}</dt>
-                  <dd>applies to {sanitaryRouteSummary.totalSegments} segment(s)</dd>
+                  <dt>Slope design intent</dt>
+                  <dd>{sanitaryRouteSummary.slopeIntentLabel} across {sanitaryRouteSummary.totalSegments} segment(s)</dd>
                 </div>
               </dl>
             </section>

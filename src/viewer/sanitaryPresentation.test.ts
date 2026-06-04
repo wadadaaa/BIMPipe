@@ -50,6 +50,10 @@ describe('sanitary presentation helpers', () => {
     })
   })
 
+  it('does not invent a slope when no routes are present', () => {
+    expect(buildSanitaryRouteSummary([]).slopeIntentLabel).toBe('N/A')
+  })
+
   it('summarizes mixed route slopes as an intent range', () => {
     const mixedSlopeRoutes = [
       routes[0],

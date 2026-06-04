@@ -222,9 +222,9 @@ function describeRiserLocation(riser: Riser, fixtures: Fixture[], kitchens: Kitc
     }))
     .sort((a, b) => a.distance - b.distance)[0]
 
-  const coordinateFallback = `${fmt(riser.position.x)} mm, ${fmt(riser.position.z)} mm`
+  const coordinateFallback = `${fmt(riser.position.x)} m, ${fmt(riser.position.z)} m`
   if (!nearest) return coordinateFallback
-  return `near ${nearest.label} · ${Math.round(nearest.distance).toLocaleString()} mm`
+  return `near ${nearest.label} · ${fmt(nearest.distance)} m`
 }
 
 function DemoStep({ done, label, detail }: { done: boolean; label: string; detail: string }) {

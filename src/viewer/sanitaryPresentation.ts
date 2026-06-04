@@ -52,8 +52,8 @@ function formatDiameterLabel(diameterMm: number): string {
 }
 
 function formatSlopeIntentLabel(slopes: number[]): string {
-  const usableSlopes = slopes.length > 0 ? slopes : [0.02]
-  const slopePercents = usableSlopes.map((slope) => slope * 100)
+  if (slopes.length === 0) return 'N/A'
+  const slopePercents = slopes.map((slope) => slope * 100)
   const min = Math.min(...slopePercents)
   const max = Math.max(...slopePercents)
   const formattedMin = min.toFixed(1)
