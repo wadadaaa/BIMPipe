@@ -5,9 +5,9 @@ This report validates the ADAM_10 sanitary routing demo after the grouped routin
 Upstream feature dependencies are already on `main`:
 
 - BIM-58 grouped bathroom drainage routing: merged before BIM-57/BIM-53.
-- BIM-57 sanitary route IFC export: PR #46.
-- BIM-52 simple ADAM_10 sanitary demo flow: PR #47.
-- BIM-53 sanitary route demo polish: PR #48.
+- BIM-57 sanitary route IFC export: PR #46 merged into `main`.
+- BIM-52 simple ADAM_10 sanitary demo flow: landed on `main` via local squash commit `b6d5ee5` after PR #47 was closed because GitHub API merge was unavailable.
+- BIM-53 sanitary route demo polish: landed on `main` via local squash commit `202b0cb` after PR #48 was closed because GitHub API merge was unavailable.
 
 ## Scope
 
