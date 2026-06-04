@@ -41,8 +41,10 @@ export function buildSanitaryRouteSummary(routes: SanitaryFixtureRoute[]): Sanit
 }
 
 function firstDiameterMm(segments: SanitaryRouteSegment[]): number | null {
-  const segment = segments.find((candidate) => (candidate.pipeDiameterMm ?? candidate.diameterMm) != null)
-  return segment?.pipeDiameterMm ?? segment?.diameterMm ?? null
+  // pipeDiameterMm is the canonical segment diameter today; diameterMm is a legacy
+  // export alias retained in buildSanitaryRoutes until IFC export fully migrates.
+  const segment = segments.find((candidate) => candidate.pipeDiameterMm != null)
+  return segment?.pipeDiameterMm ?? null
 }
 
 function formatDiameterLabel(diameterMm: number): string {

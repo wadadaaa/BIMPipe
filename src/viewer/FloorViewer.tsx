@@ -320,7 +320,17 @@ export function FloorViewer({
 
   useEffect(() => {
     scheduleRender()
-  }, [floorMeshes, plottedFixtures, plottedKitchens, risers, sanitaryRoutes, sanitaryViewMode])
+  }, [floorMeshes, plottedFixtures, plottedKitchens, risers, sanitaryRoutes])
+
+  useEffect(() => {
+    const frameId = requestAnimationFrame(() => {
+      animateRouteLines()
+    })
+    return () => cancelAnimationFrame(frameId)
+    // Overlay projection must run when Before/After mounts or clears SVG routes;
+    // the Three.js render effect intentionally excludes sanitaryViewMode.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sanitaryViewMode, visibleSanitaryRoutes])
 
   const raycaster = useRef(new THREE.Raycaster())
   const pointer = useRef(new THREE.Vector2())
