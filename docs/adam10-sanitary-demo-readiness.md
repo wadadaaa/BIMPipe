@@ -71,7 +71,7 @@ Automated smoke summary from `/opt/bimpipe/.hermes/screenshots/BIM-54/20260604T1
 ## Demo-ready presentation path
 
 1. Open `/app` with demo mode enabled.
-2. Upload the agreed ADAM_10 IFC demo asset. In Hermes validation runs this is `/opt/bimpipe/.hermes/demo-assets/ADAM_10/ADAM_10.ifc`; presenters should use the equivalent agreed local copy.
+2. Upload the canonical private ADAM_10 IFC demo asset (`ADAM_10.ifc`). In Hermes validation runs it is registered by `/opt/bimpipe/.hermes/demo-assets/ADAM_10/manifest.json` and stored at `/opt/bimpipe/.hermes/demo-assets/ADAM_10/ADAM_10.ifc`; do not commit the IFC to git. If the asset is missing on a presenter machine, obtain the private ADAM_10 demo asset bundle before running the live flow.
 3. Wait until the included default floor opens and the viewer reports ready.
 4. Open **Toilets** and confirm the seven detected toilets.
 5. Click **Place risers**.
@@ -92,7 +92,7 @@ Automated smoke summary from `/opt/bimpipe/.hermes/screenshots/BIM-54/20260604T1
 - If the dev server does not print readiness logs, verify `http://127.0.0.1:5173/app` directly; Vite may still be serving the app.
 - If the route overlay is not visible, open **Toilets**, click **Place risers**, then switch back to **After** mode.
 - If export is not available, confirm risers have been selected and the **Risers** panel says the sanitary route preview is ready for IFC export.
-- If ADAM_10 fails to parse during the presentation, use the latest prepared BIM-54 screenshot set from the agreed `.hermes/screenshots/BIM-54/<timestamp>/` evidence directory as the fallback walkthrough. The validation run documented here used `/opt/bimpipe/.hermes/screenshots/BIM-54/20260604T154352Z/`.
+- If ADAM_10 fails to parse during the presentation, use the latest prepared BIM-54 screenshot set from the agreed `.hermes/screenshots/BIM-54/<timestamp>/` evidence directory as the fallback walkthrough. Before a live presentation, copy or share that evidence set into the presentation channel/shared drive so it is available outside the Hermes machine. The validation run documented here used `/opt/bimpipe/.hermes/screenshots/BIM-54/20260604T154352Z/`.
 
 ## Verdict
 
