@@ -12,6 +12,7 @@ export interface SanitaryPresentationState {
 }
 
 export interface SanitaryRouteSummary {
+  routeCount: number
   totalSegments: number
   toiletSegments: number
   branchSegments: number
@@ -20,6 +21,7 @@ export interface SanitaryRouteSummary {
   branchDiameterLabel: string
   collectionMainDiameterLabel: string
   slopeIntentLabel: string
+  routeSegmentCountLabel: string
 }
 
 export function buildSanitaryRouteSummary(routes: SanitaryFixtureRoute[]): SanitaryRouteSummary {
@@ -29,6 +31,7 @@ export function buildSanitaryRouteSummary(routes: SanitaryFixtureRoute[]): Sanit
   const collectionMainSegments = segments.filter((segment) => segment.routeRole === 'collectionMain')
 
   return {
+    routeCount: routes.length,
     totalSegments: segments.length,
     toiletSegments: toiletSegments.length,
     branchSegments: branchSegments.length,
@@ -37,6 +40,7 @@ export function buildSanitaryRouteSummary(routes: SanitaryFixtureRoute[]): Sanit
     branchDiameterLabel: formatDiameterLabel(firstDiameterMm(branchSegments) ?? 50),
     collectionMainDiameterLabel: formatDiameterLabel(firstDiameterMm(collectionMainSegments) ?? 63),
     slopeIntentLabel: formatSlopeIntentLabel(routes.map((route) => route.slope)),
+    routeSegmentCountLabel: formatRouteSegmentCountLabel(segments.length),
   }
 }
 
@@ -59,8 +63,66 @@ function formatSlopeIntentLabel(slopes: number[]): string {
   const formattedMin = min.toFixed(1)
   const formattedMax = max.toFixed(1)
   return formattedMin === formattedMax
-    ? `${formattedMin}% route intent`
-    : `${formattedMin}–${formattedMax}% route intent`
+    ? `${formattedMin}% design slope`
+    : `${formattedMin}–${formattedMax}% design slope`
+}
+
+function formatRouteSegmentCountLabel(count: number): string {
+  return `${count} route ${count === 1 ? 'segment' : 'segments'}`
+}
+
+export interface SanitaryRouteFactCard {
+  label: string
+  value: string
+}
+
+export interface SanitaryRouteFactCards {
+  routeFactCards: SanitaryRouteFactCard[]
+  routeBreakdownCards: SanitaryRouteFactCard[]
+  hasBreakdown: boolean
+}
+
+export function buildSanitaryRouteFactCards(summary: SanitaryRouteSummary): SanitaryRouteFactCards {
+  const routeBreakdownCards = [
+    summary.toiletSegments > 0
+      ? {
+          label: `${summary.toiletDiameterLabel} toilet routes`,
+          value: formatRouteCount(summary.toiletSegments, 'route'),
+        }
+      : null,
+    summary.collectionMainSegments > 0
+      ? {
+          label: `${summary.collectionMainDiameterLabel} main lines`,
+          value: formatRouteCount(summary.collectionMainSegments, 'main'),
+        }
+      : null,
+    summary.branchSegments > 0
+      ? {
+          label: `${summary.branchDiameterLabel} branches`,
+          value: formatRouteCount(summary.branchSegments, 'branch', 'branches'),
+        }
+      : null,
+  ].filter((card): card is SanitaryRouteFactCard => card !== null)
+
+  const routeFactCards = [
+    summary.routeCount > 0
+      ? {
+          label: 'Sanitary routes',
+          value: formatRouteCount(summary.routeCount, 'route'),
+        }
+      : null,
+    ...routeBreakdownCards,
+  ].filter((card): card is SanitaryRouteFactCard => card !== null)
+
+  return {
+    routeFactCards,
+    routeBreakdownCards,
+    hasBreakdown: routeBreakdownCards.length > 0,
+  }
+}
+
+function formatRouteCount(count: number, noun: string, plural = `${noun}s`): string {
+  return `${count} ${count === 1 ? noun : plural}`
 }
 
 export function getSanitaryPresentationState({

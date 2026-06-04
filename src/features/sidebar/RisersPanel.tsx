@@ -92,7 +92,7 @@ export function RisersPanel({
       {demoFlowEnabled && (
         <section className="risers-panel__demo-flow" aria-label="Sanitary demo flow">
           <div className="risers-panel__demo-flow-header">
-            <span className="risers-panel__demo-kicker">Investor demo flow</span>
+            <span className="risers-panel__demo-kicker">Route demo flow</span>
             <strong>{demoBlocker ? 'Action needed' : 'Ready to export'}</strong>
           </div>
           <ol className="risers-panel__demo-steps">

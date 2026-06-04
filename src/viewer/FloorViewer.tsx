@@ -7,6 +7,7 @@ import type { FloorMeshes } from '@/shared/ifc/extractFloorMeshes'
 import type { Fixture, FixtureKind, KitchenArea, Riser, RiserId } from '@/domain/types'
 import { ViewTransition } from '@/shared/reactViewTransition'
 import {
+  buildSanitaryRouteFactCards,
   buildSanitaryRouteSummary,
   getSanitaryPresentationState,
   type SanitaryPresentationMode,
@@ -312,6 +313,10 @@ export function FloorViewer({
     [plottedKitchens],
   )
   const sanitaryRouteSummary = useMemo(() => buildSanitaryRouteSummary(sanitaryRoutes), [sanitaryRoutes])
+  const { routeFactCards, hasBreakdown } = useMemo(
+    () => buildSanitaryRouteFactCards(sanitaryRouteSummary),
+    [sanitaryRouteSummary],
+  )
   const sanitaryPresentationState = useMemo(
     () => getSanitaryPresentationState({ mode: sanitaryViewMode, risers, routes: sanitaryRoutes }),
     [risers, sanitaryRoutes, sanitaryViewMode],
@@ -637,7 +642,7 @@ export function FloorViewer({
           {hasSanitaryPresentation && demoFlowEnabled && (
             <section className="floor-viewer__sanitary-compare" aria-label="Sanitary before-after presentation">
               <div className="floor-viewer__sanitary-compare-head">
-                <span className="floor-viewer__sanitary-kicker">Investor demo view</span>
+                <span className="floor-viewer__sanitary-kicker">Route demo view</span>
                 <div className="floor-viewer__sanitary-toggle" role="group" aria-label="Compare sanitary output">
                   <button
                     type="button"
@@ -665,26 +670,28 @@ export function FloorViewer({
               </div>
               <p className="floor-viewer__sanitary-caption">
                 {sanitaryViewMode === 'before'
-                  ? 'Before: detected fixture inputs and selected risers, with generated routes hidden for comparison.'
-                  : 'After: selected risers and sanitary routes highlighted over the dimmed model for presentation.'}
+                  ? 'Detected fixture inputs and selected risers. Generated routes are hidden for comparison.'
+                  : 'Generated sanitary routes are shown with pipe diameters and slope design.'}
               </p>
               <dl className="floor-viewer__sanitary-facts" aria-label="Sanitary route legend">
-                <div>
-                  <dt>{sanitaryRouteSummary.toiletDiameterLabel} toilet</dt>
-                  <dd>{sanitaryRouteSummary.toiletSegments} routes</dd>
-                </div>
-                <div>
-                  <dt>{sanitaryRouteSummary.collectionMainDiameterLabel} main line</dt>
-                  <dd>{sanitaryRouteSummary.collectionMainSegments} mains</dd>
-                </div>
-                <div>
-                  <dt>{sanitaryRouteSummary.branchDiameterLabel} branch</dt>
-                  <dd>{sanitaryRouteSummary.branchSegments} branches</dd>
-                </div>
-                <div>
-                  <dt>Slope design intent</dt>
-                  <dd>{sanitaryRouteSummary.slopeIntentLabel} across {sanitaryRouteSummary.totalSegments} segment(s)</dd>
-                </div>
+                {routeFactCards.map((card) => (
+                  <div key={card.label}>
+                    <dt>{card.label}</dt>
+                    <dd>{card.value}</dd>
+                  </div>
+                ))}
+                {!hasBreakdown && (
+                  <div>
+                    <dt>Route breakdown</dt>
+                    <dd>No route breakdown available yet.</dd>
+                  </div>
+                )}
+                {sanitaryRouteSummary.totalSegments > 0 && (
+                  <div className="floor-viewer__sanitary-fact--slope">
+                    <dt>Slope design</dt>
+                    <dd>{sanitaryRouteSummary.slopeIntentLabel} across {sanitaryRouteSummary.routeSegmentCountLabel}</dd>
+                  </div>
+                )}
               </dl>
             </section>
           )}

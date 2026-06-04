@@ -17,18 +17,30 @@ describe('FloorViewer sanitary route presentation styles', () => {
     }
   })
 
-  it('keeps an investor-readable before-after sanitary comparison surface in the viewer', () => {
+  it('keeps a neutral before-after sanitary demo surface in the viewer', () => {
     const component = readFileSync('src/viewer/FloorViewer.tsx', 'utf8')
     const stylesheet = readFileSync('src/viewer/FloorViewer.css', 'utf8')
 
     expect(component).toContain('floor-viewer__sanitary-compare')
+    expect(component).toContain('Route demo view')
+    expect(component).toContain('Detected fixture inputs and selected risers. Generated routes are hidden for comparison.')
+    expect(component).toContain('Generated sanitary routes are shown with pipe diameters and slope design.')
     expect(component).toContain('Before')
     expect(component).toContain('After')
-    expect(component).toContain('toiletDiameterLabel')
-    expect(component).toContain('collectionMainDiameterLabel')
-    expect(component).toContain('branchDiameterLabel')
+    expect(component).toContain('routeFactCards')
+    expect(component).toContain('No route breakdown available yet.')
     expect(component).toContain('slopeIntentLabel')
+    expect(component).toContain('routeSegmentCountLabel')
     expect(stylesheet).toContain('.floor-viewer__sanitary-compare')
     expect(stylesheet).toContain('.floor-viewer__sanitary-toggle')
+  })
+
+  it('does not contain investor-facing product copy', () => {
+    const productSources = [
+      readFileSync('src/viewer/FloorViewer.tsx', 'utf8'),
+      readFileSync('src/features/sidebar/RisersPanel.tsx', 'utf8'),
+    ].join('\n')
+
+    expect(productSources).not.toMatch(/investor/i)
   })
 })

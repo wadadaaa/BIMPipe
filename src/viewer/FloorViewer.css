@@ -874,7 +874,7 @@
 
 .floor-viewer__sanitary-facts {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
   gap: 6px;
   margin: 0;
 }
@@ -884,6 +884,10 @@
   border-radius: 12px;
   border: 1px solid var(--border);
   background: var(--surface-soft);
+}
+
+.floor-viewer__sanitary-facts .floor-viewer__sanitary-fact--slope {
+  grid-column: span 2;
 }
 
 .floor-viewer__sanitary-facts dt {

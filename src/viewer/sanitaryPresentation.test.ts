@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Riser } from '@/domain/types'
 import type { SanitaryFixtureRoute } from '@/shared/routes/buildSanitaryRoutes'
-import { buildSanitaryRouteSummary, getSanitaryPresentationState } from './sanitaryPresentation'
+import { buildSanitaryRouteFactCards, buildSanitaryRouteSummary, getSanitaryPresentationState } from './sanitaryPresentation'
 
 const risers = [{ id: 'r1' }, { id: 'r2' }] as Riser[]
 const routes = [
@@ -37,8 +37,9 @@ describe('sanitary presentation helpers', () => {
     expect(after.visibleRoutes).toBe(routes)
   })
 
-  it('counts route categories by explicit route role for investor labels', () => {
+  it('counts route categories by explicit route role for demo labels', () => {
     expect(buildSanitaryRouteSummary(routes)).toEqual({
+      routeCount: 1,
       totalSegments: 3,
       toiletSegments: 1,
       branchSegments: 1,
@@ -46,7 +47,8 @@ describe('sanitary presentation helpers', () => {
       toiletDiameterLabel: '110 mm',
       branchDiameterLabel: '50 mm',
       collectionMainDiameterLabel: '63 mm',
-      slopeIntentLabel: '2.0% route intent',
+      slopeIntentLabel: '2.0% design slope',
+      routeSegmentCountLabel: '3 route segments',
     })
   })
 
@@ -60,7 +62,20 @@ describe('sanitary presentation helpers', () => {
       { ...routes[0], fixtureExpressId: 2, slope: 0.015 },
     ] as SanitaryFixtureRoute[]
 
-    expect(buildSanitaryRouteSummary(mixedSlopeRoutes).slopeIntentLabel).toBe('1.5–2.0% route intent')
+    expect(buildSanitaryRouteSummary(mixedSlopeRoutes).slopeIntentLabel).toBe('1.5–2.0% design slope')
+  })
+
+  it('formats route segment counts with clean singular and plural copy', () => {
+    expect(buildSanitaryRouteSummary(routes).routeSegmentCountLabel).toBe('3 route segments')
+
+    const oneSegmentRoute = [
+      {
+        ...routes[0],
+        segments: [routes[0].segments[0]],
+      },
+    ] as SanitaryFixtureRoute[]
+
+    expect(buildSanitaryRouteSummary(oneSegmentRoute).routeSegmentCountLabel).toBe('1 route segment')
   })
 
   it('keeps per-role diameter defaults when a route role is absent', () => {
@@ -81,5 +96,55 @@ describe('sanitary presentation helpers', () => {
       collectionMainSegments: 0,
       collectionMainDiameterLabel: '63 mm',
     })
+  })
+
+  it('hides zero-count route breakdown cards while keeping total routes', () => {
+    const toiletOnlyRoutes = [
+      {
+        ...routes[0],
+        segments: [routes[0].segments[0]],
+      },
+    ] as SanitaryFixtureRoute[]
+
+    const facts = buildSanitaryRouteFactCards(buildSanitaryRouteSummary(toiletOnlyRoutes))
+
+    expect(facts.routeFactCards).toEqual([
+      { label: 'Sanitary routes', value: '1 route' },
+      { label: '110 mm toilet routes', value: '1 route' },
+    ])
+    expect(facts.hasBreakdown).toBe(true)
+  })
+
+  it('reports when no route breakdown cards are available yet', () => {
+    const unclassifiedRoutes = [
+      {
+        ...routes[0],
+        segments: [
+          { ...routes[0].segments[0], routeRole: 'unknown' as never },
+        ],
+      },
+    ] as SanitaryFixtureRoute[]
+
+    const facts = buildSanitaryRouteFactCards(buildSanitaryRouteSummary(unclassifiedRoutes))
+
+    expect(facts.routeFactCards).toEqual([{ label: 'Sanitary routes', value: '1 route' }])
+    expect(facts.hasBreakdown).toBe(false)
+  })
+
+  it('uses clean plural wording for multiple branch cards', () => {
+    const branchRoutes = [
+      {
+        ...routes[0],
+        segments: [
+          { ...routes[0].segments[2] },
+          { ...routes[0].segments[2], from: { x: 3, y: 0, z: 3 }, to: { x: 4, y: 0, z: 4 } },
+        ],
+      },
+    ] as SanitaryFixtureRoute[]
+
+    const facts = buildSanitaryRouteFactCards(buildSanitaryRouteSummary(branchRoutes))
+
+    expect(facts.routeFactCards).toContainEqual({ label: '50 mm branches', value: '2 branches' })
+    expect(facts.routeFactCards).not.toContainEqual({ label: '50 mm branches', value: '2 branchs' })
   })
 })

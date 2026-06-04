@@ -184,7 +184,7 @@ describe('WorkspacePage', () => {
     await screen.findByLabelText('Remove riser R2')
     await screen.findByLabelText('Remove riser R3')
 
-    expect(screen.getByLabelText('Sanitary demo flow')).toHaveTextContent('Investor demo flow')
+    expect(screen.getByLabelText('Sanitary demo flow')).toHaveTextContent('Route demo flow')
     expect(screen.getByLabelText('Sanitary demo flow')).toHaveTextContent('Action needed')
     expect(screen.getByText('ADAM_10 floor opened').closest('li')).toHaveClass('risers-panel__demo-step--done')
     expect(screen.getByText('Sanitary inputs checked').closest('li')).toHaveClass('risers-panel__demo-step--done')
