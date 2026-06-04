@@ -15,12 +15,20 @@ export interface SanitaryExportSegment {
   fixtureExpressIds: number[]
 }
 
+export interface SanitaryExportSkippedSegment {
+  key: string
+  fixtureExpressId: number
+  riserId: string
+  reason: string
+}
+
 const COORD_KEY_SCALE = 1000
 
 export function collectSanitaryExportSegments(
   routes: SanitaryFixtureRoute[],
   storeys: Pick<Storey, 'id' | 'elevation'>[],
   risers: Riser[],
+  skippedSegments: SanitaryExportSkippedSegment[] = [],
 ): SanitaryExportSegment[] {
   if (routes.length === 0) return []
 
@@ -30,10 +38,26 @@ export function collectSanitaryExportSegments(
 
   for (const route of routes) {
     const riser = riserById.get(route.riserId)
-    if (!riser) continue
+    if (!riser) {
+      skippedSegments.push({
+        key: routeSkipKey(route),
+        fixtureExpressId: route.fixtureExpressId,
+        riserId: route.riserId,
+        reason: `Sanitary route for fixture ${route.fixtureExpressId} references missing riser ${route.riserId}.`,
+      })
+      continue
+    }
 
     const riserStoreyElevation = storeyElevationById.get(riser.storeyId)
-    if (typeof riserStoreyElevation !== 'number' || !Number.isFinite(riserStoreyElevation)) continue
+    if (typeof riserStoreyElevation !== 'number' || !Number.isFinite(riserStoreyElevation)) {
+      skippedSegments.push({
+        key: routeSkipKey(route),
+        fixtureExpressId: route.fixtureExpressId,
+        riserId: route.riserId,
+        reason: `Sanitary route for fixture ${route.fixtureExpressId} references riser ${route.riserId} on storey #${riser.storeyId} without a resolvable elevation.`,
+      })
+      continue
+    }
 
     let upstreamPlanDistance = 0
     for (const segment of route.segments) {
@@ -89,6 +113,10 @@ function segmentGeometryKey(segment: RouteSegment, riserId: string): string {
   const from = coordKey(segment.from)
   const to = coordKey(segment.to)
   return `${riserId}|${from}->${to}|${segment.kind}|${segment.pipeDiameterMm}`
+}
+
+function routeSkipKey(route: SanitaryFixtureRoute): string {
+  return `${route.riserId}|fixture-${route.fixtureExpressId}`
 }
 
 function coordKey(point: { x: number; y: number; z: number }): string {

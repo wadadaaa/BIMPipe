@@ -4,6 +4,7 @@ import {
   createViewerPointToStoreyLocalResolver,
   writeSanitaryRouteElements,
   writeSanitaryRouteSystemAssignment,
+  type SanitaryRouteExportDebugSummary,
 } from '@/shared/ifc/exportSanitaryRouteElements'
 import { Handle, type IfcAPI } from 'web-ifc'
 import type { PlanBounds, Riser, Storey, StoreyId } from '@/domain/types'
@@ -114,6 +115,7 @@ export type FullIfcRiserDebugArtifact = {
   schema: string
   sourceFloorPlanBounds: PlanBounds | null
   systemAssignment: FullIfcSystemAssignmentDebug | null
+  sanitaryRouteExport: SanitaryRouteExportDebugSummary | null
   risers: FullIfcRiserDebugRecord[]
   warnings: string[]
   notes: string[]
@@ -345,6 +347,12 @@ async function exportFullIfcWithRisersInternal(
       IFCRELCONTAINEDINSPATIALSTRUCTURE,
       debugMapping?.notes,
     )
+    if (debugMapping) {
+      debugMapping.sanitaryRouteExport = sanitaryRouteExport.debugSummary
+      for (const skippedSegment of sanitaryRouteExport.debugSummary.skippedSegments) {
+        debugMapping.notes.push(`Skipped sanitary route segment ${skippedSegment.key}: ${skippedSegment.reason}`)
+      }
+    }
     if (sanitaryRouteExport.flowSegmentHandles.length > 0) {
       writeSanitaryRouteSystemAssignment(
         api,
@@ -631,6 +639,7 @@ function createDebugArtifact(
     schema,
     sourceFloorPlanBounds,
     systemAssignment: null,
+    sanitaryRouteExport: null,
     risers: [],
     warnings: [],
     notes: [

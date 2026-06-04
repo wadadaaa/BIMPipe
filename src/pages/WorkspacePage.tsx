@@ -387,26 +387,6 @@ export function WorkspacePage({
     })
   }
 
-  const sanitaryRoutingPlanForExport = useMemo(() => {
-    if (!demoRuntime.enabled) return { routes: [], limitations: [], debugGroups: [] }
-    // Risers span every eligible floor (the physical vertical shaft), but demo sanitary routing
-    // stays on the demo-scoped floors. Scope the riser set used for routing so exported routes are
-    // not duplicated up the whole shaft when fixtures only exist on the demo floors.
-    //
-    // Note: this still leaves multiple storeys in `scopedRisers` (the demo's includedFloors, e.g.
-    // ground/1/2 for ADAM_10), so `duplicateRoutesAcrossRiserStacks` intentionally replicates the
-    // active floor's routes across those demo floors — it is not disabled, only bounded to scope.
-    const config = demoRuntime.config
-    const storeyById = new Map(storeys.map((storey) => [storey.id, storey]))
-    const scopedRisers = risers.filter((riser) => {
-      const storey = storeyById.get(riser.storeyId)
-      return storey ? isStoreyIncludedInDemoScope(storey.name, config) : false
-    })
-    return buildSanitaryRoutingDemoPlan(fixtures, scopedRisers, config)
-  }, [demoRuntime, fixtures, risers, storeys])
-
-  const sanitaryRoutesForExport = sanitaryRoutingPlanForExport.routes
-
   async function handleDownloadIfc() {
     if (
       sourceIfcBytesRef.current === null ||
@@ -470,13 +450,8 @@ export function WorkspacePage({
             detectionAggregation: detectionDebugRef.current,
             risers,
           }),
-          sanitaryRouteDebugGroups:
-            sanitaryRoutingPlanForExport.debugGroups.length > 0
-              ? sanitaryRoutingPlanForExport.debugGroups
-              : sanitaryRoutingPreview.debugGroups,
-          sanitaryRouteLimitations: Array.from(
-            new Set([...sanitaryRoutingPlanForExport.limitations, ...sanitaryRoutingPreview.limitations]),
-          ),
+          sanitaryRouteDebugGroups: sanitaryRoutingPreview.debugGroups,
+          sanitaryRouteLimitations: sanitaryRoutingPreview.limitations,
         },
         buildExportDebugFileName(modelFileName, selectedStorey?.name ?? null),
       )
@@ -500,6 +475,11 @@ export function WorkspacePage({
     const floorRisers = risers.filter((riser) => riser.storeyId === selectedStoreyId)
     return buildSanitaryRoutingDemoPlan(floorFixtures, floorRisers, demoRuntime.config)
   }, [demoRuntime, fixtures, risers, selectedStoreyId])
+
+  // Export the same route plan currently shown in the viewer. Do not recompute a separate export
+  // plan here: duplicate/independent planning can drift from the preview and hide missing routes in
+  // the downloaded IFC/debug JSON.
+  const sanitaryRoutesForExport = sanitaryRoutingPreview.routes
 
   const selectedStorey = storeys.find((storey) => storey.id === selectedStoreyId) ?? null
   const shouldLoadViewer =
