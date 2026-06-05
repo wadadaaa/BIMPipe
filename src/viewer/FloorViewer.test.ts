@@ -35,6 +35,20 @@ describe('FloorViewer sanitary route presentation styles', () => {
     expect(stylesheet).toContain('.floor-viewer__sanitary-toggle')
   })
 
+  it('keeps DEMO-only flow animation controls and visual layer isolated to the viewer', () => {
+    const component = readFileSync('src/viewer/FloorViewer.tsx', 'utf8')
+    const stylesheet = readFileSync('src/viewer/FloorViewer.css', 'utf8')
+
+    expect(component).toContain('buildSanitaryFlowParticles')
+    expect(component).toContain('Play Flow')
+    expect(component).toContain('Pause Flow')
+    expect(component).toContain('Replay Flow')
+    expect(component).toContain('floor-viewer__flow-overlay')
+    expect(component).toContain('flowAnimationState')
+    expect(stylesheet).toContain('.floor-viewer__flow-overlay')
+    expect(stylesheet).toContain('.floor-viewer__flow-particle')
+  })
+
   it('does not contain investor-facing product copy', () => {
     const productSources = [
       readFileSync('src/viewer/FloorViewer.tsx', 'utf8'),

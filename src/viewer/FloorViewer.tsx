@@ -12,6 +12,7 @@ import {
   getSanitaryPresentationState,
   type SanitaryPresentationMode,
 } from './sanitaryPresentation'
+import { buildSanitaryFlowParticles } from './sanitaryFlowAnimation'
 import './FloorViewer.css'
 
 const HOVER_ACCENT = new THREE.Color(0xffb45f)
@@ -83,8 +84,13 @@ export function FloorViewer({
   const projectionVecRef = useRef(new THREE.Vector3())
   const routeLineRefsRef = useRef<Map<string, SVGLineElement>>(new Map())
   const routeLabelRefsRef = useRef<Map<string, SVGTextElement>>(new Map())
+  const flowParticleRefsRef = useRef<Map<string, SVGCircleElement>>(new Map())
+  const flowAnimationFrameRef = useRef<number>(0)
+  const flowAnimationStartRef = useRef<number | null>(null)
+  const flowAnimationPausedAtRef = useRef<number | null>(null)
   const [routeProjectionStatus, setRouteProjectionStatus] = useState<{ failed: number; total: number }>({ failed: 0, total: 0 })
   const [sanitaryViewMode, setSanitaryViewMode] = useState<SanitaryPresentationMode>('after')
+  const [flowAnimationState, setFlowAnimationState] = useState<'idle' | 'playing' | 'paused'>('idle')
 
   // Fixture overlay: map of expressId → positioned div element
   const fixtureMarkerRefsRef = useRef<Map<number, HTMLDivElement>>(new Map())
@@ -204,6 +210,7 @@ export function FloorViewer({
       controls.removeEventListener('change', queueRender)
       controls.dispose()
       renderer.dispose()
+      cancelAnimationFrame(flowAnimationFrameRef.current)
     }
   }, [onObjectHover, onObjectSelect])
 
@@ -324,20 +331,50 @@ export function FloorViewer({
   const hasSanitaryPresentation = sanitaryPresentationState.hasPresentation
   const visibleSanitaryRoutes = sanitaryPresentationState.visibleRoutes
   const visibleRisers = sanitaryPresentationState.visibleRisers
+  const flowParticles = useMemo(
+    () => buildSanitaryFlowParticles(visibleSanitaryRoutes),
+    [visibleSanitaryRoutes],
+  )
+  const hasFlowAnimation = demoFlowEnabled && sanitaryViewMode === 'after' && flowParticles.length > 0
 
   useEffect(() => {
     scheduleRender()
   }, [floorMeshes, plottedFixtures, plottedKitchens, risers, sanitaryRoutes, sanitaryViewMode])
 
   useEffect(() => {
+    if (!hasFlowAnimation) {
+      setFlowAnimationState('idle')
+      flowAnimationStartRef.current = null
+      flowAnimationPausedAtRef.current = null
+      for (const [, particle] of flowParticleRefsRef.current) particle.style.opacity = '0'
+    }
+  }, [hasFlowAnimation])
+
+  useEffect(() => {
+    cancelAnimationFrame(flowAnimationFrameRef.current)
+    if (flowAnimationState !== 'playing') return
+
+    const tick = (timestamp: number) => {
+      if (flowAnimationStartRef.current === null) flowAnimationStartRef.current = timestamp
+      animateFlowParticles(timestamp)
+      flowAnimationFrameRef.current = requestAnimationFrame(tick)
+    }
+    flowAnimationFrameRef.current = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(flowAnimationFrameRef.current)
+  }, [flowAnimationState, flowParticles])
+
+  useEffect(() => {
     const frameId = requestAnimationFrame(() => {
       animateRouteLines()
+      if (flowAnimationState === 'paused' && flowAnimationPausedAtRef.current !== null) {
+        animateFlowParticles(flowAnimationPausedAtRef.current)
+      }
     })
     return () => cancelAnimationFrame(frameId)
     // Overlay projection must run when Before/After mounts or clears SVG routes;
     // route animation helpers are stable across the current viewer lifecycle.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sanitaryViewMode, visibleSanitaryRoutes])
+  }, [sanitaryViewMode, visibleSanitaryRoutes, flowAnimationState])
 
   const raycaster = useRef(new THREE.Raycaster())
   const pointer = useRef(new THREE.Vector2())
@@ -505,6 +542,33 @@ export function FloorViewer({
     scheduleRender()
   }
 
+  function handlePlayFlow() {
+    setSanitaryViewMode('after')
+    const now = performance.now()
+    if (flowAnimationStartRef.current === null) {
+      flowAnimationStartRef.current = now
+    } else if (flowAnimationPausedAtRef.current !== null) {
+      flowAnimationStartRef.current += now - flowAnimationPausedAtRef.current
+    }
+    flowAnimationPausedAtRef.current = null
+    setFlowAnimationState('playing')
+  }
+
+  function handlePauseFlow() {
+    const now = performance.now()
+    flowAnimationPausedAtRef.current = now
+    animateFlowParticles(now)
+    setFlowAnimationState('paused')
+  }
+
+  function handleReplayFlow() {
+    setSanitaryViewMode('after')
+    flowAnimationStartRef.current = performance.now()
+    flowAnimationPausedAtRef.current = null
+    animateFlowParticles(flowAnimationStartRef.current)
+    setFlowAnimationState('playing')
+  }
+
   const showOverlay = isLoading || !!error || !floorMeshes
   const overlayText = isLoading
     ? 'Extracting floor geometry...'
@@ -634,6 +698,35 @@ export function FloorViewer({
               }),
             )}
           </svg>
+          {hasFlowAnimation && (
+            <svg className="floor-viewer__flow-overlay" aria-hidden="true">
+              {flowParticles.map((particle) => (
+                <circle
+                  key={particle.key}
+                  ref={(el) => {
+                    if (el) flowParticleRefsRef.current.set(particle.key, el)
+                    else flowParticleRefsRef.current.delete(particle.key)
+                  }}
+                  className={[
+                    'floor-viewer__flow-particle',
+                    `floor-viewer__flow-particle--${particle.role}`,
+                    particle.aggregation === 'collector' ? 'floor-viewer__flow-particle--collector' : '',
+                  ].filter(Boolean).join(' ')}
+                  r={particle.diameterMm >= 100 ? 5.5 : particle.diameterMm >= 63 ? 4.6 : 3.8}
+                  data-flow-from-x={String(particle.from.x)}
+                  data-flow-from-y={String(particle.from.y)}
+                  data-flow-from-z={String(particle.from.z)}
+                  data-flow-to-x={String(particle.to.x)}
+                  data-flow-to-y={String(particle.to.y)}
+                  data-flow-to-z={String(particle.to.z)}
+                  data-flow-delay-ms={String(particle.phaseDelayMs)}
+                  data-flow-duration-ms={String(particle.durationMs)}
+                  data-flow-target-riser-id={particle.targetRiserId}
+                  style={{ opacity: 0 }}
+                />
+              ))}
+            </svg>
+          )}
           {routeProjectionStatus.failed > 0 && (
             <div className="floor-viewer__route-debug" role="status">
               Preview limitation: {routeProjectionStatus.failed} / {routeProjectionStatus.total} route segments could not be projected exactly. Showing fallback guide lines.
@@ -673,6 +766,32 @@ export function FloorViewer({
                   ? 'Detected fixture inputs and selected risers. Generated routes are hidden for comparison.'
                   : 'Generated sanitary routes are shown with pipe diameters and slope design.'}
               </p>
+              {hasFlowAnimation && (
+                <div className="floor-viewer__flow-controls" role="group" aria-label="Sanitary flow animation controls">
+                  <button
+                    type="button"
+                    className="floor-viewer__flow-btn floor-viewer__flow-btn--primary"
+                    onClick={flowAnimationState === 'playing' ? handlePauseFlow : handlePlayFlow}
+                    aria-pressed={flowAnimationState === 'playing'}
+                  >
+                    {flowAnimationState === 'playing' ? 'Pause Flow' : 'Play Flow'}
+                  </button>
+                  <button
+                    type="button"
+                    className="floor-viewer__flow-btn"
+                    onClick={handleReplayFlow}
+                  >
+                    Replay Flow
+                  </button>
+                  <span className="floor-viewer__flow-status" aria-live="polite">
+                    {flowAnimationState === 'playing'
+                      ? 'Flow moving toward risers'
+                      : flowAnimationState === 'paused'
+                        ? 'Flow paused'
+                        : 'Ready to animate drainage flow'}
+                  </span>
+                </div>
+              )}
               <dl className="floor-viewer__sanitary-facts" aria-label="Sanitary route legend">
                 {routeFactCards.map((card) => (
                   <div key={card.label}>
@@ -977,6 +1096,40 @@ export function FloorViewer({
     }
   }
 
+  function animateFlowParticles(timestamp: number) {
+    const canvas = canvasRef.current
+    const camera = cameraRef.current
+    const animationStart = flowAnimationStartRef.current
+    if (!canvas || !camera || animationStart === null) return
+
+    for (const [, particle] of flowParticleRefsRef.current) {
+      const duration = parseFloat(particle.dataset['flowDurationMs'] ?? '2200')
+      const delay = parseFloat(particle.dataset['flowDelayMs'] ?? '0')
+      const elapsed = Math.max(0, timestamp - animationStart - delay)
+      const progress = duration > 0 ? (elapsed % duration) / duration : 0
+      const eased = easeFlowProgress(progress)
+      const from = new THREE.Vector3(
+        parseFloat(particle.dataset['flowFromX'] ?? '0'),
+        parseFloat(particle.dataset['flowFromY'] ?? '0'),
+        parseFloat(particle.dataset['flowFromZ'] ?? '0'),
+      )
+      const to = new THREE.Vector3(
+        parseFloat(particle.dataset['flowToX'] ?? '0'),
+        parseFloat(particle.dataset['flowToY'] ?? '0'),
+        parseFloat(particle.dataset['flowToZ'] ?? '0'),
+      )
+      const world = from.lerp(to, eased)
+      const projected = projectOverlayPointOnPlan(world, canvas, camera, planPlaneRef.current)
+      if (!projected) {
+        particle.style.opacity = '0'
+        continue
+      }
+      particle.style.opacity = progress < 0.08 ? `${progress / 0.08}` : progress > 0.9 ? `${(1 - progress) / 0.1}` : '1'
+      particle.setAttribute('cx', `${projected.x}`)
+      particle.setAttribute('cy', `${projected.y}`)
+    }
+  }
+
   function positionOverlayMarker(el: HTMLDivElement, x: number, y: number, z: number) {
     const canvas = canvasRef.current
     const camera = cameraRef.current
@@ -1055,6 +1208,13 @@ function fallbackRouteLinePosition(line: SVGLineElement, canvas: HTMLCanvasEleme
   const slot = Math.abs(hash) % 7
   const y = 22 + slot * 10
   return { x1: 14, y1: y, x2: Math.max(canvas.clientWidth * 0.35, 80), y2: y }
+}
+
+function easeFlowProgress(progress: number): number {
+  // Subtle acceleration keeps the DEMO flow legible while still feeling alive.
+  return progress < 0.5
+    ? 2 * progress * progress
+    : 1 - Math.pow(-2 * progress + 2, 2) / 2
 }
 
 function buildFixtureMarkerLabels(
