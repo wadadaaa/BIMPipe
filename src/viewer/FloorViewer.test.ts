@@ -47,6 +47,8 @@ describe('FloorViewer sanitary route presentation styles', () => {
     expect(component).toContain('floor-viewer__flow-stream')
     expect(component).toContain('floor-viewer__flow-node')
     expect(component).toContain('floor-viewer__flow-card')
+    expect(component).toContain("theme === 'dark'")
+    expect(component).toContain('serviceMapThemeEnabled ?')
     expect(component).toContain('buildServiceMapFlowPath')
     expect(component).toContain("['rail', 'halo', 'core', 'pulse']")
     expect(component).toContain('flowAnimationState')

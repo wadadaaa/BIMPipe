@@ -96,6 +96,7 @@ export function FloorViewer({
   const [routeProjectionStatus, setRouteProjectionStatus] = useState<{ failed: number; total: number }>({ failed: 0, total: 0 })
   const [sanitaryViewMode, setSanitaryViewMode] = useState<SanitaryPresentationMode>('after')
   const [flowAnimationState, setFlowAnimationState] = useState<'idle' | 'playing' | 'paused'>('idle')
+  const serviceMapThemeEnabled = demoFlowEnabled && theme === 'dark'
 
   // Fixture overlay: map of expressId → positioned div element
   const fixtureMarkerRefsRef = useRef<Map<number, HTMLDivElement>>(new Map())
@@ -224,11 +225,11 @@ export function FloorViewer({
     const scene = sceneRef.current
     if (!renderer || !scene) return
 
-    const viewerBackground = readViewerBackgroundColor(demoFlowEnabled)
+    const viewerBackground = readViewerBackgroundColor(serviceMapThemeEnabled)
     renderer.setClearColor(viewerBackground, 1)
     scene.background = viewerBackground
     scheduleRender()
-  }, [theme, demoFlowEnabled])
+  }, [theme, serviceMapThemeEnabled])
 
   useEffect(() => {
     const scene = sceneRef.current
@@ -254,7 +255,7 @@ export function FloorViewer({
     }
 
     const { group, boundingBox } = floorMeshes
-    styleFloorGroup(group, demoFlowEnabled ? 'dark' : theme)
+    styleFloorGroup(group, serviceMapThemeEnabled ? 'dark' : theme)
     scene.add(group)
     floorGroupRef.current = group
     boundsRef.current = boundingBox
@@ -270,7 +271,7 @@ export function FloorViewer({
       .normalize()
     planPlaneRef.current.setFromNormalAndCoplanarPoint(camNormal, center)
     scheduleRender()
-  }, [floorMeshes, onObjectHover, onObjectSelect, theme, demoFlowEnabled])
+  }, [floorMeshes, onObjectHover, onObjectSelect, theme, serviceMapThemeEnabled])
 
   useEffect(() => {
     const floorGroup = floorGroupRef.current
@@ -587,7 +588,7 @@ export function FloorViewer({
         : 'Upload an IFC file and select a floor.'
 
   return (
-    <div className={['floor-viewer', demoFlowEnabled ? 'floor-viewer--service-map' : ''].filter(Boolean).join(' ')}>
+    <div className={['floor-viewer', serviceMapThemeEnabled ? 'floor-viewer--service-map' : ''].filter(Boolean).join(' ')}>
       <canvas
         ref={canvasRef}
         className={[
