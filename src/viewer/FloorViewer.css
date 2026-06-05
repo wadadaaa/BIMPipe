@@ -274,7 +274,7 @@
 
 .floor-viewer__flow-stream--halo {
   stroke: rgba(68, 235, 190, 0.24);
-  filter: url(#sanitary-flow-glow) drop-shadow(0 0 18px rgba(42, 218, 180, 0.54));
+  filter: drop-shadow(0 0 18px rgba(42, 218, 180, 0.54));
 }
 
 .floor-viewer__flow-stream--core {
@@ -295,7 +295,7 @@
 
 .floor-viewer__flow-stream--fixtureBranch.floor-viewer__flow-stream--halo {
   stroke: rgba(255, 190, 54, 0.24);
-  filter: url(#sanitary-flow-glow) drop-shadow(0 0 18px rgba(255, 176, 38, 0.46));
+  filter: drop-shadow(0 0 18px rgba(255, 176, 38, 0.46));
 }
 
 .floor-viewer__flow-stream--fixtureBranch.floor-viewer__flow-stream--core {

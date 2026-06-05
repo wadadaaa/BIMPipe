@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { startTransition, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react'
 import * as THREE from 'three'
 import { MapControls } from 'three/examples/jsm/controls/MapControls.js'
 import type { ThemeMode } from '@/app/App'
@@ -82,6 +82,9 @@ export function FloorViewer({
   const boundsRef = useRef<THREE.Box3 | null>(null)
   const floorGroupRef = useRef<THREE.Group | null>(null)
   const projectionVecRef = useRef(new THREE.Vector3())
+  const flowProjectionFromRef = useRef(new THREE.Vector3())
+  const flowProjectionToRef = useRef(new THREE.Vector3())
+  const flowGlowId = `sanitary-flow-glow-${useId().replace(/:/g, '')}`
   const routeLineRefsRef = useRef<Map<string, SVGLineElement>>(new Map())
   const routeLabelRefsRef = useRef<Map<string, SVGTextElement>>(new Map())
   const flowStreamRefsRef = useRef<Map<string, SVGLineElement>>(new Map())
@@ -567,7 +570,6 @@ export function FloorViewer({
     setSanitaryViewMode('after')
     flowAnimationStartRef.current = performance.now()
     flowAnimationPausedAtRef.current = null
-    animateFlowStreams()
     setFlowAnimationState('playing')
   }
 
@@ -703,7 +705,7 @@ export function FloorViewer({
           {hasFlowAnimation && (
             <svg className="floor-viewer__flow-overlay" aria-hidden="true">
               <defs>
-                <filter id="sanitary-flow-glow" x="-35%" y="-35%" width="170%" height="170%">
+                <filter id={flowGlowId} x="-35%" y="-35%" width="170%" height="170%">
                   <feGaussianBlur stdDeviation="4" result="blur" />
                   <feMerge>
                     <feMergeNode in="blur" />
@@ -738,6 +740,7 @@ export function FloorViewer({
                       data-flow-diameter-mm={String(stream.diameterMm)}
                       data-flow-target-riser-id={stream.targetRiserId}
                       data-flow-layer={layer}
+                      filter={layer === 'halo' ? `url(#${flowGlowId})` : undefined}
                       style={{
                         opacity: 0,
                         animationDelay: `${stream.phaseDelayMs}ms`,
@@ -1125,18 +1128,18 @@ export function FloorViewer({
     if (!canvas || !camera) return
 
     for (const [, stream] of flowStreamRefsRef.current) {
-      const from = new THREE.Vector3(
+      const from = flowProjectionFromRef.current.set(
         parseFloat(stream.dataset['flowFromX'] ?? '0'),
         parseFloat(stream.dataset['flowFromY'] ?? '0'),
         parseFloat(stream.dataset['flowFromZ'] ?? '0'),
       )
-      const to = new THREE.Vector3(
+      const to = flowProjectionToRef.current.set(
         parseFloat(stream.dataset['flowToX'] ?? '0'),
         parseFloat(stream.dataset['flowToY'] ?? '0'),
         parseFloat(stream.dataset['flowToZ'] ?? '0'),
       )
-      const fromPt = projectOverlayPointOnPlan(from, canvas, camera, planPlaneRef.current)
-      const toPt = projectOverlayPointOnPlan(to, canvas, camera, planPlaneRef.current)
+      const fromPt = projectOverlayPointOnPlanMutable(from, canvas, camera, planPlaneRef.current)
+      const toPt = projectOverlayPointOnPlanMutable(to, canvas, camera, planPlaneRef.current)
       if (!fromPt || !toPt) {
         stream.style.opacity = '0'
         continue
@@ -1216,6 +1219,21 @@ function projectOverlayPointOnPlan(
   planPlane: THREE.Plane,
 ) {
   const vec = world.clone()
+  const distanceToPlan = planPlane.distanceToPoint(vec)
+  if (Number.isFinite(distanceToPlan)) {
+    vec.addScaledVector(planPlane.normal, -distanceToPlan)
+  }
+  vec.project(camera)
+  if (!Number.isFinite(vec.x) || !Number.isFinite(vec.y) || !Number.isFinite(vec.z) || vec.z < -1 || vec.z > 1) return null
+  return { x: ((vec.x + 1) / 2) * canvas.clientWidth, y: ((-vec.y + 1) / 2) * canvas.clientHeight }
+}
+
+function projectOverlayPointOnPlanMutable(
+  vec: THREE.Vector3,
+  canvas: HTMLCanvasElement,
+  camera: THREE.OrthographicCamera,
+  planPlane: THREE.Plane,
+) {
   const distanceToPlan = planPlane.distanceToPoint(vec)
   if (Number.isFinite(distanceToPlan)) {
     vec.addScaledVector(planPlane.normal, -distanceToPlan)

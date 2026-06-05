@@ -37,7 +37,7 @@ export function buildSanitaryFlowStreams(routes: SanitaryFixtureRoute[]): Sanita
         to: segment.to,
         role,
         diameterMm,
-        targetRiserId: segment.targetRiserId ?? route.targetRiserId ?? route.riserId,
+        targetRiserId: segment.targetRiserId ?? route.riserId,
         aggregation: role === 'collectionMain' ? 'collector' : 'fixture',
         phaseDelayMs: routeIndex * 90 + segmentIndex * 120 + ROLE_PHASE_DELAY_MS[role],
         durationMs: ROLE_DURATION_MS[role],
