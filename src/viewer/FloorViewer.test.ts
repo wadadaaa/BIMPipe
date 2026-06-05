@@ -45,9 +45,13 @@ describe('FloorViewer sanitary route presentation styles', () => {
     expect(component).toContain('Replay Flow')
     expect(component).toContain('floor-viewer__flow-overlay')
     expect(component).toContain('floor-viewer__flow-stream')
+    expect(component).toContain('floor-viewer__flow-node')
+    expect(component).toContain("['rail', 'halo', 'core', 'pulse']")
     expect(component).toContain('flowAnimationState')
     expect(stylesheet).toContain('.floor-viewer__flow-overlay')
     expect(stylesheet).toContain('.floor-viewer__flow-stream')
+    expect(stylesheet).toContain('.floor-viewer__flow-stream--rail')
+    expect(stylesheet).toContain('.floor-viewer__flow-node')
     expect(stylesheet).toContain('@keyframes sanitary-flow-stream')
   })
 

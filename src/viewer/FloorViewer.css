@@ -272,55 +272,96 @@
   transition: opacity 120ms ease;
 }
 
+.floor-viewer__flow-stream--rail {
+  stroke: rgba(5, 13, 14, 0.72);
+  filter:
+    drop-shadow(0 0 7px rgba(0, 0, 0, 0.84))
+    drop-shadow(0 0 15px rgba(0, 0, 0, 0.52));
+}
+
 .floor-viewer__flow-stream--halo {
-  stroke: rgba(68, 235, 190, 0.24);
-  filter: drop-shadow(0 0 18px rgba(42, 218, 180, 0.54));
+  stroke: rgba(44, 238, 178, 0.22);
+  filter:
+    drop-shadow(0 0 14px rgba(44, 238, 178, 0.58))
+    drop-shadow(0 0 32px rgba(44, 238, 178, 0.36));
 }
 
 .floor-viewer__flow-stream--core {
-  stroke: rgba(57, 219, 190, 0.58);
-  filter: drop-shadow(0 0 9px rgba(58, 220, 190, 0.62));
+  stroke: rgba(66, 236, 188, 0.76);
+  filter: drop-shadow(0 0 8px rgba(58, 220, 190, 0.64));
 }
 
 .floor-viewer__flow-stream--pulse {
-  stroke: #dffcff;
-  stroke-dasharray: 16 28;
+  stroke: #ecfff8;
+  stroke-dasharray: 9 18;
   animation-name: sanitary-flow-stream;
   animation-timing-function: linear;
   animation-iteration-count: infinite;
   filter:
-    drop-shadow(0 0 4px rgba(239, 255, 255, 0.95))
-    drop-shadow(0 0 18px rgba(63, 230, 196, 0.82));
+    drop-shadow(0 0 5px rgba(245, 255, 252, 1))
+    drop-shadow(0 0 16px rgba(63, 230, 196, 0.88))
+    drop-shadow(0 0 30px rgba(42, 214, 166, 0.44));
 }
 
 .floor-viewer__flow-stream--fixtureBranch.floor-viewer__flow-stream--halo {
-  stroke: rgba(255, 190, 54, 0.24);
-  filter: drop-shadow(0 0 18px rgba(255, 176, 38, 0.46));
+  stroke: rgba(245, 142, 32, 0.24);
+  filter:
+    drop-shadow(0 0 13px rgba(255, 139, 36, 0.62))
+    drop-shadow(0 0 30px rgba(255, 139, 36, 0.34));
 }
 
 .floor-viewer__flow-stream--fixtureBranch.floor-viewer__flow-stream--core {
-  stroke: rgba(255, 202, 86, 0.62);
+  stroke: rgba(255, 157, 44, 0.78);
 }
 
 .floor-viewer__flow-stream--fixtureBranch.floor-viewer__flow-stream--pulse {
-  stroke: #ffe9a8;
+  stroke: #fff0bc;
+  stroke-dasharray: 8 17;
   filter:
-    drop-shadow(0 0 4px rgba(255, 244, 196, 0.95))
-    drop-shadow(0 0 16px rgba(255, 183, 45, 0.76));
+    drop-shadow(0 0 5px rgba(255, 244, 196, 1))
+    drop-shadow(0 0 16px rgba(255, 139, 36, 0.82))
+    drop-shadow(0 0 28px rgba(255, 139, 36, 0.36));
 }
 
 .floor-viewer__flow-stream--collector.floor-viewer__flow-stream--halo,
 .floor-viewer__flow-stream--collector.floor-viewer__flow-stream--core {
-  stroke: rgba(51, 238, 178, 0.72);
+  stroke: rgba(34, 235, 160, 0.78);
 }
 
 .floor-viewer__flow-stream--collector.floor-viewer__flow-stream--pulse {
-  stroke-dasharray: 22 24;
+  stroke-dasharray: 12 18;
+}
+
+.floor-viewer__flow-node {
+  fill: rgba(14, 28, 26, 0.92);
+  stroke: #54f0c4;
+  stroke-width: 2.2;
+  vector-effect: non-scaling-stroke;
+  filter:
+    drop-shadow(0 0 5px rgba(79, 242, 196, 0.88))
+    drop-shadow(0 0 17px rgba(40, 225, 174, 0.44));
+  transition: opacity 120ms ease;
+}
+
+.floor-viewer__flow-node--source,
+.floor-viewer__flow-node--fixtureBranch {
+  stroke: #ff9538;
+  filter:
+    drop-shadow(0 0 5px rgba(255, 159, 58, 0.9))
+    drop-shadow(0 0 16px rgba(255, 132, 36, 0.42));
+}
+
+.floor-viewer__flow-node--sink,
+.floor-viewer__flow-node--collector {
+  stroke: #43efae;
+  filter:
+    drop-shadow(0 0 5px rgba(67, 239, 174, 0.9))
+    drop-shadow(0 0 16px rgba(40, 225, 174, 0.44));
 }
 
 @keyframes sanitary-flow-stream {
-  from { stroke-dashoffset: 48; }
-  to { stroke-dashoffset: -48; }
+  from { stroke-dashoffset: 44; }
+  to { stroke-dashoffset: -44; }
 }
 
 /* ── Fixture overlay ── */

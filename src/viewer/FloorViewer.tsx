@@ -88,6 +88,7 @@ export function FloorViewer({
   const routeLineRefsRef = useRef<Map<string, SVGLineElement>>(new Map())
   const routeLabelRefsRef = useRef<Map<string, SVGTextElement>>(new Map())
   const flowStreamRefsRef = useRef<Map<string, SVGLineElement>>(new Map())
+  const flowNodeRefsRef = useRef<Map<string, SVGCircleElement>>(new Map())
   const flowAnimationFrameRef = useRef<number>(0)
   const flowAnimationStartRef = useRef<number | null>(null)
   const flowAnimationPausedAtRef = useRef<number | null>(null)
@@ -350,6 +351,7 @@ export function FloorViewer({
       flowAnimationStartRef.current = null
       flowAnimationPausedAtRef.current = null
       for (const [, stream] of flowStreamRefsRef.current) stream.style.opacity = '0'
+      for (const [, node] of flowNodeRefsRef.current) node.style.opacity = '0'
     }
   }, [hasFlowAnimation])
 
@@ -715,7 +717,7 @@ export function FloorViewer({
               </defs>
               {flowStreams.map((stream: SanitaryFlowStream) => (
                 <g key={stream.key} className="floor-viewer__flow-stream-group">
-                  {(['halo', 'core', 'pulse'] as const).map((layer) => (
+                  {(['rail', 'halo', 'core', 'pulse'] as const).map((layer) => (
                     <line
                       key={`${stream.key}-${layer}`}
                       ref={(el) => {
@@ -740,13 +742,40 @@ export function FloorViewer({
                       data-flow-diameter-mm={String(stream.diameterMm)}
                       data-flow-target-riser-id={stream.targetRiserId}
                       data-flow-layer={layer}
-                      filter={layer === 'halo' ? `url(#${flowGlowId})` : undefined}
+                      filter={layer === 'halo' || layer === 'pulse' ? `url(#${flowGlowId})` : undefined}
                       style={{
                         opacity: 0,
                         animationDelay: `${stream.phaseDelayMs}ms`,
                         animationDuration: `${stream.durationMs}ms`,
                         animationPlayState: flowAnimationState === 'playing' ? 'running' : 'paused',
                       }}
+                    />
+                  ))}
+                  {(['source', 'sink'] as const).map((nodeKind) => (
+                    <circle
+                      key={`${stream.key}-${nodeKind}`}
+                      ref={(el) => {
+                        const refKey = `${stream.key}-${nodeKind}`
+                        if (el) flowNodeRefsRef.current.set(refKey, el)
+                        else flowNodeRefsRef.current.delete(refKey)
+                      }}
+                      className={[
+                        'floor-viewer__flow-node',
+                        `floor-viewer__flow-node--${nodeKind}`,
+                        `floor-viewer__flow-node--${stream.role}`,
+                        stream.aggregation === 'collector' ? 'floor-viewer__flow-node--collector' : '',
+                      ].filter(Boolean).join(' ')}
+                      data-flow-node-kind={nodeKind}
+                      data-flow-from-x={String(stream.from.x)}
+                      data-flow-from-y={String(stream.from.y)}
+                      data-flow-from-z={String(stream.from.z)}
+                      data-flow-to-x={String(stream.to.x)}
+                      data-flow-to-y={String(stream.to.y)}
+                      data-flow-to-z={String(stream.to.z)}
+                      data-flow-target-riser-id={stream.targetRiserId}
+                      filter={`url(#${flowGlowId})`}
+                      style={{ opacity: 0 }}
+                      r="4.2"
                     />
                   ))}
                 </g>
@@ -1146,14 +1175,33 @@ export function FloorViewer({
       }
       const diameter = parseFloat(stream.dataset['flowDiameterMm'] ?? '50')
       const layer = stream.dataset['flowLayer'] ?? 'core'
-      const scale = layer === 'halo' ? 0.16 : layer === 'core' ? 0.095 : 0.07
-      const strokeWidth = Math.max(layer === 'pulse' ? 3.2 : 4.2, Math.min(14, diameter * scale))
+      const scale = layer === 'rail' ? 0.24 : layer === 'halo' ? 0.18 : layer === 'core' ? 0.088 : 0.052
+      const minimum = layer === 'rail' ? 8.8 : layer === 'halo' ? 6.4 : layer === 'pulse' ? 2.8 : 3.6
+      const maximum = layer === 'rail' ? 20 : layer === 'halo' ? 16 : layer === 'pulse' ? 7 : 10
+      const strokeWidth = Math.max(minimum, Math.min(maximum, diameter * scale))
       stream.style.opacity = flowAnimationState === 'idle' && layer === 'pulse' ? '0' : '1'
       stream.style.strokeWidth = `${strokeWidth}`
       stream.setAttribute('x1', `${fromPt.x}`)
       stream.setAttribute('y1', `${fromPt.y}`)
       stream.setAttribute('x2', `${toPt.x}`)
       stream.setAttribute('y2', `${toPt.y}`)
+    }
+
+    for (const [, node] of flowNodeRefsRef.current) {
+      const kind = node.dataset['flowNodeKind'] ?? 'source'
+      const vec = flowProjectionFromRef.current.set(
+        parseFloat(node.dataset[kind === 'sink' ? 'flowToX' : 'flowFromX'] ?? '0'),
+        parseFloat(node.dataset[kind === 'sink' ? 'flowToY' : 'flowFromY'] ?? '0'),
+        parseFloat(node.dataset[kind === 'sink' ? 'flowToZ' : 'flowFromZ'] ?? '0'),
+      )
+      const pt = projectOverlayPointOnPlanMutable(vec, canvas, camera, planPlaneRef.current)
+      if (!pt) {
+        node.style.opacity = '0'
+        continue
+      }
+      node.style.opacity = flowAnimationState === 'idle' ? '0' : '1'
+      node.setAttribute('cx', `${pt.x}`)
+      node.setAttribute('cy', `${pt.y}`)
     }
   }
 
