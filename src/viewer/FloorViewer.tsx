@@ -87,8 +87,9 @@ export function FloorViewer({
   const flowGlowId = `sanitary-flow-glow-${useId().replace(/:/g, '')}`
   const routeLineRefsRef = useRef<Map<string, SVGLineElement>>(new Map())
   const routeLabelRefsRef = useRef<Map<string, SVGTextElement>>(new Map())
-  const flowStreamRefsRef = useRef<Map<string, SVGLineElement>>(new Map())
+  const flowStreamRefsRef = useRef<Map<string, SVGPathElement>>(new Map())
   const flowNodeRefsRef = useRef<Map<string, SVGCircleElement>>(new Map())
+  const flowCardRefsRef = useRef<Map<string, SVGGElement>>(new Map())
   const flowAnimationFrameRef = useRef<number>(0)
   const flowAnimationStartRef = useRef<number | null>(null)
   const flowAnimationPausedAtRef = useRef<number | null>(null)
@@ -223,11 +224,11 @@ export function FloorViewer({
     const scene = sceneRef.current
     if (!renderer || !scene) return
 
-    const viewerBackground = readViewerBackgroundColor()
+    const viewerBackground = readViewerBackgroundColor(demoFlowEnabled)
     renderer.setClearColor(viewerBackground, 1)
     scene.background = viewerBackground
     scheduleRender()
-  }, [theme])
+  }, [theme, demoFlowEnabled])
 
   useEffect(() => {
     const scene = sceneRef.current
@@ -253,7 +254,7 @@ export function FloorViewer({
     }
 
     const { group, boundingBox } = floorMeshes
-    styleFloorGroup(group, theme)
+    styleFloorGroup(group, demoFlowEnabled ? 'dark' : theme)
     scene.add(group)
     floorGroupRef.current = group
     boundsRef.current = boundingBox
@@ -269,7 +270,7 @@ export function FloorViewer({
       .normalize()
     planPlaneRef.current.setFromNormalAndCoplanarPoint(camNormal, center)
     scheduleRender()
-  }, [floorMeshes, onObjectHover, onObjectSelect, theme])
+  }, [floorMeshes, onObjectHover, onObjectSelect, theme, demoFlowEnabled])
 
   useEffect(() => {
     const floorGroup = floorGroupRef.current
@@ -352,6 +353,7 @@ export function FloorViewer({
       flowAnimationPausedAtRef.current = null
       for (const [, stream] of flowStreamRefsRef.current) stream.style.opacity = '0'
       for (const [, node] of flowNodeRefsRef.current) node.style.opacity = '0'
+      for (const [, card] of flowCardRefsRef.current) card.style.opacity = '0'
     }
   }, [hasFlowAnimation])
 
@@ -585,7 +587,7 @@ export function FloorViewer({
         : 'Upload an IFC file and select a floor.'
 
   return (
-    <div className="floor-viewer">
+    <div className={['floor-viewer', demoFlowEnabled ? 'floor-viewer--service-map' : ''].filter(Boolean).join(' ')}>
       <canvas
         ref={canvasRef}
         className={[
@@ -718,7 +720,7 @@ export function FloorViewer({
               {flowStreams.map((stream: SanitaryFlowStream) => (
                 <g key={stream.key} className="floor-viewer__flow-stream-group">
                   {(['rail', 'halo', 'core', 'pulse'] as const).map((layer) => (
-                    <line
+                    <path
                       key={`${stream.key}-${layer}`}
                       ref={(el) => {
                         const refKey = `${stream.key}-${layer}`
@@ -778,6 +780,35 @@ export function FloorViewer({
                       r="4.2"
                     />
                   ))}
+                  <g
+                    ref={(el) => {
+                      if (el) flowCardRefsRef.current.set(stream.key, el)
+                      else flowCardRefsRef.current.delete(stream.key)
+                    }}
+                    className={[
+                      'floor-viewer__flow-card',
+                      `floor-viewer__flow-card--${stream.role}`,
+                      stream.aggregation === 'collector' ? 'floor-viewer__flow-card--collector' : '',
+                    ].filter(Boolean).join(' ')}
+                    data-flow-from-x={String(stream.from.x)}
+                    data-flow-from-y={String(stream.from.y)}
+                    data-flow-from-z={String(stream.from.z)}
+                    data-flow-to-x={String(stream.to.x)}
+                    data-flow-to-y={String(stream.to.y)}
+                    data-flow-to-z={String(stream.to.z)}
+                    data-flow-diameter-mm={String(stream.diameterMm)}
+                    data-flow-target-riser-id={stream.targetRiserId}
+                    style={{ opacity: 0 }}
+                  >
+                    <rect className="floor-viewer__flow-card-shell" x="0" y="0" width="116" height="58" rx="11" />
+                    <circle className="floor-viewer__flow-card-dot" cx="15" cy="17" r="4.5" />
+                    <text className="floor-viewer__flow-card-title" x="28" y="20">
+                      {stream.aggregation === 'collector' ? 'collector' : 'fixture'}
+                    </text>
+                    <text className="floor-viewer__flow-card-label" x="14" y="38">Ø{stream.diameterMm}</text>
+                    <text className="floor-viewer__flow-card-value" x="64" y="38">2.0%</text>
+                    <text className="floor-viewer__flow-card-caption" x="14" y="50">to {stream.targetRiserId}</text>
+                  </g>
                 </g>
               ))}
             </svg>
@@ -1181,10 +1212,7 @@ export function FloorViewer({
       const strokeWidth = Math.max(minimum, Math.min(maximum, diameter * scale))
       stream.style.opacity = flowAnimationState === 'idle' && layer === 'pulse' ? '0' : '1'
       stream.style.strokeWidth = `${strokeWidth}`
-      stream.setAttribute('x1', `${fromPt.x}`)
-      stream.setAttribute('y1', `${fromPt.y}`)
-      stream.setAttribute('x2', `${toPt.x}`)
-      stream.setAttribute('y2', `${toPt.y}`)
+      stream.setAttribute('d', buildServiceMapFlowPath(fromPt, toPt))
     }
 
     for (const [, node] of flowNodeRefsRef.current) {
@@ -1202,6 +1230,23 @@ export function FloorViewer({
       node.style.opacity = flowAnimationState === 'idle' ? '0' : '1'
       node.setAttribute('cx', `${pt.x}`)
       node.setAttribute('cy', `${pt.y}`)
+    }
+
+    for (const [, card] of flowCardRefsRef.current) {
+      const to = flowProjectionToRef.current.set(
+        parseFloat(card.dataset['flowToX'] ?? '0'),
+        parseFloat(card.dataset['flowToY'] ?? '0'),
+        parseFloat(card.dataset['flowToZ'] ?? '0'),
+      )
+      const pt = projectOverlayPointOnPlanMutable(to, canvas, camera, planPlaneRef.current)
+      if (!pt) {
+        card.style.opacity = '0'
+        continue
+      }
+      card.style.opacity = flowAnimationState === 'idle' ? '0' : '1'
+      const offsetX = card.classList.contains('floor-viewer__flow-card--fixtureBranch') ? 12 : -128
+      const offsetY = card.classList.contains('floor-viewer__flow-card--fixtureBranch') ? -62 : 12
+      card.setAttribute('transform', `translate(${pt.x + offsetX} ${pt.y + offsetY})`)
     }
   }
 
@@ -1289,6 +1334,29 @@ function projectOverlayPointOnPlanMutable(
   vec.project(camera)
   if (!Number.isFinite(vec.x) || !Number.isFinite(vec.y) || !Number.isFinite(vec.z) || vec.z < -1 || vec.z > 1) return null
   return { x: ((vec.x + 1) / 2) * canvas.clientWidth, y: ((-vec.y + 1) / 2) * canvas.clientHeight }
+}
+
+function buildServiceMapFlowPath(
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+): string {
+  const dx = to.x - from.x
+  const dy = to.y - from.y
+  if (Math.abs(dx) < 6 || Math.abs(dy) < 6) return `M ${from.x} ${from.y} L ${to.x} ${to.y}`
+
+  const midX = from.x + dx * 0.58
+  const sx = Math.sign(dx) || 1
+  const sy = Math.sign(dy) || 1
+  const radius = Math.max(10, Math.min(30, Math.min(Math.abs(dx), Math.abs(dy)) * 0.22))
+
+  return [
+    `M ${from.x} ${from.y}`,
+    `L ${midX - sx * radius} ${from.y}`,
+    `Q ${midX} ${from.y} ${midX} ${from.y + sy * radius}`,
+    `L ${midX} ${to.y - sy * radius}`,
+    `Q ${midX} ${to.y} ${midX + sx * radius} ${to.y}`,
+    `L ${to.x} ${to.y}`,
+  ].join(' ')
 }
 
 function fallbackRouteLinePosition(line: SVGLineElement, canvas: HTMLCanvasElement) {
@@ -1594,7 +1662,9 @@ function disposeSceneObject(root: THREE.Object3D) {
   })
 }
 
-function readViewerBackgroundColor(): THREE.Color {
+function readViewerBackgroundColor(serviceMapMode = false): THREE.Color {
+  if (serviceMapMode) return new THREE.Color('#080a07')
+
   const viewerBackground = getComputedStyle(document.documentElement)
     .getPropertyValue('--viewer-bg')
     .trim()
