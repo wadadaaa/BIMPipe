@@ -264,33 +264,63 @@
   overflow: visible;
 }
 
-.floor-viewer__flow-particle {
-  fill: #eaffff;
-  stroke: rgba(5, 15, 24, 0.82);
-  stroke-width: 1.5;
-  filter:
-    drop-shadow(0 0 4px rgba(255, 255, 255, 0.95))
-    drop-shadow(0 0 14px rgba(55, 216, 255, 0.86));
+.floor-viewer__flow-stream {
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+  transform-box: fill-box;
+  transform-origin: center;
   transition: opacity 120ms ease;
 }
 
-.floor-viewer__flow-particle--fixtureBranch {
-  fill: #ffe08a;
-  filter:
-    drop-shadow(0 0 4px rgba(255, 240, 174, 0.95))
-    drop-shadow(0 0 14px rgba(255, 190, 54, 0.78));
+.floor-viewer__flow-stream--halo {
+  stroke: rgba(68, 235, 190, 0.24);
+  filter: url(#sanitary-flow-glow) drop-shadow(0 0 18px rgba(42, 218, 180, 0.54));
 }
 
-.floor-viewer__flow-particle--collectionMain,
-.floor-viewer__flow-particle--toiletRoute {
-  fill: #bdf6ff;
+.floor-viewer__flow-stream--core {
+  stroke: rgba(57, 219, 190, 0.58);
+  filter: drop-shadow(0 0 9px rgba(58, 220, 190, 0.62));
 }
 
-.floor-viewer__flow-particle--collector {
-  stroke-width: 2;
+.floor-viewer__flow-stream--pulse {
+  stroke: #dffcff;
+  stroke-dasharray: 16 28;
+  animation-name: sanitary-flow-stream;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
   filter:
-    drop-shadow(0 0 5px rgba(230, 252, 255, 1))
-    drop-shadow(0 0 18px rgba(40, 205, 255, 0.94));
+    drop-shadow(0 0 4px rgba(239, 255, 255, 0.95))
+    drop-shadow(0 0 18px rgba(63, 230, 196, 0.82));
+}
+
+.floor-viewer__flow-stream--fixtureBranch.floor-viewer__flow-stream--halo {
+  stroke: rgba(255, 190, 54, 0.24);
+  filter: url(#sanitary-flow-glow) drop-shadow(0 0 18px rgba(255, 176, 38, 0.46));
+}
+
+.floor-viewer__flow-stream--fixtureBranch.floor-viewer__flow-stream--core {
+  stroke: rgba(255, 202, 86, 0.62);
+}
+
+.floor-viewer__flow-stream--fixtureBranch.floor-viewer__flow-stream--pulse {
+  stroke: #ffe9a8;
+  filter:
+    drop-shadow(0 0 4px rgba(255, 244, 196, 0.95))
+    drop-shadow(0 0 16px rgba(255, 183, 45, 0.76));
+}
+
+.floor-viewer__flow-stream--collector.floor-viewer__flow-stream--halo,
+.floor-viewer__flow-stream--collector.floor-viewer__flow-stream--core {
+  stroke: rgba(51, 238, 178, 0.72);
+}
+
+.floor-viewer__flow-stream--collector.floor-viewer__flow-stream--pulse {
+  stroke-dasharray: 22 24;
+}
+
+@keyframes sanitary-flow-stream {
+  from { stroke-dashoffset: 48; }
+  to { stroke-dashoffset: -48; }
 }
 
 /* ── Fixture overlay ── */

@@ -2,7 +2,7 @@ import type { SanitaryFixtureRoute, SanitaryPipeDiameterMm, SanitaryRouteRole } 
 
 export type SanitaryFlowAggregation = 'fixture' | 'collector'
 
-export interface SanitaryFlowParticle {
+export interface SanitaryFlowStream {
   key: string
   from: { x: number; y: number; z: number }
   to: { x: number; y: number; z: number }
@@ -26,7 +26,7 @@ const ROLE_DURATION_MS: Record<SanitaryRouteRole, number> = {
   toiletRoute: 2200,
 }
 
-export function buildSanitaryFlowParticles(routes: SanitaryFixtureRoute[]): SanitaryFlowParticle[] {
+export function buildSanitaryFlowStreams(routes: SanitaryFixtureRoute[]): SanitaryFlowStream[] {
   return routes.flatMap((route, routeIndex) =>
     route.segments.map((segment, segmentIndex) => {
       const role = segment.routeRole ?? (segment.kind === 'branch' ? 'fixtureBranch' : 'collectionMain')

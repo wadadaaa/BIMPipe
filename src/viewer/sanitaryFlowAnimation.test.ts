@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SanitaryFixtureRoute } from '@/shared/routes/buildSanitaryRoutes'
-import { buildSanitaryFlowParticles } from './sanitaryFlowAnimation'
+import { buildSanitaryFlowStreams } from './sanitaryFlowAnimation'
 
 const routes: SanitaryFixtureRoute[] = [
   {
@@ -59,28 +59,28 @@ const routes: SanitaryFixtureRoute[] = [
   },
 ]
 
-describe('sanitary flow animation presentation particles', () => {
-  it('builds viewer-only particles that move from fixture branches toward risers', () => {
-    const particles = buildSanitaryFlowParticles(routes)
+describe('sanitary flow animation presentation streams', () => {
+  it('builds viewer-only streams that move from fixture branches toward risers', () => {
+    const streams = buildSanitaryFlowStreams(routes)
 
-    expect(particles).toHaveLength(3)
-    expect(particles.map((particle) => particle.role)).toEqual([
+    expect(streams).toHaveLength(3)
+    expect(streams.map((stream) => stream.role)).toEqual([
       'toiletRoute',
       'fixtureBranch',
       'collectionMain',
     ])
-    expect(particles[0]).toMatchObject({
+    expect(streams[0]).toMatchObject({
       key: '10-toiletRoute-0',
       from: { x: 0, y: 0, z: 0 },
       to: { x: 10, y: 0, z: 0 },
       diameterMm: 110,
       targetRiserId: 'R-1',
     })
-    expect(particles[1].phaseDelayMs).toBeLessThan(particles[2].phaseDelayMs)
-    expect(particles[2].aggregation).toBe('collector')
+    expect(streams[1].phaseDelayMs).toBeLessThan(streams[2].phaseDelayMs)
+    expect(streams[2].aggregation).toBe('collector')
   })
 
-  it('returns no particles for empty route results', () => {
-    expect(buildSanitaryFlowParticles([])).toEqual([])
+  it('returns no streams for empty route results', () => {
+    expect(buildSanitaryFlowStreams([])).toEqual([])
   })
 })

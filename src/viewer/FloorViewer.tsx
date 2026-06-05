@@ -12,7 +12,7 @@ import {
   getSanitaryPresentationState,
   type SanitaryPresentationMode,
 } from './sanitaryPresentation'
-import { buildSanitaryFlowParticles } from './sanitaryFlowAnimation'
+import { buildSanitaryFlowStreams, type SanitaryFlowStream } from './sanitaryFlowAnimation'
 import './FloorViewer.css'
 
 const HOVER_ACCENT = new THREE.Color(0xffb45f)
@@ -84,7 +84,7 @@ export function FloorViewer({
   const projectionVecRef = useRef(new THREE.Vector3())
   const routeLineRefsRef = useRef<Map<string, SVGLineElement>>(new Map())
   const routeLabelRefsRef = useRef<Map<string, SVGTextElement>>(new Map())
-  const flowParticleRefsRef = useRef<Map<string, SVGCircleElement>>(new Map())
+  const flowStreamRefsRef = useRef<Map<string, SVGLineElement>>(new Map())
   const flowAnimationFrameRef = useRef<number>(0)
   const flowAnimationStartRef = useRef<number | null>(null)
   const flowAnimationPausedAtRef = useRef<number | null>(null)
@@ -331,11 +331,11 @@ export function FloorViewer({
   const hasSanitaryPresentation = sanitaryPresentationState.hasPresentation
   const visibleSanitaryRoutes = sanitaryPresentationState.visibleRoutes
   const visibleRisers = sanitaryPresentationState.visibleRisers
-  const flowParticles = useMemo(
-    () => buildSanitaryFlowParticles(visibleSanitaryRoutes),
+  const flowStreams = useMemo(
+    () => buildSanitaryFlowStreams(visibleSanitaryRoutes),
     [visibleSanitaryRoutes],
   )
-  const hasFlowAnimation = demoFlowEnabled && sanitaryViewMode === 'after' && flowParticles.length > 0
+  const hasFlowAnimation = demoFlowEnabled && sanitaryViewMode === 'after' && flowStreams.length > 0
 
   useEffect(() => {
     scheduleRender()
@@ -346,7 +346,7 @@ export function FloorViewer({
       setFlowAnimationState('idle')
       flowAnimationStartRef.current = null
       flowAnimationPausedAtRef.current = null
-      for (const [, particle] of flowParticleRefsRef.current) particle.style.opacity = '0'
+      for (const [, stream] of flowStreamRefsRef.current) stream.style.opacity = '0'
     }
   }, [hasFlowAnimation])
 
@@ -356,18 +356,20 @@ export function FloorViewer({
 
     const tick = (timestamp: number) => {
       if (flowAnimationStartRef.current === null) flowAnimationStartRef.current = timestamp
-      animateFlowParticles(timestamp)
+      animateFlowStreams()
       flowAnimationFrameRef.current = requestAnimationFrame(tick)
     }
     flowAnimationFrameRef.current = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(flowAnimationFrameRef.current)
-  }, [flowAnimationState, flowParticles])
+    // Stream positioning reads route/camera/canvas data from refs and SVG data attributes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flowAnimationState, flowStreams])
 
   useEffect(() => {
     const frameId = requestAnimationFrame(() => {
       animateRouteLines()
       if (flowAnimationState === 'paused' && flowAnimationPausedAtRef.current !== null) {
-        animateFlowParticles(flowAnimationPausedAtRef.current)
+        animateFlowStreams()
       }
     })
     return () => cancelAnimationFrame(frameId)
@@ -557,7 +559,7 @@ export function FloorViewer({
   function handlePauseFlow() {
     const now = performance.now()
     flowAnimationPausedAtRef.current = now
-    animateFlowParticles(now)
+    animateFlowStreams()
     setFlowAnimationState('paused')
   }
 
@@ -565,7 +567,7 @@ export function FloorViewer({
     setSanitaryViewMode('after')
     flowAnimationStartRef.current = performance.now()
     flowAnimationPausedAtRef.current = null
-    animateFlowParticles(flowAnimationStartRef.current)
+    animateFlowStreams()
     setFlowAnimationState('playing')
   }
 
@@ -700,30 +702,51 @@ export function FloorViewer({
           </svg>
           {hasFlowAnimation && (
             <svg className="floor-viewer__flow-overlay" aria-hidden="true">
-              {flowParticles.map((particle) => (
-                <circle
-                  key={particle.key}
-                  ref={(el) => {
-                    if (el) flowParticleRefsRef.current.set(particle.key, el)
-                    else flowParticleRefsRef.current.delete(particle.key)
-                  }}
-                  className={[
-                    'floor-viewer__flow-particle',
-                    `floor-viewer__flow-particle--${particle.role}`,
-                    particle.aggregation === 'collector' ? 'floor-viewer__flow-particle--collector' : '',
-                  ].filter(Boolean).join(' ')}
-                  r={particle.diameterMm >= 100 ? 5.5 : particle.diameterMm >= 63 ? 4.6 : 3.8}
-                  data-flow-from-x={String(particle.from.x)}
-                  data-flow-from-y={String(particle.from.y)}
-                  data-flow-from-z={String(particle.from.z)}
-                  data-flow-to-x={String(particle.to.x)}
-                  data-flow-to-y={String(particle.to.y)}
-                  data-flow-to-z={String(particle.to.z)}
-                  data-flow-delay-ms={String(particle.phaseDelayMs)}
-                  data-flow-duration-ms={String(particle.durationMs)}
-                  data-flow-target-riser-id={particle.targetRiserId}
-                  style={{ opacity: 0 }}
-                />
+              <defs>
+                <filter id="sanitary-flow-glow" x="-35%" y="-35%" width="170%" height="170%">
+                  <feGaussianBlur stdDeviation="4" result="blur" />
+                  <feMerge>
+                    <feMergeNode in="blur" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+              </defs>
+              {flowStreams.map((stream: SanitaryFlowStream) => (
+                <g key={stream.key} className="floor-viewer__flow-stream-group">
+                  {(['halo', 'core', 'pulse'] as const).map((layer) => (
+                    <line
+                      key={`${stream.key}-${layer}`}
+                      ref={(el) => {
+                        const refKey = `${stream.key}-${layer}`
+                        if (el) flowStreamRefsRef.current.set(refKey, el)
+                        else flowStreamRefsRef.current.delete(refKey)
+                      }}
+                      className={[
+                        'floor-viewer__flow-stream',
+                        `floor-viewer__flow-stream--${layer}`,
+                        `floor-viewer__flow-stream--${stream.role}`,
+                        stream.aggregation === 'collector' ? 'floor-viewer__flow-stream--collector' : '',
+                      ].filter(Boolean).join(' ')}
+                      data-flow-from-x={String(stream.from.x)}
+                      data-flow-from-y={String(stream.from.y)}
+                      data-flow-from-z={String(stream.from.z)}
+                      data-flow-to-x={String(stream.to.x)}
+                      data-flow-to-y={String(stream.to.y)}
+                      data-flow-to-z={String(stream.to.z)}
+                      data-flow-delay-ms={String(stream.phaseDelayMs)}
+                      data-flow-duration-ms={String(stream.durationMs)}
+                      data-flow-diameter-mm={String(stream.diameterMm)}
+                      data-flow-target-riser-id={stream.targetRiserId}
+                      data-flow-layer={layer}
+                      style={{
+                        opacity: 0,
+                        animationDelay: `${stream.phaseDelayMs}ms`,
+                        animationDuration: `${stream.durationMs}ms`,
+                        animationPlayState: flowAnimationState === 'playing' ? 'running' : 'paused',
+                      }}
+                    />
+                  ))}
+                </g>
               ))}
             </svg>
           )}
@@ -1096,37 +1119,38 @@ export function FloorViewer({
     }
   }
 
-  function animateFlowParticles(timestamp: number) {
+  function animateFlowStreams() {
     const canvas = canvasRef.current
     const camera = cameraRef.current
-    const animationStart = flowAnimationStartRef.current
-    if (!canvas || !camera || animationStart === null) return
+    if (!canvas || !camera) return
 
-    for (const [, particle] of flowParticleRefsRef.current) {
-      const duration = parseFloat(particle.dataset['flowDurationMs'] ?? '2200')
-      const delay = parseFloat(particle.dataset['flowDelayMs'] ?? '0')
-      const elapsed = Math.max(0, timestamp - animationStart - delay)
-      const progress = duration > 0 ? (elapsed % duration) / duration : 0
-      const eased = easeFlowProgress(progress)
+    for (const [, stream] of flowStreamRefsRef.current) {
       const from = new THREE.Vector3(
-        parseFloat(particle.dataset['flowFromX'] ?? '0'),
-        parseFloat(particle.dataset['flowFromY'] ?? '0'),
-        parseFloat(particle.dataset['flowFromZ'] ?? '0'),
+        parseFloat(stream.dataset['flowFromX'] ?? '0'),
+        parseFloat(stream.dataset['flowFromY'] ?? '0'),
+        parseFloat(stream.dataset['flowFromZ'] ?? '0'),
       )
       const to = new THREE.Vector3(
-        parseFloat(particle.dataset['flowToX'] ?? '0'),
-        parseFloat(particle.dataset['flowToY'] ?? '0'),
-        parseFloat(particle.dataset['flowToZ'] ?? '0'),
+        parseFloat(stream.dataset['flowToX'] ?? '0'),
+        parseFloat(stream.dataset['flowToY'] ?? '0'),
+        parseFloat(stream.dataset['flowToZ'] ?? '0'),
       )
-      const world = from.lerp(to, eased)
-      const projected = projectOverlayPointOnPlan(world, canvas, camera, planPlaneRef.current)
-      if (!projected) {
-        particle.style.opacity = '0'
+      const fromPt = projectOverlayPointOnPlan(from, canvas, camera, planPlaneRef.current)
+      const toPt = projectOverlayPointOnPlan(to, canvas, camera, planPlaneRef.current)
+      if (!fromPt || !toPt) {
+        stream.style.opacity = '0'
         continue
       }
-      particle.style.opacity = progress < 0.08 ? `${progress / 0.08}` : progress > 0.9 ? `${(1 - progress) / 0.1}` : '1'
-      particle.setAttribute('cx', `${projected.x}`)
-      particle.setAttribute('cy', `${projected.y}`)
+      const diameter = parseFloat(stream.dataset['flowDiameterMm'] ?? '50')
+      const layer = stream.dataset['flowLayer'] ?? 'core'
+      const scale = layer === 'halo' ? 0.16 : layer === 'core' ? 0.095 : 0.07
+      const strokeWidth = Math.max(layer === 'pulse' ? 3.2 : 4.2, Math.min(14, diameter * scale))
+      stream.style.opacity = flowAnimationState === 'idle' && layer === 'pulse' ? '0' : '1'
+      stream.style.strokeWidth = `${strokeWidth}`
+      stream.setAttribute('x1', `${fromPt.x}`)
+      stream.setAttribute('y1', `${fromPt.y}`)
+      stream.setAttribute('x2', `${toPt.x}`)
+      stream.setAttribute('y2', `${toPt.y}`)
     }
   }
 
@@ -1210,12 +1234,6 @@ function fallbackRouteLinePosition(line: SVGLineElement, canvas: HTMLCanvasEleme
   return { x1: 14, y1: y, x2: Math.max(canvas.clientWidth * 0.35, 80), y2: y }
 }
 
-function easeFlowProgress(progress: number): number {
-  // Subtle acceleration keeps the DEMO flow legible while still feeling alive.
-  return progress < 0.5
-    ? 2 * progress * progress
-    : 1 - Math.pow(-2 * progress + 2, 2) / 2
-}
 
 function buildFixtureMarkerLabels(
   fixtures: Array<Fixture & { position: NonNullable<Fixture['position']> }>,
