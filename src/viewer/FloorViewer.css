@@ -393,34 +393,34 @@
   pointer-events: none;
   transition: opacity 120ms ease;
   filter:
-    drop-shadow(0 12px 30px rgba(0, 0, 0, 0.52))
-    drop-shadow(0 0 16px rgba(37, 234, 174, 0.18));
+    drop-shadow(0 12px 26px rgba(16, 24, 40, 0.16))
+    drop-shadow(0 0 14px rgba(22, 163, 127, 0.10));
 }
 
 .floor-viewer__flow-card-shell {
-  fill: rgba(10, 12, 10, 0.93);
-  stroke: rgba(52, 237, 176, 0.50);
+  fill: rgba(255, 255, 255, 0.94);
+  stroke: rgba(20, 184, 139, 0.42);
   stroke-width: 1.4;
 }
 
 .floor-viewer__flow-card--fixtureBranch .floor-viewer__flow-card-shell {
-  stroke: rgba(255, 145, 44, 0.70);
+  stroke: rgba(217, 119, 6, 0.48);
 }
 
 .floor-viewer__flow-card--collector .floor-viewer__flow-card-shell {
-  stroke: rgba(73, 245, 171, 0.72);
+  stroke: rgba(20, 184, 139, 0.50);
 }
 
 .floor-viewer__flow-card-dot {
-  fill: #43efae;
+  fill: #0f9f73;
 }
 
 .floor-viewer__flow-card--fixtureBranch .floor-viewer__flow-card-dot {
-  fill: #ff9538;
+  fill: #d97706;
 }
 
 .floor-viewer__flow-card-title {
-  fill: #f5f6ef;
+  fill: #172033;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
   font-weight: 800;
@@ -430,7 +430,7 @@
 
 .floor-viewer__flow-card-label,
 .floor-viewer__flow-card-caption {
-  fill: rgba(245, 246, 239, 0.46);
+  fill: rgba(23, 32, 51, 0.56);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 9px;
   font-weight: 800;
@@ -439,7 +439,7 @@
 }
 
 .floor-viewer__flow-card-value {
-  fill: #f5f6ef;
+  fill: #172033;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
   font-weight: 900;
@@ -447,6 +447,47 @@
 }
 
 .floor-viewer__flow-card--fixtureBranch .floor-viewer__flow-card-value {
+  fill: #b45309;
+}
+
+.floor-viewer--service-map .floor-viewer__flow-card {
+  filter:
+    drop-shadow(0 12px 30px rgba(0, 0, 0, 0.52))
+    drop-shadow(0 0 16px rgba(37, 234, 174, 0.18));
+}
+
+.floor-viewer--service-map .floor-viewer__flow-card-shell {
+  fill: rgba(10, 12, 10, 0.93);
+  stroke: rgba(52, 237, 176, 0.50);
+}
+
+.floor-viewer--service-map .floor-viewer__flow-card--fixtureBranch .floor-viewer__flow-card-shell {
+  stroke: rgba(255, 145, 44, 0.70);
+}
+
+.floor-viewer--service-map .floor-viewer__flow-card--collector .floor-viewer__flow-card-shell {
+  stroke: rgba(73, 245, 171, 0.72);
+}
+
+.floor-viewer--service-map .floor-viewer__flow-card-dot {
+  fill: #43efae;
+}
+
+.floor-viewer--service-map .floor-viewer__flow-card--fixtureBranch .floor-viewer__flow-card-dot {
+  fill: #ff9538;
+}
+
+.floor-viewer--service-map .floor-viewer__flow-card-title,
+.floor-viewer--service-map .floor-viewer__flow-card-value {
+  fill: #f5f6ef;
+}
+
+.floor-viewer--service-map .floor-viewer__flow-card-label,
+.floor-viewer--service-map .floor-viewer__flow-card-caption {
+  fill: rgba(245, 246, 239, 0.46);
+}
+
+.floor-viewer--service-map .floor-viewer__flow-card--fixtureBranch .floor-viewer__flow-card-value {
   fill: #ffb25b;
 }
 

@@ -59,6 +59,8 @@ describe('FloorViewer sanitary route presentation styles', () => {
     expect(stylesheet).toContain('.floor-viewer__flow-stream--rail')
     expect(stylesheet).toContain('.floor-viewer__flow-node')
     expect(stylesheet).toContain('.floor-viewer__flow-card')
+    expect(stylesheet).toContain('fill: rgba(255, 255, 255, 0.94);')
+    expect(stylesheet).toContain('.floor-viewer--service-map .floor-viewer__flow-card-shell')
     expect(stylesheet).toContain('@keyframes sanitary-flow-stream')
   })
 
