@@ -723,6 +723,7 @@ export function FloorViewer({
                   {(['rail', 'halo', 'core', 'pulse'] as const).map((layer) => (
                     <path
                       key={`${stream.key}-${layer}`}
+                      fill="none"
                       ref={(el) => {
                         const refKey = `${stream.key}-${layer}`
                         if (el) flowStreamRefsRef.current.set(refKey, el)

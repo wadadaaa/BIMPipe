@@ -54,6 +54,8 @@ describe('FloorViewer sanitary route presentation styles', () => {
     expect(component).toContain('flowAnimationState')
     expect(stylesheet).toContain('.floor-viewer__flow-overlay')
     expect(stylesheet).toContain('.floor-viewer__flow-stream')
+    expect(stylesheet).toContain('fill: none;')
+    expect(component).toContain('fill="none"')
     expect(stylesheet).toContain('.floor-viewer__flow-stream--rail')
     expect(stylesheet).toContain('.floor-viewer__flow-node')
     expect(stylesheet).toContain('.floor-viewer__flow-card')

@@ -293,7 +293,9 @@
 }
 
 .floor-viewer__flow-stream {
+  fill: none;
   stroke-linecap: round;
+  stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
   transform-box: fill-box;
   transform-origin: center;
