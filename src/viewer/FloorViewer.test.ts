@@ -35,6 +35,35 @@ describe('FloorViewer sanitary route presentation styles', () => {
     expect(stylesheet).toContain('.floor-viewer__sanitary-toggle')
   })
 
+  it('keeps DEMO-only flow animation controls and visual layer isolated to the viewer', () => {
+    const component = readFileSync('src/viewer/FloorViewer.tsx', 'utf8')
+    const stylesheet = readFileSync('src/viewer/FloorViewer.css', 'utf8')
+
+    expect(component).toContain('buildSanitaryFlowStreams')
+    expect(component).toContain('Play Flow')
+    expect(component).toContain('Pause Flow')
+    expect(component).toContain('Replay Flow')
+    expect(component).toContain('floor-viewer__flow-overlay')
+    expect(component).toContain('floor-viewer__flow-stream')
+    expect(component).toContain('floor-viewer__flow-node')
+    expect(component).toContain('floor-viewer__flow-card')
+    expect(component).toContain("theme === 'dark'")
+    expect(component).toContain('serviceMapThemeEnabled ?')
+    expect(component).toContain('buildServiceMapFlowPath')
+    expect(component).toContain("['rail', 'halo', 'core', 'pulse']")
+    expect(component).toContain('flowAnimationState')
+    expect(stylesheet).toContain('.floor-viewer__flow-overlay')
+    expect(stylesheet).toContain('.floor-viewer__flow-stream')
+    expect(stylesheet).toContain('fill: none;')
+    expect(component).toContain('fill="none"')
+    expect(stylesheet).toContain('.floor-viewer__flow-stream--rail')
+    expect(stylesheet).toContain('.floor-viewer__flow-node')
+    expect(stylesheet).toContain('.floor-viewer__flow-card')
+    expect(stylesheet).toContain('fill: rgba(255, 255, 255, 0.94);')
+    expect(stylesheet).toContain('.floor-viewer--service-map .floor-viewer__flow-card-shell')
+    expect(stylesheet).toContain('@keyframes sanitary-flow-stream')
+  })
+
   it('does not contain investor-facing product copy', () => {
     const productSources = [
       readFileSync('src/viewer/FloorViewer.tsx', 'utf8'),

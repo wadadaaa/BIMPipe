@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { startTransition, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react'
 import * as THREE from 'three'
 import { MapControls } from 'three/examples/jsm/controls/MapControls.js'
 import type { ThemeMode } from '@/app/App'
@@ -12,6 +12,7 @@ import {
   getSanitaryPresentationState,
   type SanitaryPresentationMode,
 } from './sanitaryPresentation'
+import { buildSanitaryFlowStreams, type SanitaryFlowStream } from './sanitaryFlowAnimation'
 import './FloorViewer.css'
 
 const HOVER_ACCENT = new THREE.Color(0xffb45f)
@@ -81,10 +82,21 @@ export function FloorViewer({
   const boundsRef = useRef<THREE.Box3 | null>(null)
   const floorGroupRef = useRef<THREE.Group | null>(null)
   const projectionVecRef = useRef(new THREE.Vector3())
+  const flowProjectionFromRef = useRef(new THREE.Vector3())
+  const flowProjectionToRef = useRef(new THREE.Vector3())
+  const flowGlowId = `sanitary-flow-glow-${useId().replace(/:/g, '')}`
   const routeLineRefsRef = useRef<Map<string, SVGLineElement>>(new Map())
   const routeLabelRefsRef = useRef<Map<string, SVGTextElement>>(new Map())
+  const flowStreamRefsRef = useRef<Map<string, SVGPathElement>>(new Map())
+  const flowNodeRefsRef = useRef<Map<string, SVGCircleElement>>(new Map())
+  const flowCardRefsRef = useRef<Map<string, SVGGElement>>(new Map())
+  const flowAnimationFrameRef = useRef<number>(0)
+  const flowAnimationStartRef = useRef<number | null>(null)
+  const flowAnimationPausedAtRef = useRef<number | null>(null)
   const [routeProjectionStatus, setRouteProjectionStatus] = useState<{ failed: number; total: number }>({ failed: 0, total: 0 })
   const [sanitaryViewMode, setSanitaryViewMode] = useState<SanitaryPresentationMode>('after')
+  const [flowAnimationState, setFlowAnimationState] = useState<'idle' | 'playing' | 'paused'>('idle')
+  const serviceMapThemeEnabled = demoFlowEnabled && theme === 'dark'
 
   // Fixture overlay: map of expressId → positioned div element
   const fixtureMarkerRefsRef = useRef<Map<number, HTMLDivElement>>(new Map())
@@ -204,6 +216,7 @@ export function FloorViewer({
       controls.removeEventListener('change', queueRender)
       controls.dispose()
       renderer.dispose()
+      cancelAnimationFrame(flowAnimationFrameRef.current)
     }
   }, [onObjectHover, onObjectSelect])
 
@@ -212,11 +225,11 @@ export function FloorViewer({
     const scene = sceneRef.current
     if (!renderer || !scene) return
 
-    const viewerBackground = readViewerBackgroundColor()
+    const viewerBackground = readViewerBackgroundColor(serviceMapThemeEnabled)
     renderer.setClearColor(viewerBackground, 1)
     scene.background = viewerBackground
     scheduleRender()
-  }, [theme])
+  }, [theme, serviceMapThemeEnabled])
 
   useEffect(() => {
     const scene = sceneRef.current
@@ -242,7 +255,7 @@ export function FloorViewer({
     }
 
     const { group, boundingBox } = floorMeshes
-    styleFloorGroup(group, theme)
+    styleFloorGroup(group, serviceMapThemeEnabled ? 'dark' : theme)
     scene.add(group)
     floorGroupRef.current = group
     boundsRef.current = boundingBox
@@ -258,7 +271,7 @@ export function FloorViewer({
       .normalize()
     planPlaneRef.current.setFromNormalAndCoplanarPoint(camNormal, center)
     scheduleRender()
-  }, [floorMeshes, onObjectHover, onObjectSelect, theme])
+  }, [floorMeshes, onObjectHover, onObjectSelect, theme, serviceMapThemeEnabled])
 
   useEffect(() => {
     const floorGroup = floorGroupRef.current
@@ -324,20 +337,54 @@ export function FloorViewer({
   const hasSanitaryPresentation = sanitaryPresentationState.hasPresentation
   const visibleSanitaryRoutes = sanitaryPresentationState.visibleRoutes
   const visibleRisers = sanitaryPresentationState.visibleRisers
+  const flowStreams = useMemo(
+    () => buildSanitaryFlowStreams(visibleSanitaryRoutes),
+    [visibleSanitaryRoutes],
+  )
+  const hasFlowAnimation = demoFlowEnabled && sanitaryViewMode === 'after' && flowStreams.length > 0
 
   useEffect(() => {
     scheduleRender()
   }, [floorMeshes, plottedFixtures, plottedKitchens, risers, sanitaryRoutes, sanitaryViewMode])
 
   useEffect(() => {
+    if (!hasFlowAnimation) {
+      setFlowAnimationState('idle')
+      flowAnimationStartRef.current = null
+      flowAnimationPausedAtRef.current = null
+      for (const [, stream] of flowStreamRefsRef.current) stream.style.opacity = '0'
+      for (const [, node] of flowNodeRefsRef.current) node.style.opacity = '0'
+      for (const [, card] of flowCardRefsRef.current) card.style.opacity = '0'
+    }
+  }, [hasFlowAnimation])
+
+  useEffect(() => {
+    cancelAnimationFrame(flowAnimationFrameRef.current)
+    if (flowAnimationState !== 'playing') return
+
+    const tick = (timestamp: number) => {
+      if (flowAnimationStartRef.current === null) flowAnimationStartRef.current = timestamp
+      animateFlowStreams()
+      flowAnimationFrameRef.current = requestAnimationFrame(tick)
+    }
+    flowAnimationFrameRef.current = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(flowAnimationFrameRef.current)
+    // Stream positioning reads route/camera/canvas data from refs and SVG data attributes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flowAnimationState, flowStreams])
+
+  useEffect(() => {
     const frameId = requestAnimationFrame(() => {
       animateRouteLines()
+      if (flowAnimationState === 'paused' && flowAnimationPausedAtRef.current !== null) {
+        animateFlowStreams()
+      }
     })
     return () => cancelAnimationFrame(frameId)
     // Overlay projection must run when Before/After mounts or clears SVG routes;
     // route animation helpers are stable across the current viewer lifecycle.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sanitaryViewMode, visibleSanitaryRoutes])
+  }, [sanitaryViewMode, visibleSanitaryRoutes, flowAnimationState])
 
   const raycaster = useRef(new THREE.Raycaster())
   const pointer = useRef(new THREE.Vector2())
@@ -505,6 +552,32 @@ export function FloorViewer({
     scheduleRender()
   }
 
+  function handlePlayFlow() {
+    setSanitaryViewMode('after')
+    const now = performance.now()
+    if (flowAnimationStartRef.current === null) {
+      flowAnimationStartRef.current = now
+    } else if (flowAnimationPausedAtRef.current !== null) {
+      flowAnimationStartRef.current += now - flowAnimationPausedAtRef.current
+    }
+    flowAnimationPausedAtRef.current = null
+    setFlowAnimationState('playing')
+  }
+
+  function handlePauseFlow() {
+    const now = performance.now()
+    flowAnimationPausedAtRef.current = now
+    animateFlowStreams()
+    setFlowAnimationState('paused')
+  }
+
+  function handleReplayFlow() {
+    setSanitaryViewMode('after')
+    flowAnimationStartRef.current = performance.now()
+    flowAnimationPausedAtRef.current = null
+    setFlowAnimationState('playing')
+  }
+
   const showOverlay = isLoading || !!error || !floorMeshes
   const overlayText = isLoading
     ? 'Extracting floor geometry...'
@@ -515,7 +588,7 @@ export function FloorViewer({
         : 'Upload an IFC file and select a floor.'
 
   return (
-    <div className="floor-viewer">
+    <div className={['floor-viewer', serviceMapThemeEnabled ? 'floor-viewer--service-map' : ''].filter(Boolean).join(' ')}>
       <canvas
         ref={canvasRef}
         className={[
@@ -634,6 +707,114 @@ export function FloorViewer({
               }),
             )}
           </svg>
+          {hasFlowAnimation && (
+            <svg className="floor-viewer__flow-overlay" aria-hidden="true">
+              <defs>
+                <filter id={flowGlowId} x="-35%" y="-35%" width="170%" height="170%">
+                  <feGaussianBlur stdDeviation="4" result="blur" />
+                  <feMerge>
+                    <feMergeNode in="blur" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+              </defs>
+              {flowStreams.map((stream: SanitaryFlowStream) => (
+                <g key={stream.key} className="floor-viewer__flow-stream-group">
+                  {(['rail', 'halo', 'core', 'pulse'] as const).map((layer) => (
+                    <path
+                      key={`${stream.key}-${layer}`}
+                      fill="none"
+                      ref={(el) => {
+                        const refKey = `${stream.key}-${layer}`
+                        if (el) flowStreamRefsRef.current.set(refKey, el)
+                        else flowStreamRefsRef.current.delete(refKey)
+                      }}
+                      className={[
+                        'floor-viewer__flow-stream',
+                        `floor-viewer__flow-stream--${layer}`,
+                        `floor-viewer__flow-stream--${stream.role}`,
+                        stream.aggregation === 'collector' ? 'floor-viewer__flow-stream--collector' : '',
+                      ].filter(Boolean).join(' ')}
+                      data-flow-from-x={String(stream.from.x)}
+                      data-flow-from-y={String(stream.from.y)}
+                      data-flow-from-z={String(stream.from.z)}
+                      data-flow-to-x={String(stream.to.x)}
+                      data-flow-to-y={String(stream.to.y)}
+                      data-flow-to-z={String(stream.to.z)}
+                      data-flow-delay-ms={String(stream.phaseDelayMs)}
+                      data-flow-duration-ms={String(stream.durationMs)}
+                      data-flow-diameter-mm={String(stream.diameterMm)}
+                      data-flow-target-riser-id={stream.targetRiserId}
+                      data-flow-layer={layer}
+                      filter={layer === 'halo' || layer === 'pulse' ? `url(#${flowGlowId})` : undefined}
+                      style={{
+                        opacity: 0,
+                        animationDelay: `${stream.phaseDelayMs}ms`,
+                        animationDuration: `${stream.durationMs}ms`,
+                        animationPlayState: flowAnimationState === 'playing' ? 'running' : 'paused',
+                      }}
+                    />
+                  ))}
+                  {(['source', 'sink'] as const).map((nodeKind) => (
+                    <circle
+                      key={`${stream.key}-${nodeKind}`}
+                      ref={(el) => {
+                        const refKey = `${stream.key}-${nodeKind}`
+                        if (el) flowNodeRefsRef.current.set(refKey, el)
+                        else flowNodeRefsRef.current.delete(refKey)
+                      }}
+                      className={[
+                        'floor-viewer__flow-node',
+                        `floor-viewer__flow-node--${nodeKind}`,
+                        `floor-viewer__flow-node--${stream.role}`,
+                        stream.aggregation === 'collector' ? 'floor-viewer__flow-node--collector' : '',
+                      ].filter(Boolean).join(' ')}
+                      data-flow-node-kind={nodeKind}
+                      data-flow-from-x={String(stream.from.x)}
+                      data-flow-from-y={String(stream.from.y)}
+                      data-flow-from-z={String(stream.from.z)}
+                      data-flow-to-x={String(stream.to.x)}
+                      data-flow-to-y={String(stream.to.y)}
+                      data-flow-to-z={String(stream.to.z)}
+                      data-flow-target-riser-id={stream.targetRiserId}
+                      filter={`url(#${flowGlowId})`}
+                      style={{ opacity: 0 }}
+                      r="4.2"
+                    />
+                  ))}
+                  <g
+                    ref={(el) => {
+                      if (el) flowCardRefsRef.current.set(stream.key, el)
+                      else flowCardRefsRef.current.delete(stream.key)
+                    }}
+                    className={[
+                      'floor-viewer__flow-card',
+                      `floor-viewer__flow-card--${stream.role}`,
+                      stream.aggregation === 'collector' ? 'floor-viewer__flow-card--collector' : '',
+                    ].filter(Boolean).join(' ')}
+                    data-flow-from-x={String(stream.from.x)}
+                    data-flow-from-y={String(stream.from.y)}
+                    data-flow-from-z={String(stream.from.z)}
+                    data-flow-to-x={String(stream.to.x)}
+                    data-flow-to-y={String(stream.to.y)}
+                    data-flow-to-z={String(stream.to.z)}
+                    data-flow-diameter-mm={String(stream.diameterMm)}
+                    data-flow-target-riser-id={stream.targetRiserId}
+                    style={{ opacity: 0 }}
+                  >
+                    <rect className="floor-viewer__flow-card-shell" x="0" y="0" width="116" height="58" rx="11" />
+                    <circle className="floor-viewer__flow-card-dot" cx="15" cy="17" r="4.5" />
+                    <text className="floor-viewer__flow-card-title" x="28" y="20">
+                      {stream.aggregation === 'collector' ? 'collector' : 'fixture'}
+                    </text>
+                    <text className="floor-viewer__flow-card-label" x="14" y="38">Ø{stream.diameterMm}</text>
+                    <text className="floor-viewer__flow-card-value" x="64" y="38">2.0%</text>
+                    <text className="floor-viewer__flow-card-caption" x="14" y="50">to {stream.targetRiserId}</text>
+                  </g>
+                </g>
+              ))}
+            </svg>
+          )}
           {routeProjectionStatus.failed > 0 && (
             <div className="floor-viewer__route-debug" role="status">
               Preview limitation: {routeProjectionStatus.failed} / {routeProjectionStatus.total} route segments could not be projected exactly. Showing fallback guide lines.
@@ -673,6 +854,32 @@ export function FloorViewer({
                   ? 'Detected fixture inputs and selected risers. Generated routes are hidden for comparison.'
                   : 'Generated sanitary routes are shown with pipe diameters and slope design.'}
               </p>
+              {hasFlowAnimation && (
+                <div className="floor-viewer__flow-controls" role="group" aria-label="Sanitary flow animation controls">
+                  <button
+                    type="button"
+                    className="floor-viewer__flow-btn floor-viewer__flow-btn--primary"
+                    onClick={flowAnimationState === 'playing' ? handlePauseFlow : handlePlayFlow}
+                    aria-pressed={flowAnimationState === 'playing'}
+                  >
+                    {flowAnimationState === 'playing' ? 'Pause Flow' : 'Play Flow'}
+                  </button>
+                  <button
+                    type="button"
+                    className="floor-viewer__flow-btn"
+                    onClick={handleReplayFlow}
+                  >
+                    Replay Flow
+                  </button>
+                  <span className="floor-viewer__flow-status" aria-live="polite">
+                    {flowAnimationState === 'playing'
+                      ? 'Flow moving toward risers'
+                      : flowAnimationState === 'paused'
+                        ? 'Flow paused'
+                        : 'Ready to animate drainage flow'}
+                  </span>
+                </div>
+              )}
               <dl className="floor-viewer__sanitary-facts" aria-label="Sanitary route legend">
                 {routeFactCards.map((card) => (
                   <div key={card.label}>
@@ -977,6 +1184,74 @@ export function FloorViewer({
     }
   }
 
+  function animateFlowStreams() {
+    const canvas = canvasRef.current
+    const camera = cameraRef.current
+    if (!canvas || !camera) return
+
+    for (const [, stream] of flowStreamRefsRef.current) {
+      const from = flowProjectionFromRef.current.set(
+        parseFloat(stream.dataset['flowFromX'] ?? '0'),
+        parseFloat(stream.dataset['flowFromY'] ?? '0'),
+        parseFloat(stream.dataset['flowFromZ'] ?? '0'),
+      )
+      const to = flowProjectionToRef.current.set(
+        parseFloat(stream.dataset['flowToX'] ?? '0'),
+        parseFloat(stream.dataset['flowToY'] ?? '0'),
+        parseFloat(stream.dataset['flowToZ'] ?? '0'),
+      )
+      const fromPt = projectOverlayPointOnPlanMutable(from, canvas, camera, planPlaneRef.current)
+      const toPt = projectOverlayPointOnPlanMutable(to, canvas, camera, planPlaneRef.current)
+      if (!fromPt || !toPt) {
+        stream.style.opacity = '0'
+        continue
+      }
+      const diameter = parseFloat(stream.dataset['flowDiameterMm'] ?? '50')
+      const layer = stream.dataset['flowLayer'] ?? 'core'
+      const scale = layer === 'rail' ? 0.24 : layer === 'halo' ? 0.18 : layer === 'core' ? 0.088 : 0.052
+      const minimum = layer === 'rail' ? 8.8 : layer === 'halo' ? 6.4 : layer === 'pulse' ? 2.8 : 3.6
+      const maximum = layer === 'rail' ? 20 : layer === 'halo' ? 16 : layer === 'pulse' ? 7 : 10
+      const strokeWidth = Math.max(minimum, Math.min(maximum, diameter * scale))
+      stream.style.opacity = flowAnimationState === 'idle' && layer === 'pulse' ? '0' : '1'
+      stream.style.strokeWidth = `${strokeWidth}`
+      stream.setAttribute('d', buildServiceMapFlowPath(fromPt, toPt))
+    }
+
+    for (const [, node] of flowNodeRefsRef.current) {
+      const kind = node.dataset['flowNodeKind'] ?? 'source'
+      const vec = flowProjectionFromRef.current.set(
+        parseFloat(node.dataset[kind === 'sink' ? 'flowToX' : 'flowFromX'] ?? '0'),
+        parseFloat(node.dataset[kind === 'sink' ? 'flowToY' : 'flowFromY'] ?? '0'),
+        parseFloat(node.dataset[kind === 'sink' ? 'flowToZ' : 'flowFromZ'] ?? '0'),
+      )
+      const pt = projectOverlayPointOnPlanMutable(vec, canvas, camera, planPlaneRef.current)
+      if (!pt) {
+        node.style.opacity = '0'
+        continue
+      }
+      node.style.opacity = flowAnimationState === 'idle' ? '0' : '1'
+      node.setAttribute('cx', `${pt.x}`)
+      node.setAttribute('cy', `${pt.y}`)
+    }
+
+    for (const [, card] of flowCardRefsRef.current) {
+      const to = flowProjectionToRef.current.set(
+        parseFloat(card.dataset['flowToX'] ?? '0'),
+        parseFloat(card.dataset['flowToY'] ?? '0'),
+        parseFloat(card.dataset['flowToZ'] ?? '0'),
+      )
+      const pt = projectOverlayPointOnPlanMutable(to, canvas, camera, planPlaneRef.current)
+      if (!pt) {
+        card.style.opacity = '0'
+        continue
+      }
+      card.style.opacity = flowAnimationState === 'idle' ? '0' : '1'
+      const offsetX = card.classList.contains('floor-viewer__flow-card--fixtureBranch') ? 12 : -128
+      const offsetY = card.classList.contains('floor-viewer__flow-card--fixtureBranch') ? -62 : 12
+      card.setAttribute('transform', `translate(${pt.x + offsetX} ${pt.y + offsetY})`)
+    }
+  }
+
   function positionOverlayMarker(el: HTMLDivElement, x: number, y: number, z: number) {
     const canvas = canvasRef.current
     const camera = cameraRef.current
@@ -1048,6 +1323,44 @@ function projectOverlayPointOnPlan(
   return { x: ((vec.x + 1) / 2) * canvas.clientWidth, y: ((-vec.y + 1) / 2) * canvas.clientHeight }
 }
 
+function projectOverlayPointOnPlanMutable(
+  vec: THREE.Vector3,
+  canvas: HTMLCanvasElement,
+  camera: THREE.OrthographicCamera,
+  planPlane: THREE.Plane,
+) {
+  const distanceToPlan = planPlane.distanceToPoint(vec)
+  if (Number.isFinite(distanceToPlan)) {
+    vec.addScaledVector(planPlane.normal, -distanceToPlan)
+  }
+  vec.project(camera)
+  if (!Number.isFinite(vec.x) || !Number.isFinite(vec.y) || !Number.isFinite(vec.z) || vec.z < -1 || vec.z > 1) return null
+  return { x: ((vec.x + 1) / 2) * canvas.clientWidth, y: ((-vec.y + 1) / 2) * canvas.clientHeight }
+}
+
+function buildServiceMapFlowPath(
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+): string {
+  const dx = to.x - from.x
+  const dy = to.y - from.y
+  if (Math.abs(dx) < 6 || Math.abs(dy) < 6) return `M ${from.x} ${from.y} L ${to.x} ${to.y}`
+
+  const midX = from.x + dx * 0.58
+  const sx = Math.sign(dx) || 1
+  const sy = Math.sign(dy) || 1
+  const radius = Math.max(10, Math.min(30, Math.min(Math.abs(dx), Math.abs(dy)) * 0.22))
+
+  return [
+    `M ${from.x} ${from.y}`,
+    `L ${midX - sx * radius} ${from.y}`,
+    `Q ${midX} ${from.y} ${midX} ${from.y + sy * radius}`,
+    `L ${midX} ${to.y - sy * radius}`,
+    `Q ${midX} ${to.y} ${midX + sx * radius} ${to.y}`,
+    `L ${to.x} ${to.y}`,
+  ].join(' ')
+}
+
 function fallbackRouteLinePosition(line: SVGLineElement, canvas: HTMLCanvasElement) {
   const hashSeed = `${line.dataset['routeFromX'] ?? ''}-${line.dataset['routeToX'] ?? ''}`
   let hash = 0
@@ -1056,6 +1369,7 @@ function fallbackRouteLinePosition(line: SVGLineElement, canvas: HTMLCanvasEleme
   const y = 22 + slot * 10
   return { x1: 14, y1: y, x2: Math.max(canvas.clientWidth * 0.35, 80), y2: y }
 }
+
 
 function buildFixtureMarkerLabels(
   fixtures: Array<Fixture & { position: NonNullable<Fixture['position']> }>,
@@ -1350,7 +1664,9 @@ function disposeSceneObject(root: THREE.Object3D) {
   })
 }
 
-function readViewerBackgroundColor(): THREE.Color {
+function readViewerBackgroundColor(serviceMapMode = false): THREE.Color {
+  if (serviceMapMode) return new THREE.Color('#080a07')
+
   const viewerBackground = getComputedStyle(document.documentElement)
     .getPropertyValue('--viewer-bg')
     .trim()
