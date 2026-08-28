@@ -8,7 +8,7 @@ Branch: `goal/t0-t3-routing` · Started: 2026-08-28 · Status legend: ⏳ pendin
 | T0 — Export round-trip test | ✅ | commit `b381bd4`; ADAM_10 coverage pending asset (see Blockers) |
 | T1 — Un-gate routes from demo mode | ✅ | commit `016a92d` |
 | T2 — All fixture kinds + nearest-riser assignment | 🔄 | started after T1 green |
-| T3 core — Branch routing geometry (src/domain) | ⏳ | |
+| T3 core — Branch routing geometry (src/domain) | ✅ | commits `d9b5f4e`, `4ac9d40`, `98d287f` |
 | T3 — Viewer wiring (2D/3D, per-floor toggle) | ⏳ | starts after T2 + T3 core |
 | Final verification (`pnpm lint && pnpm test` full) | ⏳ | |
 
@@ -34,6 +34,13 @@ Branch: `goal/t0-t3-routing` · Started: 2026-08-28 · Status legend: ⏳ pendin
 - No viewer/sidebar changes needed: route lines + routes chip were already ungated; `RisersPanel` already surfaces limitations when demo is off. New component test proves dev surfacing (upload `anytower.ifc`, place risers, `routes:1`, routing preview notes visible, demo section absent).
 - Tests: +4 planner tests (incl. deep-equality parity demo vs non-demo on identical inputs), +1 WorkspacePage dev-flow test. Focused runs 41/41 green; zero existing assertions changed. `pnpm build` green. Coordinator re-ran 26/26 green.
 - Noted for T2/T3: suggested toilet risers coincide with toilets, so toilet routes are degenerate until risers move — pre-existing planner behavior now visible in dev; dev exports now include routes in debug JSON (intended).
+
+### T3 core — Branch routing geometry ✅ (2026-08-28 22:24, commits `d9b5f4e` / `4ac9d40` / `98d287f`)
+
+- Baseline reconciliation (`d9b5f4e`): the 2 pre-existing bim11 failures were stale tests — git archaeology (`f9479dd` added the tests; `e395ee5` and `5463f21` deliberately added the "inherits exception coverage from primary member:" prefix afterward) proves the prefix is intended production behavior. Test expectations updated to the exact intended strings (`toBe`, not loosened).
+- `src/domain/branchRouting.ts` (types-first commit, then algorithm): pure `computeBranchRoutes(AssignedFixture[]) -> FloorRoutes[]`. X-leg-first L-shaped runs (bend at `(riser.x, fixture.z)`), riser-datum elevations at +2% × remaining run (`DEFAULT_BRANCH_SLOPE_DROP_MM = 20` per `DEFAULT_BRANCH_SLOPE_RUN_MM = 1000`), per-(storey, riser) collinear same-direction legs merged and split at junction entries so each segment carries a constant `servedFixtureExpressIds` set (trunk when >1). Units via optional `planUnits` param or local mm/m heuristic (dependency direction shared→domain respected). No obstacle avoidance — documented approximation.
+- Tests: 11 new; `pnpm test src/domain` 69/69 green (worker); coordinator re-ran branchRouting + bim11: 24/24 green. `pnpm eslint src/domain` clean; `tsc --noEmit` clean.
+- Follow-up candidates recorded: no snapping tolerance on collinearity; ideal-slope (not min-invert) elevations; slope constant not yet per-call parameterized.
 
 ## Blockers
 
