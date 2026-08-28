@@ -19,6 +19,7 @@ import { buildSuggestedRisers } from '@/shared/routes/buildSuggestedRisers'
 import { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
 import { buildDemoModeUploadError, getDemoRuntimeConfig, isStoreyIncludedInDemoScope } from '@/shared/demoConfig'
 import { buildSanitaryRoutingDemoPlan, buildSanitaryRoutingPlan } from '@/shared/routes/buildSanitaryRoutes'
+import { buildBranchRoutesFromAssignments } from '@/shared/routes/buildBranchRoutes'
 import { assignFixturesToRisers } from '@/domain/assignFixturesToRisers'
 
 let floorViewerModulePromise: Promise<typeof import('@/viewer/FloorViewer')> | null = null
@@ -135,6 +136,13 @@ export function WorkspacePage({
   // --- view mode ---
   const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d')
 
+  // --- branch routes ---
+  // Per-storey visibility of the T3 branch route overlay. Absent storeys default
+  // to visible so routes show right after suggestion.
+  const [branchRoutesVisibleByStorey, setBranchRoutesVisibleByStorey] = useState<Map<StoreyId, boolean>>(
+    () => new Map(),
+  )
+
   // ---------------------------------------------------------------------------
 
   // Async handlers (handleFileAccepted, openStorey) need to read the latest
@@ -186,6 +194,7 @@ export function WorkspacePage({
       setDownloadError(null)
       setDemoAssetError(null)
       setViewMode('2d')
+      setBranchRoutesVisibleByStorey(new Map())
       setWebIfcModelId(null)
     })
 
@@ -335,6 +344,15 @@ export function WorkspacePage({
     })
   }
 
+  function handleToggleBranchRoutes() {
+    if (selectedStoreyId === null) return
+    setBranchRoutesVisibleByStorey((prev) => {
+      const next = new Map(prev)
+      next.set(selectedStoreyId, !(prev.get(selectedStoreyId) ?? true))
+      return next
+    })
+  }
+
   function handleSuggestRisers() {
     if (!selectedStoreyId || (fixtures.length === 0 && kitchens.length === 0)) return
 
@@ -479,6 +497,14 @@ export function WorkspacePage({
     return assignFixturesToRisers(fixtures, risers)
   }, [fixtures, risers, selectedStoreyId])
 
+  // Branch routes (T3): pure derivation from the T2 assignments above. The
+  // adapter drops unassigned entries — those stay visible in the fixtures panel
+  // with an explicit reason and have no riser to route toward.
+  const branchRouteFloors = useMemo(
+    () => buildBranchRoutesFromAssignments(fixtureAssignments),
+    [fixtureAssignments],
+  )
+
   const sanitaryRoutingPreview = useMemo(() => {
     if (selectedStoreyId === null) return { routes: [], limitations: [], debugGroups: [] }
     const floorFixtures = fixtures.filter((fixture) => fixture.storeyId === selectedStoreyId)
@@ -513,6 +539,15 @@ export function WorkspacePage({
   const viewerFixtures = isExtractingGeometry ? [] : fixtures
   const viewerKitchens = isExtractingGeometry ? [] : kitchens
   const viewerRisers = isExtractingGeometry ? [] : currentFloorRisers
+
+  // Branch route segments for the currently-viewed floor only (2D overlay).
+  const selectedFloorBranchSegments =
+    selectedStoreyId !== null
+      ? (branchRouteFloors.find((floor) => floor.storeyId === selectedStoreyId)?.segments ?? [])
+      : []
+  const viewerBranchRouteSegments = isExtractingGeometry ? [] : selectedFloorBranchSegments
+  const branchRoutesVisibleOnSelectedFloor =
+    selectedStoreyId === null || (branchRoutesVisibleByStorey.get(selectedStoreyId) ?? true)
 
 
   const validationReport =
@@ -581,6 +616,8 @@ export function WorkspacePage({
         risers={risers}
         theme={theme}
         onSwitch2D={() => setViewMode('2d')}
+        branchRouteFloors={branchRouteFloors}
+        branchRouteVisibility={branchRoutesVisibleByStorey}
       />
     </Suspense>
   ) : shouldLoadViewer ? (
@@ -613,6 +650,9 @@ export function WorkspacePage({
           onSwitch3D={storeys.length > 0 ? handleSwitch3D : undefined}
           sanitaryRoutes={sanitaryRoutingPreview.routes}
           demoFlowEnabled={demoRuntime.enabled}
+          branchRouteSegments={viewerBranchRouteSegments}
+          branchRoutesVisible={branchRoutesVisibleOnSelectedFloor}
+          onToggleBranchRoutes={handleToggleBranchRoutes}
         />
       </ViewTransition>
     </Suspense>

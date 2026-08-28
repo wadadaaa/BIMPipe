@@ -63,17 +63,28 @@ vi.mock('@/viewer/FloorViewer', () => ({
     kitchens,
     risers,
     sanitaryRoutes,
+    branchRouteSegments,
+    branchRoutesVisible,
+    onToggleBranchRoutes,
   }: {
     fixtures?: Array<unknown>
     kitchens?: Array<unknown>
     risers?: Array<unknown>
     sanitaryRoutes?: Array<unknown>
+    branchRouteSegments?: Array<unknown>
+    branchRoutesVisible?: boolean
+    onToggleBranchRoutes?: () => void
   }) => (
     <div data-testid="floor-viewer">
       <span>fixtures:{fixtures?.length ?? 0}</span>
       <span>kitchens:{kitchens?.length ?? 0}</span>
       <span>risers:{risers?.length ?? 0}</span>
       <span>routes:{sanitaryRoutes?.length ?? 0}</span>
+      {/* Mirrors the real viewer: hidden floors draw zero branch segments. */}
+      <span>branchSegments:{branchRoutesVisible === false ? 0 : (branchRouteSegments?.length ?? 0)}</span>
+      <button type="button" onClick={onToggleBranchRoutes}>
+        toggle-branch-routes
+      </button>
     </div>
   ),
 }))
@@ -379,5 +390,41 @@ describe('WorkspacePage', () => {
     expect(
       screen.getByText(/verify grouping before using this demo heuristic with anytower\.ifc/i),
     ).toBeInTheDocument()
+  })
+
+  it('shows branch routes after suggestion and the per-floor toggle hides and re-shows them', async () => {
+    mocks.getDemoRuntimeConfig.mockReturnValue({ enabled: false as const })
+
+    const user = userEvent.setup()
+    render(<WorkspacePage />)
+
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]')
+    expect(input).not.toBeNull()
+    await user.upload(input!, new File([new ArrayBuffer(128)], 'anytower.ifc'))
+
+    const levelTwoButton = await screen.findByRole('button', { name: /קומה 2/i })
+    await waitFor(() => {
+      expect(levelTwoButton).toHaveClass('storey-list__item--selected')
+    })
+
+    const placeRisersButton = await screen.findByRole('button', { name: /place risers/i })
+    await user.click(placeRisersButton)
+
+    await screen.findByLabelText('Remove riser R1')
+
+    // Both toilets sit exactly on their suggested risers (zero-length runs emit no
+    // segments); the bath routes to the kitchen corner riser as an axis-aligned
+    // L-run, so the dev flow shows its two branch segments right after suggestion.
+    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('branchSegments:2')
+
+    await user.click(screen.getByRole('button', { name: 'toggle-branch-routes' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('floor-viewer')).toHaveTextContent('branchSegments:0')
+    })
+
+    await user.click(screen.getByRole('button', { name: 'toggle-branch-routes' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('floor-viewer')).toHaveTextContent('branchSegments:2')
+    })
   })
 })

@@ -4,6 +4,7 @@ import { MapControls } from 'three/examples/jsm/controls/MapControls.js'
 import type { ThemeMode } from '@/app/App'
 import type { SanitaryFixtureRoute } from '@/shared/routes/buildSanitaryRoutes'
 import type { FloorMeshes } from '@/shared/ifc/extractFloorMeshes'
+import type { RouteSegment } from '@/domain/branchRouting'
 import type { Fixture, FixtureKind, KitchenArea, Riser, RiserId } from '@/domain/types'
 import { ViewTransition } from '@/shared/reactViewTransition'
 import {
@@ -12,6 +13,7 @@ import {
   getSanitaryPresentationState,
   type SanitaryPresentationMode,
 } from './sanitaryPresentation'
+import { getBranchRoutePresentation } from './branchRoutePresentation'
 import './FloorViewer.css'
 
 const HOVER_ACCENT = new THREE.Color(0xffb45f)
@@ -41,6 +43,10 @@ interface FloorViewerProps {
   onSwitch3D?: () => void
   sanitaryRoutes?: SanitaryFixtureRoute[]
   demoFlowEnabled?: boolean
+  /** Branch route segments computed for the currently selected floor (T3). */
+  branchRouteSegments?: RouteSegment[]
+  branchRoutesVisible?: boolean
+  onToggleBranchRoutes?: () => void
 }
 
 export function FloorViewer({
@@ -67,6 +73,9 @@ export function FloorViewer({
   onSwitch3D,
   sanitaryRoutes = [],
   demoFlowEnabled = false,
+  branchRouteSegments = [],
+  branchRoutesVisible = true,
+  onToggleBranchRoutes,
 }: FloorViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
@@ -83,6 +92,7 @@ export function FloorViewer({
   const projectionVecRef = useRef(new THREE.Vector3())
   const routeLineRefsRef = useRef<Map<string, SVGLineElement>>(new Map())
   const routeLabelRefsRef = useRef<Map<string, SVGTextElement>>(new Map())
+  const branchRouteLineRefsRef = useRef<Map<string, SVGLineElement>>(new Map())
   const [routeProjectionStatus, setRouteProjectionStatus] = useState<{ failed: number; total: number }>({ failed: 0, total: 0 })
   const [sanitaryViewMode, setSanitaryViewMode] = useState<SanitaryPresentationMode>('after')
 
@@ -156,6 +166,7 @@ export function FloorViewer({
       animateFixtureMarkers()
       animateRiserMarkers()
       animateRouteLines()
+      animateBranchRouteLines()
     }
 
     const queueRender = () => {
@@ -324,10 +335,15 @@ export function FloorViewer({
   const hasSanitaryPresentation = sanitaryPresentationState.hasPresentation
   const visibleSanitaryRoutes = sanitaryPresentationState.visibleRoutes
   const visibleRisers = sanitaryPresentationState.visibleRisers
+  const branchRoutePresentation = useMemo(
+    () => getBranchRoutePresentation({ segments: branchRouteSegments, visible: branchRoutesVisible }),
+    [branchRouteSegments, branchRoutesVisible],
+  )
+  const visibleBranchRouteSegments = branchRoutePresentation.visibleSegments
 
   useEffect(() => {
     scheduleRender()
-  }, [floorMeshes, plottedFixtures, plottedKitchens, risers, sanitaryRoutes, sanitaryViewMode])
+  }, [floorMeshes, plottedFixtures, plottedKitchens, risers, sanitaryRoutes, sanitaryViewMode, branchRoutePresentation])
 
   useEffect(() => {
     const frameId = requestAnimationFrame(() => {
@@ -580,6 +596,12 @@ export function FloorViewer({
             </span>
           )}
 
+          {visibleBranchRouteSegments.length > 0 && (
+            <span className="floor-viewer__chip floor-viewer__chip--branch-route">
+              {visibleBranchRouteSegments.length} branch {visibleBranchRouteSegments.length === 1 ? 'run' : 'runs'}
+            </span>
+          )}
+
           {storeyCount > 0 && (
             <span className="floor-viewer__chip">{storeyCount} storeys</span>
           )}
@@ -589,6 +611,27 @@ export function FloorViewer({
       {!showOverlay && (
         <>
           <svg className="floor-viewer__route-overlay" aria-hidden="true">
+            {visibleBranchRouteSegments.map((segment) => (
+              <line
+                key={segment.key}
+                ref={(el) => {
+                  if (el) branchRouteLineRefsRef.current.set(segment.key, el)
+                  else branchRouteLineRefsRef.current.delete(segment.key)
+                }}
+                className={[
+                  'floor-viewer__branch-route-line',
+                  segment.kind === 'trunk'
+                    ? 'floor-viewer__branch-route-line--trunk'
+                    : 'floor-viewer__branch-route-line--fixture-branch',
+                ].join(' ')}
+                data-branch-from-x={String(segment.from.x)}
+                data-branch-from-y={String(segment.from.y)}
+                data-branch-from-z={String(segment.from.z)}
+                data-branch-to-x={String(segment.to.x)}
+                data-branch-to-y={String(segment.to.y)}
+                data-branch-to-z={String(segment.to.z)}
+              />
+            ))}
             {visibleSanitaryRoutes.flatMap((route) =>
               route.segments.map((segment, index) => {
                 const routeKey = `${route.fixtureExpressId}-${segment.routeRole}-${index}`
@@ -847,6 +890,11 @@ export function FloorViewer({
           <span className="floor-viewer__legend-item floor-viewer__legend-item--route-branch">
             Dashed amber = branch route
           </span>
+          {branchRoutePresentation.hasRoutes && (
+            <span className="floor-viewer__legend-item floor-viewer__legend-item--branch-route">
+              Violet = fixture branch runs
+            </span>
+          )}
           {isAddingFixture && (
             <span className="floor-viewer__legend-item floor-viewer__legend-item--fixture">
               Click to place {getFixtureKindLabel(pendingFixtureKind).toLowerCase()}
@@ -877,6 +925,20 @@ export function FloorViewer({
               onClick={onSwitch3D}
             >
               3D
+            </button>
+          )}
+          {onToggleBranchRoutes && branchRoutePresentation.hasRoutes && (
+            <button
+              className="floor-viewer__btn"
+              title={
+                branchRoutesVisible
+                  ? 'Hide branch routes on this floor'
+                  : 'Show branch routes on this floor'
+              }
+              aria-pressed={branchRoutesVisible}
+              onClick={onToggleBranchRoutes}
+            >
+              Runs
             </button>
           )}
         </div>
@@ -974,6 +1036,37 @@ export function FloorViewer({
 
     if (projectionFailures !== routeProjectionStatus.failed || routeLines.size !== routeProjectionStatus.total) {
       setRouteProjectionStatus({ failed: projectionFailures, total: routeLines.size })
+    }
+  }
+
+  function animateBranchRouteLines() {
+    const canvas = canvasRef.current
+    const camera = cameraRef.current
+    if (!canvas || !camera) return
+
+    for (const [, line] of branchRouteLineRefsRef.current) {
+      const from = new THREE.Vector3(
+        parseFloat(line.dataset['branchFromX'] ?? '0'),
+        parseFloat(line.dataset['branchFromY'] ?? '0'),
+        parseFloat(line.dataset['branchFromZ'] ?? '0'),
+      )
+      const to = new THREE.Vector3(
+        parseFloat(line.dataset['branchToX'] ?? '0'),
+        parseFloat(line.dataset['branchToY'] ?? '0'),
+        parseFloat(line.dataset['branchToZ'] ?? '0'),
+      )
+
+      const fromPt = projectOverlayPointOnPlan(from, canvas, camera, planPlaneRef.current)
+      const toPt = projectOverlayPointOnPlan(to, canvas, camera, planPlaneRef.current)
+      if (!fromPt || !toPt) {
+        line.style.opacity = '0'
+        continue
+      }
+      line.style.opacity = ''
+      line.setAttribute('x1', `${fromPt.x}`)
+      line.setAttribute('y1', `${fromPt.y}`)
+      line.setAttribute('x2', `${toPt.x}`)
+      line.setAttribute('y2', `${toPt.y}`)
     }
   }
 

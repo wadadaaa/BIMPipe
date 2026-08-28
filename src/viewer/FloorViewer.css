@@ -230,6 +230,26 @@
   stroke-dasharray: none;
 }
 
+/* ── Branch route overlay (T3 fixture-to-riser runs) ── */
+.floor-viewer__branch-route-line {
+  vector-effect: non-scaling-stroke;
+  stroke: #c58bff;
+  stroke-linecap: round;
+  filter:
+    drop-shadow(0 0 4px rgba(0, 0, 0, 0.85))
+    drop-shadow(0 0 9px rgba(150, 84, 232, 0.55));
+}
+
+.floor-viewer__branch-route-line--trunk {
+  stroke-width: 5;
+  opacity: 0.98;
+}
+
+.floor-viewer__branch-route-line--fixture-branch {
+  stroke-width: 2.6;
+  opacity: 0.85;
+}
+
 .floor-viewer__route-label {
   paint-order: stroke;
   stroke: rgba(4, 8, 14, 0.92);
@@ -911,4 +931,15 @@
 .floor-viewer__legend-item--route-branch {
   border-color: rgba(255, 204, 51, 0.4);
   color: #ffd772;
+}
+
+.floor-viewer__chip--branch-route {
+  border-color: rgba(197, 139, 255, 0.42);
+  background: rgba(84, 44, 128, 0.28);
+  color: #e2c6ff;
+}
+
+.floor-viewer__legend-item--branch-route {
+  border-color: rgba(197, 139, 255, 0.32);
+  color: #dcb8ff;
 }

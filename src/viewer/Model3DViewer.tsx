@@ -3,10 +3,15 @@ import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import type { ThemeMode } from '@/app/App'
+import type { FloorRoutes } from '@/domain/branchRouting'
 import type { Riser, Storey, StoreyId } from '@/domain/types'
 import { getIfcApi } from '@/shared/ifc/ifcApi'
 import { extractFloorMeshes } from '@/shared/ifc/extractFloorMeshes'
+import { buildBranchRouteWorldSegments, type BranchRouteViewSegment } from './branchRoutePresentation'
 import './Model3DViewer.css'
+
+const EMPTY_BRANCH_ROUTE_FLOORS: FloorRoutes[] = []
+const EMPTY_BRANCH_ROUTE_VISIBILITY: ReadonlyMap<StoreyId, boolean> = new Map()
 
 interface Model3DViewerProps {
   webIfcModelId: number
@@ -15,6 +20,10 @@ interface Model3DViewerProps {
   risers: Riser[]
   theme: ThemeMode
   onSwitch2D: () => void
+  /** Per-floor branch routes (T3); drawn at each storey's riser-junction level. */
+  branchRouteFloors?: FloorRoutes[]
+  /** Per-storey branch route visibility; absent storeys default to visible. */
+  branchRouteVisibility?: ReadonlyMap<StoreyId, boolean>
 }
 
 // Tints per floor level, cycling through blue-cyan palette
@@ -29,6 +38,12 @@ const FLOOR_TINTS = [
 const FILL_OPACITY = 0.04
 const WIRE_OPACITY = 0.32
 const RISER_COLOR = new THREE.Color(0xffb45f)
+// Violet, matching the 2D branch route overlay; distinct from riser orange and floor tints.
+const BRANCH_ROUTE_COLOR = new THREE.Color(0xc58bff)
+// LineBasicMaterial line width is not portable, so trunk vs fixture-branch is
+// distinguished by opacity instead.
+const BRANCH_TRUNK_OPACITY = 0.95
+const BRANCH_FIXTURE_OPACITY = 0.5
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -38,6 +53,8 @@ export function Model3DViewer({
   risers,
   theme,
   onSwitch2D,
+  branchRouteFloors = EMPTY_BRANCH_ROUTE_FLOORS,
+  branchRouteVisibility = EMPTY_BRANCH_ROUTE_VISIBILITY,
 }: Model3DViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
@@ -47,15 +64,25 @@ export function Model3DViewer({
   const frameIdRef = useRef<number>(0)
   const floorGroupRef = useRef<THREE.Group | null>(null)
   const riserGroupRef = useRef<THREE.Group | null>(null)
+  const branchRouteGroupRef = useRef<THREE.Group | null>(null)
   const buildingBoxRef = useRef<THREE.Box3 | null>(null)
   const storeyYCentersRef = useRef<Map<StoreyId, number>>(new Map())
   const risersRef = useRef(risers)
+  const branchRouteFloorsRef = useRef(branchRouteFloors)
+  const branchRouteVisibilityRef = useRef(branchRouteVisibility)
 
   const [loadedCount, setLoadedCount] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   risersRef.current = risers
+
+  // Keep the latest branch route props visible to the async geometry loader,
+  // which finishes after an unknown number of renders.
+  useEffect(() => {
+    branchRouteFloorsRef.current = branchRouteFloors
+    branchRouteVisibilityRef.current = branchRouteVisibility
+  }, [branchRouteFloors, branchRouteVisibility])
 
   // ── Scene setup (mount once) ──────────────────────────────────────────────
   useEffect(() => {
@@ -121,6 +148,11 @@ export function Model3DViewer({
         disposeGroup(riserGroupRef.current)
         riserGroupRef.current = null
       }
+      if (branchRouteGroupRef.current) {
+        scene.remove(branchRouteGroupRef.current)
+        disposeGroup(branchRouteGroupRef.current)
+        branchRouteGroupRef.current = null
+      }
       ro.disconnect()
       controls.dispose()
       renderer.dispose()
@@ -160,6 +192,11 @@ export function Model3DViewer({
       scene.remove(riserGroupRef.current)
       disposeGroup(riserGroupRef.current)
       riserGroupRef.current = null
+    }
+    if (branchRouteGroupRef.current) {
+      scene.remove(branchRouteGroupRef.current)
+      disposeGroup(branchRouteGroupRef.current)
+      branchRouteGroupRef.current = null
     }
     const floorRoot = new THREE.Group()
     scene.add(floorRoot)
@@ -218,6 +255,13 @@ export function Model3DViewer({
           storeyYCentersRef.current,
           risersRef.current,
         )
+        replaceBranchRouteGroup(
+          activeScene,
+          branchRouteGroupRef,
+          storeyYCentersRef.current,
+          branchRouteFloorsRef.current,
+          branchRouteVisibilityRef.current,
+        )
         if (!combinedBox.isEmpty()) fitCamera(activeCamera, activeControls, combinedBox)
       } catch (err) {
         if (!cancelled) {
@@ -244,6 +288,19 @@ export function Model3DViewer({
       risers,
     )
   }, [risers])
+
+  useEffect(() => {
+    const scene = sceneRef.current
+    if (!scene) return
+
+    replaceBranchRouteGroup(
+      scene,
+      branchRouteGroupRef,
+      storeyYCentersRef.current,
+      branchRouteFloors,
+      branchRouteVisibility,
+    )
+  }, [branchRouteFloors, branchRouteVisibility])
 
   return (
     <div className="model-3d-viewer">
@@ -522,4 +579,72 @@ function replaceRiserGroup(
   buildRiserPipes(riserGroup, risers, buildingBox, storeyYCenters)
   scene.add(riserGroup)
   riserGroupRef.current = riserGroup
+}
+
+/**
+ * Rebuilds the branch route overlay. Segments are placed at each storey's
+ * geometry-derived Y center — the same anchor as the riser junction spheres —
+ * plus the segment's relative slope elevation, so the downstream end of every
+ * run lands exactly on its riser junction (see buildBranchRouteWorldSegments).
+ */
+function replaceBranchRouteGroup(
+  scene: THREE.Scene,
+  branchRouteGroupRef: MutableRefObject<THREE.Group | null>,
+  storeyYCenters: Map<StoreyId, number>,
+  branchRouteFloors: FloorRoutes[],
+  branchRouteVisibility: ReadonlyMap<StoreyId, boolean>,
+): void {
+  if (branchRouteGroupRef.current) {
+    scene.remove(branchRouteGroupRef.current)
+    disposeGroup(branchRouteGroupRef.current)
+    branchRouteGroupRef.current = null
+  }
+
+  const segments = buildBranchRouteWorldSegments({
+    floors: branchRouteFloors,
+    storeyYAnchors: storeyYCenters,
+    visibilityByStorey: branchRouteVisibility,
+  })
+  if (segments.length === 0) return
+
+  const branchRouteGroup = new THREE.Group()
+  buildBranchRouteLines(branchRouteGroup, segments)
+  scene.add(branchRouteGroup)
+  branchRouteGroupRef.current = branchRouteGroup
+}
+
+/** One LineSegments per segment kind: trunks brighter, fixture branches fainter. */
+function buildBranchRouteLines(
+  targetGroup: THREE.Group,
+  segments: BranchRouteViewSegment[],
+): void {
+  const trunkPositions: number[] = []
+  const fixturePositions: number[] = []
+
+  for (const segment of segments) {
+    const positions = segment.kind === 'trunk' ? trunkPositions : fixturePositions
+    positions.push(
+      segment.from.x, segment.from.y, segment.from.z,
+      segment.to.x, segment.to.y, segment.to.z,
+    )
+  }
+
+  for (const [positions, opacity] of [
+    [trunkPositions, BRANCH_TRUNK_OPACITY],
+    [fixturePositions, BRANCH_FIXTURE_OPACITY],
+  ] as const) {
+    if (positions.length === 0) continue
+    const geometry = new THREE.BufferGeometry()
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+    targetGroup.add(
+      new THREE.LineSegments(
+        geometry,
+        new THREE.LineBasicMaterial({
+          color: BRANCH_ROUTE_COLOR,
+          transparent: true,
+          opacity,
+        }),
+      ),
+    )
+  }
 }
