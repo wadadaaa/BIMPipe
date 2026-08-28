@@ -101,49 +101,32 @@ describe('suggestRiserPositions', () => {
     expect(result[1].y).toBe(50)
   })
 
-  it('does not split a wet core just because fixture Y values differ when no WC exists', () => {
-    const result = suggestRiserPositions([
-      fixture(1, 0, 50, 0, 'SINK'),
-      fixture(2, 0.2, 9999, 0.2, 'BATH'),
-    ])
-
-    expect(result).toHaveLength(1)
-  })
-
-  it('splits fixtures that are distant on Z even when Y is the same when no WC exists', () => {
-    const result = suggestRiserPositions([
-      fixture(1, 0, 50, 0, 'SINK'),
-      fixture(2, 0, 50, 10000, 'BATH'),
-    ])
-
-    expect(result).toHaveLength(2)
-  })
-
-  it('does not merge a long chain of nearby fixtures into one riser when no WC exists', () => {
+  it('returns no risers when only non-toilet fixtures exist (they attach to risers instead)', () => {
+    // T2: non-toilet fixtures never spawn risers; they are assigned to the nearest
+    // riser by src/domain/assignFixturesToRisers.ts.
     const result = suggestRiserPositions([
       fixture(1, 0, 50, 0, 'SINK'),
       fixture(2, 0, 50, 1000, 'BATH'),
-      fixture(3, 0, 50, 2000, 'BATH'),
-      fixture(4, 0, 50, 3000, 'WASHHANDBASIN'),
-      fixture(5, 0, 50, 4000, 'URINAL'),
+      fixture(3, 0, 50, 2000, 'WASHHANDBASIN'),
+      fixture(4, 0, 50, 3000, 'URINAL'),
+      fixture(5, 0, 50, 4000, 'BIDET'),
     ])
 
-    expect(result.length).toBeGreaterThan(1)
+    expect(result).toEqual([])
   })
 
-  it('uses roughly four fixtures per riser when one non-WC cluster is too dense', () => {
-    const result = suggestRiserPositions([
-      fixture(1, 10000, 50, 0, 'SINK'),
-      fixture(2, 10100, 50, 0, 'BATH'),
-      fixture(3, 10200, 50, 0, 'BATH'),
-      fixture(4, 10300, 50, 0, 'WASHHANDBASIN'),
-      fixture(5, 10400, 50, 0, 'URINAL'),
-      fixture(6, 10500, 50, 0, 'SINK'),
-      fixture(7, 10600, 50, 0, 'BIDET'),
-      fixture(8, 10700, 50, 0, 'BATH'),
-    ])
+  it('keeps dedicated kitchen risers when only non-toilet fixtures accompany a kitchen', () => {
+    const result = suggestRiserPositions(
+      [
+        fixture(1, 500, 50, 500, 'BATH'),
+        fixture(2, 700, 50, 700, 'WASHHANDBASIN'),
+      ],
+      [kitchen(11, 3000, 50, 3000)],
+      { minX: 0, maxX: 10000, minZ: 0, maxZ: 10000 },
+    )
 
-    expect(result).toHaveLength(2)
+    // Only the kitchen corner riser is suggested; the bath and basin add nothing.
+    expect(result).toEqual([{ x: 1800, y: 50, z: 1800 }])
   })
 
   it('ignores non-toilet fixtures when toilets exist', () => {
@@ -216,17 +199,18 @@ describe('suggestRiserPositions', () => {
     ])
   })
 
-  it('falls back to clustered centroids when no WC exists in the fixture set', () => {
+  it('suggests nothing when no WC and no kitchen exists, even in metre models', () => {
+    // T2: the old clustered-centroid fallback is removed; non-toilet fixtures wait
+    // for a riser to attach to instead of spawning one.
     const result = suggestRiserPositions([
       fixture(1, 0, 50, 0, 'SINK'),
       fixture(2, 0.4, 50, 0, 'BATH'),
     ])
 
-    expect(result).toHaveLength(1)
-    expect(result[0]).toMatchObject({ x: 0.2, y: 50, z: 0 })
+    expect(result).toEqual([])
   })
 
-  it('does not let kitchen sinks create extra clustered risers when kitchens already drive the count', () => {
+  it('does not let kitchen sinks create extra risers when kitchens already drive the count', () => {
     const result = suggestRiserPositions(
       [
         { ...fixture(1, 205, 50, 205, 'SINK'), isKitchenSink: true },

@@ -1,18 +1,15 @@
 import type { Fixture, KitchenArea, PlanBounds } from '@/domain/types'
-import { averagePosition, detectPlanUnits, planDistance, type Point3D } from './planGeometry'
+import { detectPlanUnits, planDistance, type Point3D } from './planGeometry'
 import type { RiserPlacementRuleProfile } from './riserPlacementProfile'
-
-interface RiserCluster {
-  points: Point3D[]
-  centroid: Point3D
-}
 
 type PositionedFixture = Fixture & { position: NonNullable<Fixture['position']> }
 type PositionedKitchen = KitchenArea & { position: NonNullable<KitchenArea['position']> }
 
 /**
- * Groups nearby sanitary points into wet cores and returns one riser candidate
- * per core. Distances are measured on the viewer plan plane: X/Z, not X/Y.
+ * Returns one riser candidate per toilet plus one dedicated corner riser per kitchen.
+ * Non-toilet fixtures never spawn risers; they attach to the nearest riser instead
+ * (see `src/domain/assignFixturesToRisers.ts`). Distances are measured on the viewer
+ * plan plane: X/Z, not X/Y.
  */
 export function suggestRiserPositions(
   fixtures: Fixture[],
@@ -30,45 +27,15 @@ export function suggestRiserPositions(
       kitchen.position !== null,
   )
   const dedicatedKitchenPositions = buildKitchenRiserPositions(positionedKitchens, floorPlanBounds, fixtureOffsetToleranceMm)
-  const points = positionedFixtures.map((fixture) => fixture.position)
-
-  if (points.length === 0 && dedicatedKitchenPositions.length === 0) return []
 
   const wcFixtures = positionedFixtures.filter((fixture) => fixture.kind === 'TOILETPAN')
-  if (wcFixtures.length > 0) {
-    return sortByDominantPlanAxis([
-      ...wcFixtures.map((fixture) => fixture.position),
-      ...dedicatedKitchenPositions,
-    ]).map((position) => ({
-      ...position,
-    }))
-  }
-
-  const clusteredFixturePoints = positionedFixtures
-    .filter((fixture) => !fixture.isKitchenSink)
-    .map((fixture) => fixture.position)
-
-  if (clusteredFixturePoints.length === 0) {
-    return sortByDominantPlanAxis(dedicatedKitchenPositions).map((position) => ({ ...position }))
-  }
-
-  const units = detectPlanUnits([...clusteredFixturePoints, ...dedicatedKitchenPositions])
-  const maxWetCoreDiameter = units === 'mm' ? 2600 : 2.6
-  const spatialClusters = buildBoundedClusters(clusteredFixturePoints, maxWetCoreDiameter)
-  const targetCount = Math.min(
-    clusteredFixturePoints.length,
-    Math.max(spatialClusters.length, Math.ceil(clusteredFixturePoints.length / 4)),
-  )
-
-  const rawPositions =
-    targetCount <= spatialClusters.length
-      ? spatialClusters.map((cluster) => cluster.centroid)
-      : kMeansPlan(clusteredFixturePoints, targetCount)
-
-  return sortByDominantPlanAxis([
+  const anchorPositions = [
+    ...wcFixtures.map((fixture) => fixture.position),
     ...dedicatedKitchenPositions,
-    ...rawPositions,
-  ]).map((position) => ({ ...position }))
+  ]
+  if (anchorPositions.length === 0) return []
+
+  return sortByDominantPlanAxis(anchorPositions).map((position) => ({ ...position }))
 }
 
 function buildKitchenRiserPositions(
@@ -231,83 +198,6 @@ function ensureKitchenRiserSeparation(
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max)
-}
-
-function buildBoundedClusters(points: Point3D[], maxWetCoreDiameter: number): RiserCluster[] {
-  const clusters: RiserCluster[] = []
-
-  for (const point of sortByDominantPlanAxis(points)) {
-    let nearestCluster: RiserCluster | null = null
-    let nearestDistance = Infinity
-
-    for (const cluster of clusters) {
-      if (!canAddToCluster(cluster, point, maxWetCoreDiameter)) continue
-
-      const distance = planDistance(point, cluster.centroid)
-      if (distance < nearestDistance) {
-        nearestCluster = cluster
-        nearestDistance = distance
-      }
-    }
-
-    if (nearestCluster) {
-      nearestCluster.points.push(point)
-      nearestCluster.centroid = averagePosition(nearestCluster.points)
-      continue
-    }
-
-    clusters.push({ points: [point], centroid: { ...point } })
-  }
-
-  return clusters
-}
-
-function kMeansPlan(points: Point3D[], k: number): Point3D[] {
-  const sorted = sortByDominantPlanAxis(points)
-  const step = sorted.length / k
-  let centroids = Array.from({ length: k }, (_, i) => ({
-    ...sorted[Math.min(Math.floor(i * step + step / 2), sorted.length - 1)],
-  }))
-
-  for (let iteration = 0; iteration < 24; iteration++) {
-    const clusters: Point3D[][] = Array.from({ length: k }, () => [])
-
-    for (const point of points) {
-      let nearestIndex = 0
-      let nearestDistance = Infinity
-
-      for (let i = 0; i < centroids.length; i++) {
-        const distance = planDistance(point, centroids[i])
-        if (distance < nearestDistance) {
-          nearestDistance = distance
-          nearestIndex = i
-        }
-      }
-
-      clusters[nearestIndex].push(point)
-    }
-
-    let moved = false
-    centroids = centroids.map((centroid, i) => {
-      const cluster = clusters[i]
-      if (cluster.length === 0) return centroid
-
-      const next = averagePosition(cluster)
-      if (planDistance(centroid, next) > 1e-6) moved = true
-      return next
-    })
-
-    if (!moved) break
-  }
-
-  return centroids
-}
-
-function canAddToCluster(cluster: RiserCluster, point: Point3D, maxDiameter: number): boolean {
-  for (const existingPoint of cluster.points) {
-    if (planDistance(existingPoint, point) > maxDiameter) return false
-  }
-  return true
 }
 
 function sortByDominantPlanAxis(points: Point3D[]): Point3D[] {
