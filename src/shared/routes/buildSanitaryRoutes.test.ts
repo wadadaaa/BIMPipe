@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { DemoConfig } from '@/shared/demoConfig'
 import type { Fixture, Riser } from '@/domain/types'
-import { buildSanitaryRoutingDemoPlan, DEMO_SANITARY_SLOPE } from './buildSanitaryRoutes'
+import { buildSanitaryRoutingDemoPlan, buildSanitaryRoutingPlan, DEMO_SANITARY_SLOPE } from './buildSanitaryRoutes'
 
 const demoConfig: DemoConfig = {
   name: 'demo',
@@ -316,5 +316,64 @@ describe('buildSanitaryRoutingDemoPlan', () => {
       slopePercent: 2,
     })
     expect(plan.limitations).not.toContain('Branch fixtures are drawn as a single straight branch run to the riser in plan view for the demo.')
+  })
+})
+
+describe('buildSanitaryRoutingPlan', () => {
+  it('computes routes without a demo config when fixtures and risers share a floor', () => {
+    const plan = buildSanitaryRoutingPlan(
+      [
+        fixture({ expressId: 10, kind: 'TOILETPAN' }),
+        fixture({ expressId: 11, kind: 'SINK', position: { x: 2, y: 0, z: 0 } }),
+      ],
+      [riser('R1', 10, 0)],
+      'ANY_UPLOAD.ifc',
+    )
+
+    expect(plan.routes.map((route) => route.fixtureExpressId).sort()).toEqual([10, 11])
+    expect(plan.routes.find((route) => route.fixtureExpressId === 10)).toMatchObject({
+      pipeDiameterMm: 110,
+      slope: DEMO_SANITARY_SLOPE,
+    })
+    expect(plan.limitations).toContain(
+      'Sanitary service-zone grouping uses an ADAM_10-calibrated viewer-coordinate distance; verify grouping before using this demo heuristic with ANY_UPLOAD.ifc.',
+    )
+  })
+
+  it('produces output identical to the demo entry point for the same inputs', () => {
+    const sharedFixtures = [
+      fixture({ expressId: 101, kind: 'TOILETPAN', position: { x: 0, y: 0, z: 0 } }),
+      fixture({ expressId: 102, kind: 'SINK', position: { x: 2, y: 0, z: 4 } }),
+      fixture({ expressId: 103, kind: 'BATH', position: { x: 6, y: 0, z: 3 } }),
+    ]
+    const sharedRisers = [riser('R1', 10, 0), riser('R2', 100, 0)]
+
+    expect(buildSanitaryRoutingPlan(sharedFixtures, sharedRisers, demoConfig.model.fileName)).toEqual(
+      buildSanitaryRoutingDemoPlan(sharedFixtures, sharedRisers, demoConfig),
+    )
+  })
+
+  it('does not warn about calibration for the ADAM_10 model file name', () => {
+    const plan = buildSanitaryRoutingPlan(
+      [fixture({ expressId: 12, position: { x: 2, y: 0, z: 0 } })],
+      [riser('R1', 10, 0)],
+      'ADAM_10.ifc',
+    )
+
+    expect(plan.routes).toHaveLength(1)
+    expect(plan.limitations).toEqual([])
+  })
+
+  it('treats an unknown model file name as uncalibrated', () => {
+    const plan = buildSanitaryRoutingPlan(
+      [fixture({ expressId: 13, position: { x: 2, y: 0, z: 0 } })],
+      [riser('R1', 10, 0)],
+      null,
+    )
+
+    expect(plan.routes).toHaveLength(1)
+    expect(plan.limitations).toContain(
+      'Sanitary service-zone grouping uses an ADAM_10-calibrated viewer-coordinate distance; verify grouping before using this demo heuristic with this model.',
+    )
   })
 })

@@ -18,7 +18,7 @@ import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE } from '@/shared/routes/riserPlace
 import { buildSuggestedRisers } from '@/shared/routes/buildSuggestedRisers'
 import { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
 import { buildDemoModeUploadError, getDemoRuntimeConfig, isStoreyIncludedInDemoScope } from '@/shared/demoConfig'
-import { buildSanitaryRoutingDemoPlan } from '@/shared/routes/buildSanitaryRoutes'
+import { buildSanitaryRoutingDemoPlan, buildSanitaryRoutingPlan } from '@/shared/routes/buildSanitaryRoutes'
 
 let floorViewerModulePromise: Promise<typeof import('@/viewer/FloorViewer')> | null = null
 let model3DViewerModulePromise: Promise<typeof import('@/viewer/Model3DViewer')> | null = null
@@ -470,11 +470,14 @@ export function WorkspacePage({
 
 
   const sanitaryRoutingPreview = useMemo(() => {
-    if (!demoRuntime.enabled || selectedStoreyId === null) return { routes: [], limitations: [], debugGroups: [] }
+    if (selectedStoreyId === null) return { routes: [], limitations: [], debugGroups: [] }
     const floorFixtures = fixtures.filter((fixture) => fixture.storeyId === selectedStoreyId)
     const floorRisers = risers.filter((riser) => riser.storeyId === selectedStoreyId)
-    return buildSanitaryRoutingDemoPlan(floorFixtures, floorRisers, demoRuntime.config)
-  }, [demoRuntime, fixtures, risers, selectedStoreyId])
+    if (demoRuntime.enabled) {
+      return buildSanitaryRoutingDemoPlan(floorFixtures, floorRisers, demoRuntime.config)
+    }
+    return buildSanitaryRoutingPlan(floorFixtures, floorRisers, modelFileName)
+  }, [demoRuntime, fixtures, modelFileName, risers, selectedStoreyId])
 
   // Export the same selected-floor route plan currently shown in the viewer. Download IFC is scoped
   // to the active included demo floor (`selectedStoreyId`); `buildSanitaryRoutingDemoPlan` can still

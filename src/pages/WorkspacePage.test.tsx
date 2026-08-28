@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   detectKitchens: vi.fn(),
   exportFullIfcWithRisers: vi.fn(),
   exportFullIfcWithRisersWithDebug: vi.fn(),
+  getDemoRuntimeConfig: vi.fn(),
 }))
 
 vi.mock('@/shared/ifc/ifcApi', () => ({
@@ -42,32 +43,37 @@ vi.mock('@/shared/demoConfig', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/shared/demoConfig')>()
   return {
     ...actual,
-    getDemoRuntimeConfig: () => ({
-      enabled: true as const,
-      config: {
-        name: 'ADAM_10 test demo',
-        model: { fileName: 'tower.ifc', schema: 'IFC2X3', source: 'test', assetPath: 'test' },
-        scope: { includedFloors: ['קומה 2'], excludedFloors: [] },
-        routing: { mode: 'demo' as const, allowManualRiserSelection: true },
-      },
-    }),
+    getDemoRuntimeConfig: mocks.getDemoRuntimeConfig,
   }
 })
+
+const demoEnabledRuntime = {
+  enabled: true as const,
+  config: {
+    name: 'ADAM_10 test demo',
+    model: { fileName: 'tower.ifc', schema: 'IFC2X3', source: 'test', assetPath: 'test' },
+    scope: { includedFloors: ['קומה 2'], excludedFloors: [] },
+    routing: { mode: 'demo' as const, allowManualRiserSelection: true },
+  },
+}
 
 vi.mock('@/viewer/FloorViewer', () => ({
   FloorViewer: ({
     fixtures,
     kitchens,
     risers,
+    sanitaryRoutes,
   }: {
     fixtures?: Array<unknown>
     kitchens?: Array<unknown>
     risers?: Array<unknown>
+    sanitaryRoutes?: Array<unknown>
   }) => (
     <div data-testid="floor-viewer">
       <span>fixtures:{fixtures?.length ?? 0}</span>
       <span>kitchens:{kitchens?.length ?? 0}</span>
       <span>risers:{risers?.length ?? 0}</span>
+      <span>routes:{sanitaryRoutes?.length ?? 0}</span>
     </div>
   ),
 }))
@@ -83,6 +89,8 @@ describe('WorkspacePage', () => {
   beforeEach(() => {
     anchorClick.mockReset()
     HTMLAnchorElement.prototype.click = anchorClick
+
+    mocks.getDemoRuntimeConfig.mockReturnValue(demoEnabledRuntime)
 
     URL.createObjectURL = vi.fn(() => 'blob:test')
     URL.revokeObjectURL = vi.fn()
@@ -159,6 +167,7 @@ describe('WorkspacePage', () => {
     mocks.detectKitchens.mockReset()
     mocks.exportFullIfcWithRisers.mockReset()
     mocks.exportFullIfcWithRisersWithDebug.mockReset()
+    mocks.getDemoRuntimeConfig.mockReset()
   })
 
   it('auto-opens קומה 2 instead of מרתף 2 and excludes penthouse floor from auto-generated risers by default', async () => {
@@ -323,5 +332,45 @@ describe('WorkspacePage', () => {
       expect(mocks.extractFloorMeshes).not.toHaveBeenCalled()
     })
     expect(screen.getByText(/no active floor/i)).toBeInTheDocument()
+  })
+
+  it('computes and surfaces sanitary routes without demo mode once fixtures and risers exist on the floor', async () => {
+    mocks.getDemoRuntimeConfig.mockReturnValue({ enabled: false as const })
+
+    const user = userEvent.setup()
+    render(<WorkspacePage />)
+
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]')
+    expect(input).not.toBeNull()
+    // Non-demo mode accepts any file name (no demo upload restriction).
+    await user.upload(input!, new File([new ArrayBuffer(128)], 'anytower.ifc'))
+
+    const levelTwoButton = await screen.findByRole('button', { name: /קומה 2/i })
+    await waitFor(() => {
+      expect(levelTwoButton).toHaveClass('storey-list__item--selected')
+    })
+
+    const placeRisersButton = await screen.findByRole('button', { name: /place risers/i })
+    await user.click(placeRisersButton)
+
+    await screen.findByLabelText('Remove riser R1')
+    await screen.findByLabelText('Remove riser R2')
+    await screen.findByLabelText('Remove riser R3')
+
+    // Suggested toilet risers sit exactly on the toilets, so their routes are
+    // degenerate (zero plan length) and skipped. Removing R2 rebinds WC-12 to
+    // R1, which yields a real fixture-to-riser route with no demo mode active.
+    await user.click(screen.getByLabelText('Remove riser R2'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('floor-viewer')).toHaveTextContent('routes:1')
+    })
+
+    // Demo-only chrome stays hidden, but the routing limitations surface in dev.
+    expect(screen.queryByLabelText('Sanitary demo flow')).not.toBeInTheDocument()
+    expect(screen.getByText('Sanitary routing preview notes')).toBeInTheDocument()
+    expect(
+      screen.getByText(/verify grouping before using this demo heuristic with anytower\.ifc/i),
+    ).toBeInTheDocument()
   })
 })

@@ -112,6 +112,18 @@ export function buildSanitaryRoutingDemoPlan(
     throw new Error('buildSanitaryRoutingDemoPlan requires demo routing mode.')
   }
 
+  return buildSanitaryRoutingPlan(fixtures, risers, config.model.fileName)
+}
+
+/**
+ * Config-free planner entry point. `modelFileName` is only used to decide whether the
+ * ADAM_10-calibrated service-zone distance limitation applies; pass `null` when unknown.
+ */
+export function buildSanitaryRoutingPlan(
+  fixtures: Fixture[],
+  risers: Riser[],
+  modelFileName: string | null,
+): SanitaryRoutingPlan {
   if (risers.length === 0) {
     return { routes: [], limitations: ['Sanitary routing requires at least one selected riser.'], debugGroups: [] }
   }
@@ -195,9 +207,9 @@ export function buildSanitaryRoutingDemoPlan(
     .map((fixture) => fixture.kind)
 
   const limitations: string[] = []
-  if (!isServiceZoneDistanceCalibratedForModel(config.model.fileName)) {
+  if (!isServiceZoneDistanceCalibratedForModel(modelFileName)) {
     limitations.push(
-      `Sanitary service-zone grouping uses an ${SERVICE_ZONE_DISTANCE_MODEL_HINT}-calibrated viewer-coordinate distance; verify grouping before using this demo heuristic with ${config.model.fileName}.`,
+      `Sanitary service-zone grouping uses an ${SERVICE_ZONE_DISTANCE_MODEL_HINT}-calibrated viewer-coordinate distance; verify grouping before using this demo heuristic with ${modelFileName ?? 'this model'}.`,
     )
   }
   if (unsupportedKinds.length > 0) {
@@ -253,7 +265,8 @@ function buildServiceZoneGroups(fixtures: Fixture[]): ServiceZoneGroup[] {
   return groups
 }
 
-function isServiceZoneDistanceCalibratedForModel(fileName: string): boolean {
+function isServiceZoneDistanceCalibratedForModel(fileName: string | null): boolean {
+  if (fileName === null) return false
   const normalizedBaseName = fileName
     .split(/[\\/]/)
     .pop()!
