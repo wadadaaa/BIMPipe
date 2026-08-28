@@ -308,6 +308,42 @@ describe('detectFixtures', () => {
     expect(result).toEqual([])
   })
 
+  // --- shower / floor-drain inclusion flag ---
+
+  it('includes typed shower terminals as OTHER when includeShowerFloorDrains is enabled', async () => {
+    const api = makeApi(
+      [{ relatingStoreyId: 1, elementIds: [12] }],
+      [asSanitary(12, 'Shower-01', 'SHOWER')],
+    )
+    const result = await detectFixtures(api, 0, 1, { includeShowerFloorDrains: true })
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({ expressId: 12, kind: 'OTHER' })
+  })
+
+  it('flips shower proxy inclusion with the includeShowerFloorDrains flag', async () => {
+    const api = makeApi(
+      [{ relatingStoreyId: 1, elementIds: [304] }],
+      [asProxy(304, 'Shower tray')],
+    )
+    const excluded = await detectFixtures(api, 0, 1)
+    const included = await detectFixtures(api, 0, 1, { includeShowerFloorDrains: true })
+    expect(excluded).toEqual([])
+    expect(included).toHaveLength(1)
+    expect(included[0]).toMatchObject({ expressId: 304, kind: 'OTHER' })
+  })
+
+  it('detects floor drains as OTHER only when includeShowerFloorDrains is enabled', async () => {
+    const api = makeApi(
+      [{ relatingStoreyId: 1, elementIds: [305] }],
+      [asFlowTerminal(305, 'Floor drain 50mm', 'NOTDEFINED')],
+    )
+    const excluded = await detectFixtures(api, 0, 1)
+    const included = await detectFixtures(api, 0, 1, { includeShowerFloorDrains: true })
+    expect(excluded).toEqual([])
+    expect(included).toHaveLength(1)
+    expect(included[0]).toMatchObject({ expressId: 305, kind: 'OTHER' })
+  })
+
   it('includes IFCFURNISHINGELEMENT when its metadata matches a plumbing keyword', async () => {
     const api = makeApi(
       [{ relatingStoreyId: 5, elementIds: [401] }],

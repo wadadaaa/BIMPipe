@@ -72,6 +72,7 @@ const KNOWN_KINDS = new Set<string>([
 ])
 
 const EXCLUDED_FIXTURE_PATTERN = /shower|מקלח(?:ת|ון)|אגנית/i
+const FLOOR_DRAIN_PATTERN = /floor\s*drain|מחסום\s*רצפה/i
 const KITCHEN_PATTERN = /kitchen(?:ette)?|מטבח/i
 const EXPLICIT_WASH_BASIN_PATTERN = /wash.?hand.?basin|washbasin|hand.?basin|lavatory|כיור\s*רחצה/i
 
@@ -103,6 +104,28 @@ export function inferFixtureKindFromText(text: string): FixtureKind | null {
 
 export function isExcludedFixtureText(text: string): boolean {
   return EXCLUDED_FIXTURE_PATTERN.test(text)
+}
+
+export interface DetectFixturesOptions {
+  /**
+   * When true, shower and floor-drain elements are detected as fixtures instead of
+   * being skipped. They are reported as kind 'OTHER' because `FixtureKind` has no
+   * dedicated shower/floor-drain kind (`src/domain/types.ts` is frozen for T2).
+   */
+  includeShowerFloorDrains?: boolean
+}
+
+/**
+ * Single code-level policy constant for shower/floor-drain detection. Floor drains
+ * matter for drainage planning, but the current product flow excludes them; flip
+ * this constant to include them without touching call sites.
+ */
+export const DETECT_FIXTURES_CONFIG: Required<DetectFixturesOptions> = {
+  includeShowerFloorDrains: false,
+}
+
+function isShowerFloorDrainText(text: string): boolean {
+  return EXCLUDED_FIXTURE_PATTERN.test(text) || FLOOR_DRAIN_PATTERN.test(text)
 }
 
 function isKitchenText(text: string): boolean {
@@ -231,7 +254,10 @@ export async function detectFixtures(
   api: IfcAPI,
   webIfcModelId: number,
   storeyId: StoreyId,
+  options: DetectFixturesOptions = DETECT_FIXTURES_CONFIG,
 ): Promise<Fixture[]> {
+  const includeShowerFloorDrains =
+    options.includeShowerFloorDrains ?? DETECT_FIXTURES_CONFIG.includeShowerFloorDrains
   const {
     IFCSANITARYTERMINAL,
     IFCFLOWTERMINAL,
@@ -263,16 +289,19 @@ export async function detectFixtures(
       const line = api.GetLine(webIfcModelId, expressId, false) as any
       const name: string = line.Name?.value ?? line.LongName?.value ?? `Fixture ${expressId}`
       const searchText = readLineText(line)
-      if (isExcludedFixtureText(`${line.PredefinedType?.value ?? ''} ${searchText}`)) continue
+      const typedSearchText = `${line.PredefinedType?.value ?? ''} ${searchText}`
+      if (!includeShowerFloorDrains && isExcludedFixtureText(typedSearchText)) continue
 
       const predefinedKind = toFixtureKind(line.PredefinedType?.value ?? '')
       const fallbackKind = inferFixtureKindFromText(searchText)
+      const showerFloorDrainKind: FixtureKind | null =
+        includeShowerFloorDrains && isShowerFloorDrainText(typedSearchText) ? 'OTHER' : null
       const inferredKind =
         predefinedKind !== 'OTHER'
           ? predefinedKind
           : typeConstant === IFCSANITARYTERMINAL
             ? (fallbackKind ?? 'OTHER')
-            : fallbackKind
+            : (fallbackKind ?? showerFloorDrainKind)
 
       if (inferredKind === null) continue
 
@@ -309,9 +338,12 @@ export async function detectFixtures(
       const line = api.GetLine(webIfcModelId, expressId, false) as any
       const name: string = line.Name?.value ?? line.LongName?.value ?? ''
       const searchText = readLineText(line)
-      if (isExcludedFixtureText(`${line.PredefinedType?.value ?? ''} ${searchText}`)) continue
+      const typedSearchText = `${line.PredefinedType?.value ?? ''} ${searchText}`
+      if (!includeShowerFloorDrains && isExcludedFixtureText(typedSearchText)) continue
 
-      const inferredKind = inferFixtureKindFromText(searchText)
+      const inferredKind =
+        inferFixtureKindFromText(searchText) ??
+        (includeShowerFloorDrains && isShowerFloorDrainText(typedSearchText) ? 'OTHER' : null)
       if (inferredKind === null) continue // not a plumbing fixture
 
       seen.add(expressId)
@@ -345,9 +377,12 @@ export async function detectFixtures(
       if (!line) continue
 
       const searchText = readLineText(line)
-      if (isExcludedFixtureText(`${line.PredefinedType?.value ?? ''} ${searchText}`)) continue
+      const typedSearchText = `${line.PredefinedType?.value ?? ''} ${searchText}`
+      if (!includeShowerFloorDrains && isExcludedFixtureText(typedSearchText)) continue
 
-      const inferredKind = inferFixtureKindFromText(searchText)
+      const inferredKind =
+        inferFixtureKindFromText(searchText) ??
+        (includeShowerFloorDrains && isShowerFloorDrainText(typedSearchText) ? 'OTHER' : null)
       if (inferredKind === null) continue
 
       const name: string = line.Name?.value ?? line.LongName?.value ?? `Fixture ${expressId}`
