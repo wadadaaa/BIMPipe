@@ -10,7 +10,7 @@ Branch: `goal/t0-t3-routing` · Started: 2026-08-28 · Status legend: ⏳ pendin
 | T2 — All fixture kinds + nearest-riser assignment | ✅ | commits `43e0a1e`…`b37e77c`; live ADAM_10 check pending asset |
 | T3 core — Branch routing geometry (src/domain) | ✅ | commits `d9b5f4e`, `4ac9d40`, `98d287f` |
 | T3 — Viewer wiring (2D/3D, per-floor toggle) | ✅ | commit `882e18e` |
-| Final verification (`pnpm lint && pnpm test` full) | 🔄 | gate green ×2; live browser pass in progress |
+| Final verification (`pnpm lint && pnpm test` full) | ✅ | lint 0 errors · 292/292 tests · build green · live dev-flow pass on Duplex MEP with screenshots |
 
 ## Baseline (clean `main`, c3e6d80, 2026-08-28 22:11)
 
@@ -74,6 +74,20 @@ Downloaded 2026-08-28 from buildingSMART Community-Sample-Test-Files (Duplex Apa
 ## Live verification (dev flow on Duplex MEP sample)
 
 Dev server `pnpm dev` on `http://localhost:5174`; model `external/samples/Duplex_MEP_20110907.ifc` (17 MB, IFC2X3, 105 IfcFlowTerminal).
+
+**Pass 2 (2026-08-28 23:14, complete — via Playwright after the IDE-browser tooling disconnected twice in pass 1):**
+
+- Upload + parse: OK. Storeys: Roof (6 mm), Level 2 (3 mm, auto-opened), Level 1 (0 mm). Zero console errors for the entire session (info-level only).
+- **T2 per-kind counts (live)**: Level 2 fixtures panel renders "Toilets 2" (M_Water Closet…) and "Basins 4" (M_Lavatory…), "6 on plan · 6 total" — multi-kind detection working (basins were invisible before T2).
+- **Riser suggestion**: "Suggest" on Level 2 placed 2 stacks. Level 2 itself shows 0 risers — correct by design: with floors [Level 1, Level 2], Level 2 is classified `penthouse` and the default profile has `penthouseRule: 'exclude_new_risers'`, so the stacks span Level 1 only.
+- **T1 routes (live, non-demo)**: Level 1 shows chips "4 fixtures · 4 kitchens · 2 risers · **4 sanitary routes** · **8 branch runs**"; route labels "Ø110 toilet 2.0%", "Ø63 main 2.0%", "Ø50 branch 2.0%"; honest calibration limitation note shown for the non-ADAM model; workflow reached step 04 Export with "Download IFC" enabled.
+- **T3 toggle (live)**: "Runs" button `aria-pressed` true→false→true; "8 branch runs" chip disappears/reappears; SVG line count 21→13→21 (exactly −/+8 branch polylines).
+- **T3 3D (live)**: 3D canvas renders (2 riser pipes visible through the model, chips "3 floors · 2 risers"). Branch-run lines in 3D are wired and unit-tested; at the default camera zoom they are not visually distinguishable in the screenshot — noted honestly.
+
+![Fixtures per-kind counts](docs/progress/02-fixtures-per-kind-counts.png)
+![Level 1: risers, sanitary routes, branch runs](docs/progress/03-level1-risers-routes-branchruns.png)
+![Level 1: branch runs hidden via Runs toggle](docs/progress/04-level1-runs-hidden.png)
+![3D view with riser pipes](docs/progress/05-3d-view-risers-branchruns.png)
 
 **Pass 1 (2026-08-28 23:03, partial — browser session disconnected mid-run; resumed in pass 2):**
 
