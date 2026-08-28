@@ -6,7 +6,7 @@ import { Sidebar } from './Sidebar'
 describe('Sidebar', () => {
   it('renders the MVP tabs including decisions', () => {
     render(<Sidebar activeTab="fixtures" onTabChange={vi.fn()} />)
-    expect(screen.getByRole('tab', { name: /toilets/i })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /fixtures/i })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /risers/i })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /decisions/i })).toBeInTheDocument()
   })
@@ -14,7 +14,7 @@ describe('Sidebar', () => {
   it('marks the active tab as selected', () => {
     render(<Sidebar activeTab="risers" onTabChange={vi.fn()} />)
     expect(screen.getByRole('tab', { name: /risers/i })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByRole('tab', { name: /toilets/i })).toHaveAttribute('aria-selected', 'false')
+    expect(screen.getByRole('tab', { name: /fixtures/i })).toHaveAttribute('aria-selected', 'false')
   })
 
   it('calls onTabChange with the selected tab', async () => {
@@ -36,7 +36,7 @@ describe('Sidebar', () => {
       />,
     )
 
-    expect(screen.getAllByText('Toilets').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Fixtures').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Kitchens').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Risers').length).toBeGreaterThan(0)
     expect(screen.getAllByText('1').length).toBeGreaterThan(0)

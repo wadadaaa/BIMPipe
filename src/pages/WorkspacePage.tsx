@@ -19,6 +19,7 @@ import { buildSuggestedRisers } from '@/shared/routes/buildSuggestedRisers'
 import { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
 import { buildDemoModeUploadError, getDemoRuntimeConfig, isStoreyIncludedInDemoScope } from '@/shared/demoConfig'
 import { buildSanitaryRoutingDemoPlan, buildSanitaryRoutingPlan } from '@/shared/routes/buildSanitaryRoutes'
+import { assignFixturesToRisers } from '@/domain/assignFixturesToRisers'
 
 let floorViewerModulePromise: Promise<typeof import('@/viewer/FloorViewer')> | null = null
 let model3DViewerModulePromise: Promise<typeof import('@/viewer/Model3DViewer')> | null = null
@@ -268,10 +269,9 @@ export function WorkspacePage({
           detectedFixtures.status === 'fulfilled' ? detectedFixtures.value : []
         const kitchensResult =
           detectedKitchens.status === 'fulfilled' ? detectedKitchens.value : []
-        const toiletFixtures = fixturesResult.filter((fixture) => fixture.kind === 'TOILETPAN')
 
         startTransition(() => {
-          setFixtures(toiletFixtures)
+          setFixtures(fixturesResult)
           setKitchens(kitchensResult)
           // Detection and placement are split into two distinct phases.
           // Risers are placed only when the user explicitly clicks Suggest.
@@ -469,6 +469,16 @@ export function WorkspacePage({
   // ---------------------------------------------------------------------------
 
 
+  // Fixture-to-riser assignment for the active floor (toilets anchor risers,
+  // everything else attaches to the nearest in-range riser). Only computed once
+  // risers exist on the floor — before placement the panel shows detection state
+  // without misleading "unassigned" flags.
+  const fixtureAssignments = useMemo(() => {
+    if (selectedStoreyId === null) return []
+    if (!risers.some((riser) => riser.storeyId === selectedStoreyId)) return []
+    return assignFixturesToRisers(fixtures, risers)
+  }, [fixtures, risers, selectedStoreyId])
+
   const sanitaryRoutingPreview = useMemo(() => {
     if (selectedStoreyId === null) return { routes: [], limitations: [], debugGroups: [] }
     const floorFixtures = fixtures.filter((fixture) => fixture.storeyId === selectedStoreyId)
@@ -619,6 +629,7 @@ export function WorkspacePage({
       hasModel={modelFileName !== null}
       fixtures={fixtures}
       kitchens={kitchens}
+      fixtureAssignments={fixtureAssignments}
       isDetectingFixtures={isDetectingFixtures}
       risers={viewerRisers}
       isAddingRiser={isAddingRiser}

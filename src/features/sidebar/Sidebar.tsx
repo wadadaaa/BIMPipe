@@ -1,5 +1,6 @@
 import { startTransition } from 'react'
 import type { Fixture, KitchenArea, Riser, RiserId, SidebarTab } from '@/domain/types'
+import type { FixtureRiserAssignment } from '@/domain/assignFixturesToRisers'
 import type { StoreyDetectionAggregation } from '@/shared/ifc/aggregateStoreyDetections'
 import type { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
 import { ViewTransition } from '@/shared/reactViewTransition'
@@ -16,6 +17,7 @@ interface SidebarProps {
   hasModel?: boolean
   fixtures?: Fixture[]
   kitchens?: KitchenArea[]
+  fixtureAssignments?: FixtureRiserAssignment[]
   isDetectingFixtures?: boolean
   risers?: Riser[]
   isAddingRiser?: boolean
@@ -37,9 +39,9 @@ interface SidebarProps {
 const TABS: { id: SidebarTab; label: string; focus: string; hint: string }[] = [
   {
     id: 'fixtures',
-    label: 'Toilets',
-    focus: 'Toilet inventory',
-    hint: 'Amber markers on the plan are detected toilets from the IFC. Kitchens stay visible on the plan for kitchen riser placement.',
+    label: 'Fixtures',
+    focus: 'Fixture inventory',
+    hint: 'Amber markers on the plan are detected sanitary fixtures from the IFC. Kitchens stay visible on the plan for kitchen riser placement.',
   },
   {
     id: 'risers',
@@ -63,6 +65,7 @@ export function Sidebar({
   hasModel = false,
   fixtures = [],
   kitchens = [],
+  fixtureAssignments = [],
   isDetectingFixtures = false,
   risers = [],
   isAddingRiser = false,
@@ -102,9 +105,9 @@ export function Sidebar({
 
       <div className="sidebar__summary-grid">
         <div className="sidebar__summary-card">
-          <span className="sidebar__summary-label">Toilets</span>
+          <span className="sidebar__summary-label">Fixtures</span>
           <strong
-            key={`toilets-${selectedStoreyName ? fixtures.length : 'idle'}`}
+            key={`fixtures-${selectedStoreyName ? fixtures.length : 'idle'}`}
             className="sidebar__summary-value sidebar__summary-value--flash"
           >
             {selectedStoreyName ? fixtures.length : '—'}
@@ -172,6 +175,7 @@ export function Sidebar({
             {activeTab === 'fixtures' ? (
               <FixturesPanel
                 fixtures={fixtures}
+                assignments={fixtureAssignments}
                 isLoading={isDetectingFixtures}
                 canPlaceRisers={
                   fixtures.some((fixture) => fixture.position !== null) ||

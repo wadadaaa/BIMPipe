@@ -100,7 +100,7 @@ export function RisersPanel({
             <DemoStep
               done={canSuggest}
               label="Sanitary inputs checked"
-              detail={`${positionedFixtureCount} toilet(s), ${positionedKitchenCount} kitchen area(s) with plan points`}
+              detail={`${positionedFixtureCount} fixture(s), ${positionedKitchenCount} kitchen area(s) with plan points`}
             />
             <DemoStep
               done={risers.length > 0}

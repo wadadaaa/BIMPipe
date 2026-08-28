@@ -194,15 +194,18 @@ describe('WorkspacePage', () => {
     await screen.findByLabelText('Remove riser R3')
 
     expect(screen.getByLabelText('Sanitary demo flow')).toHaveTextContent('Route demo flow')
-    expect(screen.getByLabelText('Sanitary demo flow')).toHaveTextContent('Action needed')
+    // T2: the detected bath is carried through state and routes to the kitchen
+    // riser immediately after placement, so the demo flow is already exportable.
+    expect(screen.getByLabelText('Sanitary demo flow')).toHaveTextContent('Ready to export')
     expect(screen.getByText('ADAM_10 floor opened').closest('li')).toHaveClass('risers-panel__demo-step--done')
     expect(screen.getByText('Sanitary inputs checked').closest('li')).toHaveClass('risers-panel__demo-step--done')
     expect(screen.getByText('Risers selected').closest('li')).toHaveClass('risers-panel__demo-step--done')
-    expect(screen.getByText('Route preview generated').closest('li')).not.toHaveClass('risers-panel__demo-step--done')
+    expect(screen.getByText('Route preview generated').closest('li')).toHaveClass('risers-panel__demo-step--done')
     expect(screen.getByLabelText('Sanitary demo flow')).toHaveTextContent('WC routes use Ø110 intent')
     expect(screen.getByLabelText('Sanitary demo flow')).toHaveTextContent('2.0% slope toward the riser')
 
-    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('fixtures:2')
+    // All detected fixtures (2 toilets + 1 bath) reach the viewer, not only toilets.
+    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('fixtures:3')
     expect(screen.getByTestId('floor-viewer')).toHaveTextContent('kitchens:1')
     expect(screen.getByTestId('floor-viewer')).toHaveTextContent('risers:3')
 
@@ -358,12 +361,16 @@ describe('WorkspacePage', () => {
     await screen.findByLabelText('Remove riser R3')
 
     // Suggested toilet risers sit exactly on the toilets, so their routes are
-    // degenerate (zero plan length) and skipped. Removing R2 rebinds WC-12 to
-    // R1, which yields a real fixture-to-riser route with no demo mode active.
+    // degenerate (zero plan length) and skipped. The bath (T2: all fixtures flow
+    // through routing) already yields one real branch route to the kitchen riser.
+    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('routes:1')
+
+    // Removing R2 rebinds WC-12 to R1, which yields a second real
+    // fixture-to-riser route with no demo mode active.
     await user.click(screen.getByLabelText('Remove riser R2'))
 
     await waitFor(() => {
-      expect(screen.getByTestId('floor-viewer')).toHaveTextContent('routes:1')
+      expect(screen.getByTestId('floor-viewer')).toHaveTextContent('routes:2')
     })
 
     // Demo-only chrome stays hidden, but the routing limitations surface in dev.

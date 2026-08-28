@@ -558,7 +558,7 @@ export function FloorViewer({
 
           {plottedFixtures.length > 0 && (
             <span className="floor-viewer__chip floor-viewer__chip--fixture">
-              {plottedFixtures.length} toilets
+              {plottedFixtures.length} fixtures
             </span>
           )}
 
@@ -833,7 +833,7 @@ export function FloorViewer({
       {!showOverlay && (
         <div className="floor-viewer__legend" aria-hidden="true">
           <span className="floor-viewer__legend-item floor-viewer__legend-item--fixture">
-            Amber = toilets
+            Amber = fixtures
           </span>
           <span className="floor-viewer__legend-item floor-viewer__legend-item--kitchen">
             Mint = kitchens
