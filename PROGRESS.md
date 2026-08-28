@@ -9,8 +9,8 @@ Branch: `goal/t0-t3-routing` · Started: 2026-08-28 · Status legend: ⏳ pendin
 | T1 — Un-gate routes from demo mode | ✅ | commit `016a92d` |
 | T2 — All fixture kinds + nearest-riser assignment | ✅ | commits `43e0a1e`…`b37e77c`; live ADAM_10 check pending asset |
 | T3 core — Branch routing geometry (src/domain) | ✅ | commits `d9b5f4e`, `4ac9d40`, `98d287f` |
-| T3 — Viewer wiring (2D/3D, per-floor toggle) | ⏳ | starts after T2 + T3 core |
-| Final verification (`pnpm lint && pnpm test` full) | ⏳ | |
+| T3 — Viewer wiring (2D/3D, per-floor toggle) | ✅ | commit `882e18e` |
+| Final verification (`pnpm lint && pnpm test` full) | 🔄 | gate green ×2; live browser pass in progress |
 
 ## Baseline (clean `main`, c3e6d80, 2026-08-28 22:11)
 
@@ -50,6 +50,14 @@ Branch: `goal/t0-t3-routing` · Started: 2026-08-28 · Status legend: ⏳ pendin
 - Worker validation: 123 tests / 12 focused files green; eslint clean; build green; react-doctor: only pre-existing findings.
 - **Coordinator integration gate after T2 (nothing in flight): `pnpm lint` 0 errors (1 pre-existing warning) · `pnpm test` 281/281 (34 files) · `pnpm build` green.** Baseline was 246 passed + 2 failed.
 - Known follow-ups: planner still skips URINAL/BIDET/CISTERN/OTHER with limitation notes; viewer markers don't distinguish unassigned (T3 candidate); assignment vs planner nearest-riser can diverge in edge cases.
+
+### T3 — Viewer wiring ✅ (2026-08-28 22:56, commit `882e18e`)
+
+- New pure adapter `src/shared/routes/buildBranchRoutes.ts` (assigned `FixtureRiserAssignment[]` → `AssignedFixture[]` → `computeBranchRoutes`, units passed through explicitly) + `src/viewer/branchRoutePresentation.ts` (2D plan projection; 3D world segments anchored to the same storey Y anchor as riser junction spheres, so downstream ends land exactly on riser junctions and upstream ends rise at the 2% slope).
+- 2D `FloorViewer`: violet polylines (trunk stroke 5 vs branch 2.6), "N branch runs" chip, legend entry, "Runs" toolbar toggle (`aria-pressed`). 3D `Model3DViewer`: two `THREE.LineSegments` groups (trunk/branch by opacity), rebuilt on prop change, disposed with scene. Per-floor visibility as `Map<StoreyId, boolean>` in `WorkspacePage` (absent = visible, reset on upload), shared by both viewers.
+- Tests: +11 (4 adapter, 6 presentation, 1 component incl. toggle hide/re-show). Existing demo-path assertions unchanged (stub-only additions).
+- Full gate (worker, then coordinator re-run): `pnpm lint` 0 errors (1 pre-existing warning) · `pnpm test` **292/292** · `pnpm build` green · react-doctor only pre-existing Model3DViewer finding.
+- Boot smoke check clean; full live upload flow verified separately on the Duplex MEP sample (see Live verification below).
 
 ## Blockers
 
