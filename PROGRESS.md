@@ -7,7 +7,7 @@ Branch: `goal/t0-t3-routing` · Started: 2026-08-28 · Status legend: ⏳ pendin
 | Setup (deps, baseline lint+test) | 🔄 | |
 | T0 — Export round-trip test | ✅ | commit `b381bd4`; ADAM_10 coverage pending asset (see Blockers) |
 | T1 — Un-gate routes from demo mode | ✅ | commit `016a92d` |
-| T2 — All fixture kinds + nearest-riser assignment | 🔄 | started after T1 green |
+| T2 — All fixture kinds + nearest-riser assignment | ✅ | commits `43e0a1e`…`b37e77c`; live ADAM_10 check pending asset |
 | T3 core — Branch routing geometry (src/domain) | ✅ | commits `d9b5f4e`, `4ac9d40`, `98d287f` |
 | T3 — Viewer wiring (2D/3D, per-floor toggle) | ⏳ | starts after T2 + T3 core |
 | Final verification (`pnpm lint && pnpm test` full) | ⏳ | |
@@ -41,6 +41,15 @@ Branch: `goal/t0-t3-routing` · Started: 2026-08-28 · Status legend: ⏳ pendin
 - `src/domain/branchRouting.ts` (types-first commit, then algorithm): pure `computeBranchRoutes(AssignedFixture[]) -> FloorRoutes[]`. X-leg-first L-shaped runs (bend at `(riser.x, fixture.z)`), riser-datum elevations at +2% × remaining run (`DEFAULT_BRANCH_SLOPE_DROP_MM = 20` per `DEFAULT_BRANCH_SLOPE_RUN_MM = 1000`), per-(storey, riser) collinear same-direction legs merged and split at junction entries so each segment carries a constant `servedFixtureExpressIds` set (trunk when >1). Units via optional `planUnits` param or local mm/m heuristic (dependency direction shared→domain respected). No obstacle avoidance — documented approximation.
 - Tests: 11 new; `pnpm test src/domain` 69/69 green (worker); coordinator re-ran branchRouting + bim11: 24/24 green. `pnpm eslint src/domain` clean; `tsc --noEmit` clean.
 - Follow-up candidates recorded: no snapping tolerance on collinearity; ideal-slope (not min-invert) elevations; slope constant not yet per-call parameterized.
+
+### T2 — All fixture kinds + nearest-riser assignment ✅ (2026-08-28 22:39, commits `43e0a1e`, `2c386c0`, `1db723c`, `b37e77c`)
+
+- `TOILETPAN` filter removed: all kinds reach state, viewer, per-kind counts in FixturesPanel, riser suggestion, and route planning. Toilets + kitchen corners are the only riser anchors; the no-toilet clustering/k-means fallback is removed (5 fallback tests intentionally replaced with non-spawning assertions).
+- New pure `src/domain/assignFixturesToRisers.ts`: discriminated-union result (assigned: riser id/stack/positions/planDistance/units; unassigned: reason `no-plan-position` / `no-riser-on-storey` / `no-riser-within-branch-length`), `MAX_BRANCH_LENGTH_MM = 4000` / `_M = 4` (documented 3–5 m branch-drain rationale), same-floor only, deterministic tie-breaks. Unassigned fixtures surfaced in UI (count + badge).
+- `includeShowerFloorDrains` detection flag (default off = current behavior; enabled maps shower/floor-drain incl. `מחסום רצפה` to kind `OTHER`); 3 tests prove the flip.
+- Worker validation: 123 tests / 12 focused files green; eslint clean; build green; react-doctor: only pre-existing findings.
+- **Coordinator integration gate after T2 (nothing in flight): `pnpm lint` 0 errors (1 pre-existing warning) · `pnpm test` 281/281 (34 files) · `pnpm build` green.** Baseline was 246 passed + 2 failed.
+- Known follow-ups: planner still skips URINAL/BIDET/CISTERN/OTHER with limitation notes; viewer markers don't distinguish unassigned (T3 candidate); assignment vs planner nearest-riser can diverge in edge cases.
 
 ## Blockers
 
