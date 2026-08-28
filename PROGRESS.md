@@ -71,6 +71,18 @@ Downloaded 2026-08-28 from buildingSMART Community-Sample-Test-Files (Duplex Apa
 - `external/samples/Duplex_MEP_20110907.ifc` (17 MB, MEP; **105 `IfcFlowTerminal` entities** — best for detection/routing verification)
 - `external/samples/Duplex_Plumbing_20121113.ifc` (30 MB, plumbing distribution; no terminals)
 
+## Live verification (dev flow on Duplex MEP sample)
+
+Dev server `pnpm dev` on `http://localhost:5174`; model `external/samples/Duplex_MEP_20110907.ifc` (17 MB, IFC2X3, 105 IfcFlowTerminal).
+
+**Pass 1 (2026-08-28 23:03, partial — browser session disconnected mid-run; resumed in pass 2):**
+
+- Upload + parse: OK (~15 s). Storeys parsed: Roof, Level 2 (auto-opened), Level 1.
+- Detection on Level 2: 6 fixtures — water closets ("M_Water Closet - Flush Tank…") and lavatories ("M_Lavatory - Oval-650 mm…"); viewer chips "2 rm · 6 fixtures · 3 storeys"; WC markers rendered in two clusters; "Place risers" available.
+- Runtime note: browser automation session disconnected after screenshot #1 (tooling disconnect, not an app error — no app console errors observed up to that point).
+
+![Workspace after parsing](docs/progress/01-workspace-after-parsing.png)
+
 ## Screenshots
 
 _(added per milestone under `docs/progress/`)_
