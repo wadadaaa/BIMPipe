@@ -5,7 +5,7 @@ Branch: `goal/t0-t3-routing` · Started: 2026-08-28 · Status legend: ⏳ pendin
 | Task | Status | Notes |
 | --- | --- | --- |
 | Setup (deps, baseline lint+test) | 🔄 | |
-| T0 — Export round-trip test | ⏳ | ADAM_10 coverage pending asset (see Blockers) |
+| T0 — Export round-trip test | ✅ | commit `b381bd4`; ADAM_10 coverage pending asset (see Blockers) |
 | T1 — Un-gate routes from demo mode | ⏳ | |
 | T2 — All fixture kinds + nearest-riser assignment | ⏳ | starts after T1 green |
 | T3 core — Branch routing geometry (src/domain) | ⏳ | |
@@ -20,7 +20,13 @@ Branch: `goal/t0-t3-routing` · Started: 2026-08-28 · Status legend: ⏳ pendin
 
 ## Milestones
 
-_(test results and screenshots appended per milestone)_
+### T0 — Export round-trip test ✅ (2026-08-28 22:17, commit `b381bd4`)
+
+- New `src/shared/ifc/exportFullIfcWithRisers.roundtrip.test.ts` (199 lines, no production code changed): exports 2 riser stacks over 2 storeys with the real web-ifc engine, reopens the bytes with a fresh `IfcAPI`, asserts schema round-trip, segment count == stack count (`IfcFlowSegment` on IFC2X3 / `IfcPipeSegment` on IFC4), `Pset_FlowSegmentOccurrence` + `Qto_PipeSegmentBaseQuantities` linkage, `BIMPipe Sanitary Stacks` system; IFC2X3 additionally 2 `IfcPipeSegmentType` with `Pset_PipeSegmentTypeCommon`; IFC4 pins the TODO(BIM-51) gap (0 type psets) so closing it later must update the test deliberately.
+- Focused runs: roundtrip 2/2 passed; all 4 export test files 25/25 passed. Coordinator re-ran roundtrip independently: 2/2 passed (822ms).
+- Corruption proof: temporary `stackGroups.slice(0, 1)` mutation → both tests failed (`expected [ 96 ] to have a length of 2 but got 1`); mutation reverted (empty `git diff` on the exporter), tests green again.
+- The hardcoded `#24` body-context lookup did not need replacement (fixture exercises it as-is).
+- ADAM_10 clause skipped: asset not on machine (see Blockers).
 
 ## Blockers
 
