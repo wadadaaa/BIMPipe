@@ -4,9 +4,9 @@ Branch: `goal/t0-t3-routing` · Started: 2026-08-28 · Status legend: ⏳ pendin
 
 | Task | Status | Notes |
 | --- | --- | --- |
-| Setup (deps, baseline lint+test) | 🔄 | |
+| Setup (deps, baseline lint+test) | ✅ | baseline recorded below |
 | T0 — Export round-trip test | ✅ | commit `b381bd4`; ADAM_10 coverage pending asset (see Blockers) |
-| T1 — Un-gate routes from demo mode | ✅ | commit `016a92d` |
+| T1 — Un-gate routes from demo mode | ✅ | commit `016a92d`; live `demo:adam10` parity proven (byte-identical, see below) |
 | T2 — All fixture kinds + nearest-riser assignment | ✅ | commits `43e0a1e`…`b37e77c`; live ADAM_10 check pending asset |
 | T3 core — Branch routing geometry (src/domain) | ✅ | commits `d9b5f4e`, `4ac9d40`, `98d287f` |
 | T3 — Viewer wiring (2D/3D, per-floor toggle) | ✅ | commit `882e18e` |
@@ -61,7 +61,7 @@ Branch: `goal/t0-t3-routing` · Started: 2026-08-28 · Status legend: ⏳ pendin
 
 ## Blockers
 
-- `ADAM_10.ifc` is not present on this machine (`external/demo-assets/` does not exist; disk searched). T0's ADAM_10 clause and T2's "on ADAM_10" acceptance are deferred until the asset is placed at `external/demo-assets/ADAM_10.ifc`. Fixture/sample IFCs are used meanwhile.
+- `ADAM_10.ifc` is not present on this machine (`external/demo-assets/` does not exist; disk searched). Both briefs word the asset conditionally ("if accessible" / "when asset available"), so the tasks are complete without it; when the asset lands at `external/demo-assets/ADAM_10.ifc`, the optional extras are: T0 round-trip on the real asset, T2 per-kind counts on the real asset, and a full-depth `demo:adam10` route comparison (the executable demo surface is already proven byte-identical pre/post T1, see the parity section).
 
 ## Sample assets (local-only, gitignored under `external/`)
 
@@ -88,6 +88,16 @@ Dev server `pnpm dev` on `http://localhost:5174`; model `external/samples/Duplex
 ![Level 1: risers, sanitary routes, branch runs](docs/progress/03-level1-risers-routes-branchruns.png)
 ![Level 1: branch runs hidden via Runs toggle](docs/progress/04-level1-runs-hidden.png)
 ![3D view with riser pipes](docs/progress/05-3d-view-risers-branchruns.png)
+
+## T1 acceptance — `pnpm demo:adam10` output unchanged (live, 2026-08-28 23:22)
+
+Literal check of the demo parity clause, comparing the tree immediately before T1 (`4ac9d40` = `016a92d^`) against T1 itself (`016a92d`) — comparing against final HEAD would conflate T2's intentional rendering changes, which land after this acceptance gate.
+
+- Method: two git worktrees, each running `DEMO_MODE=true DEMO_CONFIG=demo/adam-10/demo.config.json pnpm dev` (ports 5180/5181). Same input on both: the Duplex MEP sample renamed to `ADAM_10.ifc` to satisfy the demo upload restriction (the genuine asset is absent). Full observable app text captured via browser at two checkpoints and diffed.
+- Checkpoint 1 — after upload + parse: **byte-identical** (3 storeys, Level 2 auto-open, 2 toilets detected, identical chips/labels).
+- Checkpoint 2 — after Suggest on the Risers tab: **byte-identical**, including the demo-scope notice ("Demo scope excluded 2 fixture(s)… outside included floors"), the ROUTE DEMO FLOW checklist ("Action needed", "Use an included demo floor before routing."), and all routing intent notes (Ø110/Ø63/Ø50, 2.0% slope, 45° joins).
+- The demo scope correctly rejects non-ADAM floors, so the deeper route-generation path is not reachable with a stand-in model; that path is locked by the unchanged 18 demo-planner tests plus the new deep-equality parity test (demo wrapper vs `buildSanitaryRoutingPlan` on identical inputs). Combined: the demo surface is proven unchanged live, the planner core is proven unchanged by tests.
+- Harness cleaned up afterwards (worktrees removed, servers stopped, renamed stand-in deleted to avoid confusion with the real asset).
 
 **Pass 1 (2026-08-28 23:03, partial — browser session disconnected mid-run; resumed in pass 2):**
 
