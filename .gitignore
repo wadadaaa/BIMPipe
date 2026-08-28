@@ -45,3 +45,6 @@ __MACOSX/
 # IFC experiment outputs
 experiments/ifc-riser-lab/output/*
 !experiments/ifc-riser-lab/output/.gitkeep
+
+# Local-only external assets (demo/sample IFC models; see demo/adam-10/README.md)
+external/

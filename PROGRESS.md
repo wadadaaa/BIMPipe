@@ -26,6 +26,14 @@ _(test results and screenshots appended per milestone)_
 
 - `ADAM_10.ifc` is not present on this machine (`external/demo-assets/` does not exist; disk searched). T0's ADAM_10 clause and T2's "on ADAM_10" acceptance are deferred until the asset is placed at `external/demo-assets/ADAM_10.ifc`. Fixture/sample IFCs are used meanwhile.
 
+## Sample assets (local-only, gitignored under `external/`)
+
+Downloaded 2026-08-28 from buildingSMART Community-Sample-Test-Files (Duplex Apartment, IFC2X3, Revit exports) for live verification:
+
+- `external/samples/Duplex_A_20110907.ifc` (2.3 MB, architecture; 4 storeys, 21 spaces, keyword-detectable fixtures)
+- `external/samples/Duplex_MEP_20110907.ifc` (17 MB, MEP; **105 `IfcFlowTerminal` entities** — best for detection/routing verification)
+- `external/samples/Duplex_Plumbing_20121113.ifc` (30 MB, plumbing distribution; no terminals)
+
 ## Screenshots
 
 _(added per milestone under `docs/progress/`)_
