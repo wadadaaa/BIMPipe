@@ -6,8 +6,8 @@ Branch: `goal/t0-t3-routing` · Started: 2026-08-28 · Status legend: ⏳ pendin
 | --- | --- | --- |
 | Setup (deps, baseline lint+test) | 🔄 | |
 | T0 — Export round-trip test | ✅ | commit `b381bd4`; ADAM_10 coverage pending asset (see Blockers) |
-| T1 — Un-gate routes from demo mode | ⏳ | |
-| T2 — All fixture kinds + nearest-riser assignment | ⏳ | starts after T1 green |
+| T1 — Un-gate routes from demo mode | ✅ | commit `016a92d` |
+| T2 — All fixture kinds + nearest-riser assignment | 🔄 | started after T1 green |
 | T3 core — Branch routing geometry (src/domain) | ⏳ | |
 | T3 — Viewer wiring (2D/3D, per-floor toggle) | ⏳ | starts after T2 + T3 core |
 | Final verification (`pnpm lint && pnpm test` full) | ⏳ | |
@@ -27,6 +27,13 @@ Branch: `goal/t0-t3-routing` · Started: 2026-08-28 · Status legend: ⏳ pendin
 - Corruption proof: temporary `stackGroups.slice(0, 1)` mutation → both tests failed (`expected [ 96 ] to have a length of 2 but got 1`); mutation reverted (empty `git diff` on the exporter), tests green again.
 - The hardcoded `#24` body-context lookup did not need replacement (fixture exercises it as-is).
 - ADAM_10 clause skipped: asset not on machine (see Blockers).
+
+### T1 — Un-gate routes from demo mode ✅ (2026-08-28 22:21, commit `016a92d`)
+
+- Route computation runs in plain dev: new exported `buildSanitaryRoutingPlan(fixtures, risers, modelFileName)` in `buildSanitaryRoutes.ts` carries the previous planner body verbatim; `buildSanitaryRoutingDemoPlan` is now a thin demo-asserting wrapper (byte-identical demo behavior). `WorkspacePage` memo short-circuit on `!demoRuntime.enabled` removed.
+- No viewer/sidebar changes needed: route lines + routes chip were already ungated; `RisersPanel` already surfaces limitations when demo is off. New component test proves dev surfacing (upload `anytower.ifc`, place risers, `routes:1`, routing preview notes visible, demo section absent).
+- Tests: +4 planner tests (incl. deep-equality parity demo vs non-demo on identical inputs), +1 WorkspacePage dev-flow test. Focused runs 41/41 green; zero existing assertions changed. `pnpm build` green. Coordinator re-ran 26/26 green.
+- Noted for T2/T3: suggested toilet risers coincide with toilets, so toilet routes are degenerate until risers move — pre-existing planner behavior now visible in dev; dev exports now include routes in debug JSON (intended).
 
 ## Blockers
 
