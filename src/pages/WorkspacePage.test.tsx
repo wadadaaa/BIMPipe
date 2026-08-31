@@ -166,6 +166,7 @@ describe('WorkspacePage', () => {
   })
 
   afterEach(() => {
+    vi.unstubAllGlobals()
     HTMLAnchorElement.prototype.click = originalAnchorClick
     URL.createObjectURL = originalCreateObjectURL
     URL.revokeObjectURL = originalRevokeObjectURL
@@ -390,6 +391,37 @@ describe('WorkspacePage', () => {
     expect(
       screen.getByText(/verify grouping before using this demo heuristic with anytower\.ifc/i),
     ).toBeInTheDocument()
+  })
+
+  it('loads the bundled sample model through the same upload path as a user-picked file', async () => {
+    mocks.getDemoRuntimeConfig.mockReturnValue({ enabled: false as const })
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => new ArrayBuffer(128),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const user = userEvent.setup()
+    render(<WorkspacePage />)
+
+    await user.click(screen.getByRole('button', { name: /duplex mep/i }))
+
+    // The sample flows through handleFileAccepted: parse, auto-open, same as an upload.
+    const levelTwoButton = await screen.findByRole('button', { name: /קומה 2/i })
+    await waitFor(() => {
+      expect(levelTwoButton).toHaveClass('storey-list__item--selected')
+    })
+    expect(fetchMock).toHaveBeenCalledWith('/samples/Duplex_MEP_20110907.ifc')
+    expect(mocks.parseStoreys).toHaveBeenCalledTimes(1)
+    expect(screen.getAllByText('Duplex_MEP_20110907.ifc').length).toBeGreaterThan(0)
+  })
+
+  it('hides the sample model affordance in demo mode', () => {
+    // beforeEach enables demo mode; the demo only accepts its configured model.
+    render(<WorkspacePage />)
+    expect(screen.queryByRole('button', { name: /duplex mep/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /upload ifc file/i })).toBeInTheDocument()
   })
 
   it('shows branch routes after suggestion and the per-floor toggle hides and re-shows them', async () => {

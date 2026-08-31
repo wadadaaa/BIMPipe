@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { IfcUpload } from './IfcUpload'
 
@@ -56,5 +56,81 @@ describe('IfcUpload', () => {
 
     expect(onFileAccepted).not.toHaveBeenCalled()
     expect(screen.getByRole('alert')).toHaveTextContent(/empty/)
+  })
+
+  describe('sample model', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals()
+    })
+
+    it('downloads the sample with a busy state and feeds it through the accepted-file path', async () => {
+      const onFileAccepted = vi.fn()
+      let resolveFetch: (value: unknown) => void = () => {}
+      const fetchMock = vi.fn(
+        () =>
+          new Promise((resolve) => {
+            resolveFetch = resolve
+          }),
+      )
+      vi.stubGlobal('fetch', fetchMock)
+
+      render(<IfcUpload onFileAccepted={onFileAccepted} isLoading={false} error={null} />)
+
+      await userEvent.click(screen.getByRole('button', { name: /duplex mep/i }))
+
+      // Busy state while the sample is downloading.
+      expect(screen.getByRole('button', { name: /downloading duplex mep/i })).toBeDisabled()
+      expect(fetchMock).toHaveBeenCalledWith('/samples/Duplex_MEP_20110907.ifc')
+
+      resolveFetch({
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => new ArrayBuffer(2048),
+      })
+
+      await waitFor(() => {
+        expect(onFileAccepted).toHaveBeenCalledTimes(1)
+      })
+      const file = onFileAccepted.mock.calls[0][0] as File
+      expect(file.name).toBe('Duplex_MEP_20110907.ifc')
+      expect(file.size).toBe(2048)
+      expect(screen.getByRole('button', { name: /duplex mep \(17 mb\)/i })).toBeEnabled()
+    })
+
+    it('surfaces a visible error with the reason when the sample download fails', async () => {
+      const onFileAccepted = vi.fn()
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => ({ ok: false, status: 404 })),
+      )
+
+      render(<IfcUpload onFileAccepted={onFileAccepted} isLoading={false} error={null} />)
+
+      await userEvent.click(screen.getByRole('button', { name: /duplex mep/i }))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        "Failed to download sample model 'Duplex_MEP_20110907.ifc': HTTP 404",
+      )
+      expect(onFileAccepted).not.toHaveBeenCalled()
+    })
+
+    it('hides the sample affordance when showSampleModel is false', () => {
+      render(
+        <IfcUpload
+          onFileAccepted={vi.fn()}
+          isLoading={false}
+          error={null}
+          showSampleModel={false}
+        />,
+      )
+      expect(screen.queryByRole('button', { name: /duplex mep/i })).not.toBeInTheDocument()
+    })
+
+    it('hides the sample affordance once a model is loaded', () => {
+      render(
+        <IfcUpload onFileAccepted={vi.fn()} isLoading={false} error={null} fileName="tower.ifc" />,
+      )
+      expect(screen.queryByRole('button', { name: /duplex mep/i })).not.toBeInTheDocument()
+    })
   })
 })

@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { validateFile } from './validateFile'
+import { DUPLEX_MEP_SAMPLE, fetchSampleModelFile } from './sampleModel'
 import './IfcUpload.css'
 
 interface IfcUploadProps {
@@ -8,6 +9,7 @@ interface IfcUploadProps {
   error: string | null
   fileName?: string | null
   storeyCount?: number
+  showSampleModel?: boolean
 }
 
 export function IfcUpload({
@@ -16,10 +18,12 @@ export function IfcUpload({
   error,
   fileName = null,
   storeyCount = 0,
+  showSampleModel = true,
 }: IfcUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragOver, setDragOver] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
+  const [isFetchingSample, setIsFetchingSample] = useState(false)
 
   function handleFile(file: File) {
     const err = validateFile(file)
@@ -29,6 +33,22 @@ export function IfcUpload({
     }
     setLocalError(null)
     onFileAccepted(file)
+  }
+
+  async function handleLoadSample() {
+    setIsFetchingSample(true)
+    setLocalError(null)
+    try {
+      const file = await fetchSampleModelFile()
+      // Same entry point as a user-picked file: validation, then onFileAccepted.
+      handleFile(file)
+    } catch (err) {
+      setLocalError(
+        err instanceof Error ? err.message : 'Failed to download the sample model.',
+      )
+    } finally {
+      setIsFetchingSample(false)
+    }
   }
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -93,6 +113,23 @@ export function IfcUpload({
           </div>
         )}
       </div>
+
+      {showSampleModel && !fileName && (
+        <p className="ifc-upload__sample">
+          Or try a sample model:{' '}
+          <button
+            type="button"
+            className="ifc-upload__sample-button"
+            onClick={() => void handleLoadSample()}
+            disabled={isFetchingSample || isLoading}
+            aria-busy={isFetchingSample}
+          >
+            {isFetchingSample
+              ? `Downloading ${DUPLEX_MEP_SAMPLE.label}…`
+              : `${DUPLEX_MEP_SAMPLE.label} (${DUPLEX_MEP_SAMPLE.sizeLabel})`}
+          </button>
+        </p>
+      )}
 
       {displayError && (
         <p className="ifc-upload__error" role="alert">

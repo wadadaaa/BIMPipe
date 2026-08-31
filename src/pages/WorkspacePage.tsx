@@ -588,6 +588,9 @@ export function WorkspacePage({
         error={uploadError ?? demoUploadError ?? demoRuntimeConfigError}
         fileName={modelFileName}
         storeyCount={storeys.length}
+        // Demo mode only accepts the configured demo model, so the bundled
+        // sample would always be rejected — hide the affordance instead.
+        showSampleModel={!demoRuntime.enabled}
       />
       {demoAssetError ? (
         <p style={{ marginTop: 8, color: 'var(--color-warning, #f59e0b)', fontSize: 13 }} role="status">
