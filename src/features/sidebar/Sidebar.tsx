@@ -3,6 +3,8 @@ import type { Fixture, KitchenArea, Riser, RiserId, SidebarTab } from '@/domain/
 import type { FixtureRiserAssignment } from '@/domain/assignFixturesToRisers'
 import type { StoreyDetectionAggregation } from '@/shared/ifc/aggregateStoreyDetections'
 import type { InitialStoreyDecision } from '@/shared/ifc/scanStoreyFixtures'
+import type { StoreyAlignment } from '@/domain/alignStoreys'
+import type { MergedStoreyDetection } from '@/domain/mergeFixturesAcrossFiles'
 import type { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
 import type { LengthUnit } from '@/shared/lengthUnits'
 import { ViewTransition } from '@/shared/reactViewTransition'
@@ -34,6 +36,10 @@ interface SidebarProps {
   detectionAggregation?: StoreyDetectionAggregation | null
   /** Why the initial floor was auto-opened (plain mode); null in demo mode. */
   initialStoreyDecision?: InitialStoreyDecision | null
+  /** Storey mapping per linked file (multi-IFC uploads); empty for single-file. */
+  storeyAlignments?: StoreyAlignment[]
+  /** Cross-file fixture merge accounting for the open floor; null for single-file. */
+  crossFileMerge?: MergedStoreyDetection | null
   sanitaryRouteLimitations?: string[]
   demoFlowEnabled?: boolean
   demoFloorOpened?: boolean
@@ -85,6 +91,8 @@ export function Sidebar({
   validationReport = null,
   detectionAggregation = null,
   initialStoreyDecision = null,
+  storeyAlignments = [],
+  crossFileMerge = null,
   sanitaryRouteLimitations = [],
   demoFlowEnabled = false,
   demoFloorOpened = false,
@@ -218,6 +226,8 @@ export function Sidebar({
                 detectionAggregation={detectionAggregation}
                 demoFlowEnabled={demoFlowEnabled}
                 initialStoreyDecision={initialStoreyDecision}
+                storeyAlignments={storeyAlignments}
+                crossFileMerge={crossFileMerge}
               />
             )}
           </section>

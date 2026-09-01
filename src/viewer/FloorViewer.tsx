@@ -23,6 +23,14 @@ const SELECTED_ACCENT = new THREE.Color(0xff6a7f)
 
 interface FloorViewerProps {
   floorMeshes: FloorMeshes | null
+  /**
+   * Architecture walls/columns of the aligned linked-model storey (W4),
+   * rendered as a faint non-interactive underlay beneath the host plan. Must
+   * be extracted in the SAME local frame as `floorMeshes`.
+   */
+  underlayMeshes?: FloorMeshes | null
+  /** File the underlay came from, shown as a viewer chip. */
+  underlaySourceFileName?: string | null
   isLoading: boolean
   error: string | null
   theme: ThemeMode
@@ -68,6 +76,8 @@ interface FloorViewerProps {
 
 export function FloorViewer({
   floorMeshes,
+  underlayMeshes = null,
+  underlaySourceFileName = null,
   isLoading,
   error,
   theme,
@@ -108,6 +118,7 @@ export function FloorViewer({
   const selectedMeshRef = useRef<THREE.Mesh | null>(null)
   const boundsRef = useRef<THREE.Box3 | null>(null)
   const floorGroupRef = useRef<THREE.Group | null>(null)
+  const underlayGroupRef = useRef<THREE.Group | null>(null)
   const projectionVecRef = useRef(new THREE.Vector3())
   const routeLineRefsRef = useRef<Map<string, SVGLineElement>>(new Map())
   const routeLabelRefsRef = useRef<Map<string, SVGTextElement>>(new Map())
@@ -229,6 +240,12 @@ export function FloorViewer({
         floorGroupRef.current = null
       }
 
+      if (underlayGroupRef.current) {
+        scene.remove(underlayGroupRef.current)
+        disposeSceneObject(underlayGroupRef.current)
+        underlayGroupRef.current = null
+      }
+
       scheduleRenderRef.current = () => {}
       renderQueuedRef.current = false
       cancelAnimationFrame(frameIdRef.current)
@@ -291,6 +308,30 @@ export function FloorViewer({
     planPlaneRef.current.setFromNormalAndCoplanarPoint(camNormal, center)
     scheduleRender()
   }, [floorMeshes, onObjectHover, onObjectSelect, theme])
+
+  // Architecture underlay: swapped independently of the host plan so the plan
+  // stays visible while the linked-model storey is still tessellating.
+  useEffect(() => {
+    const scene = sceneRef.current
+    if (!scene) return
+
+    if (underlayGroupRef.current) {
+      scene.remove(underlayGroupRef.current)
+      disposeSceneObject(underlayGroupRef.current)
+      underlayGroupRef.current = null
+    }
+
+    if (!underlayMeshes) {
+      scheduleRender()
+      return
+    }
+
+    const { group } = underlayMeshes
+    styleUnderlayGroup(group, theme)
+    scene.add(group)
+    underlayGroupRef.current = group
+    scheduleRender()
+  }, [underlayMeshes, theme])
 
   useEffect(() => {
     const floorGroup = floorGroupRef.current
@@ -633,6 +674,12 @@ export function FloorViewer({
 
           {storeyCount > 0 && (
             <span className="floor-viewer__chip">{storeyCount} storeys</span>
+          )}
+
+          {underlayMeshes && underlaySourceFileName && (
+            <span className="floor-viewer__chip" dir="auto">
+              Underlay: {underlaySourceFileName}
+            </span>
           )}
         </div>
       </div>
@@ -1366,6 +1413,46 @@ function styleFloorGroup(group: THREE.Group, theme: ThemeMode) {
       object.userData['anchor'] = anchor
     }
 
+    object.add(outline)
+  })
+}
+
+/**
+ * Faint, non-interactive styling for the linked-model architecture underlay.
+ * Renders beneath the host plan (renderOrder 0 vs the plan's 1/2) and never
+ * participates in hover/selection raycasts.
+ */
+function styleUnderlayGroup(group: THREE.Group, theme: ThemeMode) {
+  const fillColor = new THREE.Color(theme === 'dark' ? 0x8fa3bd : 0x64748b)
+  const edgeColor = new THREE.Color(theme === 'dark' ? 0xa8bad2 : 0x475569)
+  const noRaycast = () => {}
+
+  group.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return
+
+    const material = new THREE.MeshBasicMaterial({
+      color: fillColor,
+      transparent: true,
+      opacity: 0.05,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    })
+    object.material = material
+    object.renderOrder = 0
+    object.raycast = noRaycast
+    object.updateMatrixWorld(true)
+
+    const outline = new THREE.LineSegments(
+      new THREE.EdgesGeometry(object.geometry as THREE.BufferGeometry, 28),
+      new THREE.LineBasicMaterial({
+        color: edgeColor,
+        transparent: true,
+        opacity: 0.34,
+        depthWrite: false,
+      }),
+    )
+    outline.renderOrder = 0
+    outline.raycast = noRaycast
     object.add(outline)
   })
 }

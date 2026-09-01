@@ -3,9 +3,27 @@ import type { FloorMeshes } from '@/shared/ifc/extractFloorMeshes'
 import type { InitialStoreyDecision } from '@/shared/ifc/scanStoreyFixtures'
 import type { ModelOriginDecision } from '@/shared/frame/modelFrame'
 import type { LengthUnit } from '@/shared/lengthUnits'
+import type { StoreyAlignment } from '@/domain/alignStoreys'
+import type { MergedStoreyDetection } from '@/domain/mergeFixturesAcrossFiles'
 import { appendAdjustment, createAdjustLog, type AdjustLog } from '@/domain/adjustLog'
 import { getDemoRuntimeConfig, type DemoRuntimeConfig } from '@/shared/demoConfig'
 import { removeRiserStack } from '@/shared/routes/buildRiserStacks'
+
+/** A non-host model opened alongside the host in a multi-file upload (W4). */
+export interface LinkedModelState {
+  fileName: string
+  webIfcModelId: number
+  lengthUnit: LengthUnit | null
+  storeyCount: number
+  /** True when the file contains wall elements — the underlay source signal. */
+  hasWalls: boolean
+}
+
+/** Architecture walls/columns of the aligned storey, rendered beneath the plan. */
+export interface StoreyUnderlayState {
+  meshes: FloorMeshes
+  sourceFileName: string
+}
 
 // All WorkspacePage state in one place. Pure module: no React imports, no side
 // effects in the reducer. Async orchestration (IFC parsing, geometry extraction,
@@ -29,11 +47,26 @@ export interface WorkspacePageState {
   demoRuntime: DemoRuntimeConfig
   demoRuntimeConfigError: string | null
 
+  // --- linked models (multi-IFC ingest) ---
+  // Non-host files of a multi-file upload, in upload order. Empty for a
+  // single-file upload, which keeps that flow byte-identical to before.
+  linkedModels: LinkedModelState[]
+  // One alignment per linked file (host storey ↔ linked storey by absolute
+  // elevation), including explicitly blocked ones so failures stay visible.
+  storeyAlignments: StoreyAlignment[]
+
   // --- floor extraction ---
   selectedStoreyId: StoreyId | null
   floorMeshes: FloorMeshes | null
   isExtractingGeometry: boolean
   geometryError: string | null
+  // Architecture underlay for the open storey; null when no linked file maps
+  // to it or the extraction failed (then underlayError carries the reason).
+  underlay: StoreyUnderlayState | null
+  underlayError: string | null
+  // Cross-file fixture merge accounting for the open storey (Decisions tab +
+  // debug JSON); null on single-file uploads and before detection completes.
+  crossFileMerge: MergedStoreyDetection | null
 
   // --- initial floor auto-select (plain mode) ---
   // Why the chooser auto-opened a floor after upload, surfaced in the
@@ -96,10 +129,15 @@ export const initialWorkspacePageState: WorkspacePageState = {
   demoAssetError: null,
   demoRuntime: { enabled: false },
   demoRuntimeConfigError: null,
+  linkedModels: [],
+  storeyAlignments: [],
   selectedStoreyId: null,
   floorMeshes: null,
   isExtractingGeometry: false,
   geometryError: null,
+  underlay: null,
+  underlayError: null,
+  crossFileMerge: null,
   initialStoreyDecision: null,
   modelOrigin: null,
   hoveredExpressId: null,
@@ -147,6 +185,9 @@ export type WorkspacePageAction =
   // Carries the declared length unit alongside the storeys: both are read from
   // the same freshly-opened model, so they land in state atomically.
   | { type: 'storeys-parsed'; storeys: Storey[]; modelLengthUnit: LengthUnit | null }
+  // Non-host files of a multi-file upload finished parsing; alignments carry
+  // both successful mappings and explicitly blocked/failed linked files.
+  | { type: 'linked-models-loaded'; linkedModels: LinkedModelState[]; alignments: StoreyAlignment[] }
   // Plain-mode floor auto-select outcome (chooser or its fallback), recorded
   // for the Decisions tab / debug JSON before the floor actually opens.
   | { type: 'initial-storey-chosen'; decision: InitialStoreyDecision }
@@ -159,7 +200,19 @@ export type WorkspacePageAction =
   // reducer ignores repeats so the origin can never drift mid-session.
   | { type: 'model-origin-resolved'; decision: ModelOriginDecision }
   | { type: 'floor-geometry-loaded'; floorMeshes: FloorMeshes }
-  | { type: 'floor-fixtures-detected'; fixtures: Fixture[]; kitchens: KitchenArea[]; hasRisers: boolean }
+  // Architecture underlay outcome for the open storey. null underlay with an
+  // error keeps the failure visible; null with no error means "no aligned
+  // linked storey with walls" (a normal state, not a failure).
+  | { type: 'underlay-loaded'; underlay: StoreyUnderlayState | null }
+  | { type: 'underlay-failed'; message: string }
+  | {
+      type: 'floor-fixtures-detected'
+      fixtures: Fixture[]
+      kitchens: KitchenArea[]
+      hasRisers: boolean
+      // Cross-file merge accounting; omitted/null on the single-file path.
+      crossFileMerge?: MergedStoreyDetection | null
+    }
   | { type: 'fixture-detection-finished' }
   | { type: 'floor-open-failed'; message: string }
   | { type: 'object-hovered'; expressId: number | null }
@@ -246,6 +299,11 @@ function reduce(state: WorkspacePageState, action: WorkspacePageAction): Workspa
         modelLengthUnit: null,
         initialStoreyDecision: null,
         adjustLog: createAdjustLog(),
+        linkedModels: [],
+        storeyAlignments: [],
+        underlay: null,
+        underlayError: null,
+        crossFileMerge: null,
       }
 
     case 'model-opened':
@@ -253,6 +311,9 @@ function reduce(state: WorkspacePageState, action: WorkspacePageAction): Workspa
 
     case 'storeys-parsed':
       return { ...state, storeys: action.storeys, modelLengthUnit: action.modelLengthUnit }
+
+    case 'linked-models-loaded':
+      return { ...state, linkedModels: action.linkedModels, storeyAlignments: action.alignments }
 
     case 'initial-storey-chosen':
       return { ...state, initialStoreyDecision: action.decision }
@@ -270,6 +331,9 @@ function reduce(state: WorkspacePageState, action: WorkspacePageAction): Workspa
         selectedStoreyId: action.storeyId,
         floorMeshes: null,
         geometryError: null,
+        underlay: null,
+        underlayError: null,
+        crossFileMerge: null,
         isExtractingGeometry: true,
         hoveredExpressId: null,
         selectedExpressId: null,
@@ -291,6 +355,12 @@ function reduce(state: WorkspacePageState, action: WorkspacePageAction): Workspa
     case 'floor-geometry-loaded':
       return { ...state, floorMeshes: action.floorMeshes, isExtractingGeometry: false }
 
+    case 'underlay-loaded':
+      return { ...state, underlay: action.underlay, underlayError: null }
+
+    case 'underlay-failed':
+      return { ...state, underlay: null, underlayError: action.message }
+
     case 'floor-fixtures-detected':
       // Detection and placement are split into two distinct phases.
       // Risers are placed only when the user explicitly clicks Suggest.
@@ -298,6 +368,7 @@ function reduce(state: WorkspacePageState, action: WorkspacePageAction): Workspa
         ...state,
         fixtures: action.fixtures,
         kitchens: action.kitchens,
+        crossFileMerge: action.crossFileMerge ?? null,
         activeTab: action.hasRisers ? state.activeTab : 'fixtures',
       }
 

@@ -1,6 +1,8 @@
 import type { StoreyDetectionAggregation } from '@/shared/ifc/aggregateStoreyDetections'
 import type { InitialStoreyDecision } from '@/shared/ifc/scanStoreyFixtures'
 import type { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
+import type { StoreyAlignment } from '@/domain/alignStoreys'
+import type { MergedStoreyDetection } from '@/domain/mergeFixturesAcrossFiles'
 
 type ValidationReport = ReturnType<typeof buildRiserValidationReport>
 
@@ -10,6 +12,10 @@ interface PlacementValidationPanelProps {
   demoFlowEnabled?: boolean
   /** Why the initial floor was auto-opened (plain mode); null in demo mode. */
   initialStoreyDecision?: InitialStoreyDecision | null
+  /** Storey mapping per linked file (multi-IFC uploads); empty for single-file. */
+  storeyAlignments?: StoreyAlignment[]
+  /** Cross-file fixture merge accounting for the open floor; null for single-file. */
+  crossFileMerge?: MergedStoreyDetection | null
 }
 
 function getUserFacingIssue(
@@ -58,11 +64,104 @@ function stripDeveloperCopy(message: string): string {
     .replace(/debug JSON/gi, 'export notes')
 }
 
+function formatElevationM(valueM: number): string {
+  // `+ 0` folds negative zero so a -0.0004 m elevation prints "0.00", not "-0.00".
+  const rounded = Math.round(valueM * 100) / 100 + 0
+  return `${rounded.toFixed(2)} m`
+}
+
+function formatStoreyNames(entries: Array<{ storeyName: string }>): string {
+  return entries.map((entry) => entry.storeyName).join(', ')
+}
+
+function StoreyAlignmentSection({ alignment }: { alignment: StoreyAlignment }) {
+  if (alignment.status === 'blocked') {
+    return (
+      <section className="sidebar__panel" data-testid="storey-alignment">
+        <p className="sidebar__panel-copy" dir="auto">
+          <strong>{alignment.linkedFileName}:</strong> alignment blocked — {alignment.blockedReason}
+        </p>
+      </section>
+    )
+  }
+
+  const origin = alignment.originAgreement
+  return (
+    <section className="sidebar__panel" data-testid="storey-alignment">
+      <p className="sidebar__panel-copy" dir="auto">
+        <strong>{alignment.linkedFileName}</strong>
+        {' — '}
+        {alignment.pairs.length} storey {alignment.pairs.length === 1 ? 'pair' : 'pairs'} within{' '}
+        {alignment.toleranceMm} mm.
+      </p>
+      {origin.status === 'mismatch' && origin.warning !== null ? (
+        <p className="sidebar__panel-copy" role="alert" dir="auto">
+          <strong>Origin warning:</strong> {origin.warning}
+        </p>
+      ) : (
+        <p className="sidebar__panel-copy">
+          <strong>Plan origin:</strong>{' '}
+          {origin.status === 'shared'
+            ? `shared (building placements ${origin.distanceMm} mm apart)`
+            : 'unknown'}
+        </p>
+      )}
+      {alignment.pairs.length > 0 && (
+        <ul className="risers-panel__legend-list">
+          {alignment.pairs.map((pair) => (
+            <li key={pair.host.storeyId} dir="auto">
+              <strong>{pair.host.storeyName}</strong> ({formatElevationM(pair.host.absoluteElevationM)}) ↔{' '}
+              <strong>{pair.linked.storeyName}</strong> ({formatElevationM(pair.linked.absoluteElevationM)}), Δ{' '}
+              {pair.deltaMm} mm
+            </li>
+          ))}
+        </ul>
+      )}
+      {alignment.unmappedHost.length > 0 && (
+        <p className="sidebar__panel-copy" dir="auto">
+          <strong>Unmapped host storeys ({alignment.unmappedHost.length}):</strong>{' '}
+          {formatStoreyNames(alignment.unmappedHost)}
+        </p>
+      )}
+      {alignment.unmappedLinked.length > 0 && (
+        <p className="sidebar__panel-copy" dir="auto">
+          <strong>Unmapped linked storeys ({alignment.unmappedLinked.length}):</strong>{' '}
+          {formatStoreyNames(alignment.unmappedLinked)}
+        </p>
+      )}
+    </section>
+  )
+}
+
+function CrossFileMergeSection({ merge }: { merge: MergedStoreyDetection }) {
+  return (
+    <section className="sidebar__panel" data-testid="cross-file-merge">
+      <p className="sidebar__panel-title">Cross-file fixtures (open floor)</p>
+      <ul className="risers-panel__legend-list">
+        {merge.perFile.map((file) => (
+          <li key={file.fileName} dir="auto">
+            <strong>{file.fileName}:</strong> detected {file.detectedFixtureCount}, merged{' '}
+            {file.mergedFixtureCount}, duplicates {file.duplicateFixtureCount}, kitchens{' '}
+            {file.kitchenCount}
+          </li>
+        ))}
+      </ul>
+      <p className="sidebar__panel-copy">
+        {merge.duplicates.length === 0
+          ? `No cross-file duplicates within ${merge.dedupeToleranceMm} mm.`
+          : `${merge.duplicates.length} duplicate${merge.duplicates.length === 1 ? '' : 's'} dropped (same kind within ${merge.dedupeToleranceMm} mm; host instance kept).`}
+      </p>
+    </section>
+  )
+}
+
 export function PlacementValidationPanel({
   report,
   detectionAggregation,
   demoFlowEnabled = false,
   initialStoreyDecision = null,
+  storeyAlignments = [],
+  crossFileMerge = null,
 }: PlacementValidationPanelProps) {
   const autoOpenDecision = initialStoreyDecision && (
     <p className="sidebar__panel-copy">
@@ -73,10 +172,27 @@ export function PlacementValidationPanel({
     </p>
   )
 
+  // Multi-IFC ingest: mapping + merge accounting stay visible before risers
+  // are suggested, so alignment problems surface immediately after upload.
+  const multiModelSections = (storeyAlignments.length > 0 || crossFileMerge !== null) && (
+    <>
+      {storeyAlignments.length > 0 && (
+        <section className="sidebar__panel">
+          <p className="sidebar__panel-title">Storey mapping (linked models)</p>
+        </section>
+      )}
+      {storeyAlignments.map((alignment) => (
+        <StoreyAlignmentSection key={alignment.linkedFileName} alignment={alignment} />
+      ))}
+      {crossFileMerge !== null && <CrossFileMergeSection merge={crossFileMerge} />}
+    </>
+  )
+
   if (!report) {
     return (
       <>
         {autoOpenDecision}
+        {multiModelSections}
         <p className="sidebar__panel-copy">Suggest risers to populate export validation details.</p>
       </>
     )
@@ -93,6 +209,7 @@ export function PlacementValidationPanel({
   return (
     <section className="sidebar__panel">
       {autoOpenDecision}
+      {multiModelSections}
       <p className="sidebar__panel-title">Placement and export readiness</p>
       <ul className="risers-panel__legend-list">
         <li><strong>Processed floors:</strong> {report.summary.processedFloorCount}</li>

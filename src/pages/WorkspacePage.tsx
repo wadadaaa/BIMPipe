@@ -11,6 +11,12 @@ import { getIfcApi } from '@/shared/ifc/ifcApi'
 import { aggregateStoreyDetections } from '@/shared/ifc/aggregateStoreyDetections'
 import { parseStoreys } from '@/shared/ifc/parseStoreys'
 import { resolveModelLengthUnit } from '@/shared/ifc/resolveModelLengthUnit'
+import {
+  alignStoreysByElevation,
+  STOREY_ALIGNMENT_TOLERANCE_MM,
+  type AlignmentModelInput,
+  type StoreyAlignment,
+} from '@/domain/alignStoreys'
 import type { LengthUnit } from '@/shared/lengthUnits'
 import type { Fixture, KitchenArea, PlanBounds, Riser, RiserId, Storey, StoreyId, SidebarTab } from '@/domain/types'
 import type { FloorMeshes } from '@/shared/ifc/extractFloorMeshes'
@@ -25,7 +31,11 @@ import {
   type ModelFrame,
 } from '@/shared/frame/modelFrame'
 import { serializeAdjustLog } from '@/domain/adjustLog'
-import { createInitialWorkspacePageState, workspacePageReducer } from './workspacePageState'
+import {
+  createInitialWorkspacePageState,
+  workspacePageReducer,
+  type LinkedModelState,
+} from './workspacePageState'
 import { buildRiserStack } from '@/shared/routes/buildRiserStacks'
 import { classifyFloors } from '@/shared/routes/floorClassification'
 import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE } from '@/shared/routes/riserPlacementProfile'
@@ -114,10 +124,15 @@ export function WorkspacePage({
     demoAssetError,
     demoRuntime,
     demoRuntimeConfigError,
+    linkedModels,
+    storeyAlignments,
     selectedStoreyId,
     floorMeshes,
     isExtractingGeometry,
     geometryError,
+    underlay,
+    underlayError,
+    crossFileMerge,
     initialStoreyDecision,
     modelOrigin,
     hoveredExpressId,
@@ -149,6 +164,12 @@ export function WorkspacePage({
   // Declared length unit mirrored from state for the same reason: openStorey
   // runs before the storeys-parsed transition flushes, so it reads the ref.
   const modelLengthUnitRef = useRef<LengthUnit | null>(null)
+  // Multi-file upload (W4): linked models and their storey alignments mirrored
+  // for openStorey, which runs before the linked-models-loaded transition
+  // flushes. hostFileNameRef feeds the cross-file merge accounting.
+  const linkedModelsRef = useRef<LinkedModelState[]>([])
+  const storeyAlignmentsRef = useRef<StoreyAlignment[]>([])
+  const hostFileNameRef = useRef<string | null>(null)
 
   // Rendering frame derived from the reducer state. Identity for near-origin
   // models, so localization below is a no-op that preserves array identities.
@@ -178,7 +199,21 @@ export function WorkspacePage({
     nextRiserLabelRef.current = getNextRiserLabelNumber(risers)
   }, [risers])
 
-  async function handleFileAccepted(file: File) {
+  function handleFileAccepted(file: File) {
+    void handleFilesAccepted([file])
+  }
+
+  async function handleFilesAccepted(files: File[]) {
+    const [file, ...linkedFiles] = files
+    if (!file) return
+    if (demoRuntime.enabled && linkedFiles.length > 0) {
+      // Demo mode stays single-file only (its scope config is built around one model).
+      dispatch({
+        type: 'demo-upload-rejected',
+        message: 'Demo mode accepts a single IFC file. Linked models are unavailable here.',
+      })
+      return
+    }
     const uploadDemoError = buildDemoModeUploadError(file.name, demoRuntime)
     if (uploadDemoError) {
       dispatch({ type: 'demo-upload-rejected', message: uploadDemoError })
@@ -191,6 +226,10 @@ export function WorkspacePage({
     risersRef.current = []
     modelFrameRef.current = null
     modelLengthUnitRef.current = null
+    hostFileNameRef.current = file.name
+    const previousLinkedModels = linkedModelsRef.current
+    linkedModelsRef.current = []
+    storeyAlignmentsRef.current = []
     dispatch({ type: 'upload-started', fileName: file.name })
     startTransition(() => {
       dispatch({ type: 'upload-reset' })
@@ -202,9 +241,16 @@ export function WorkspacePage({
         file.arrayBuffer(),
       ])
 
-      // Close any previously opened model
+      // Close any previously opened models (host and linked).
       if (webIfcModelIdRef.current !== null) {
         api.CloseModel(webIfcModelIdRef.current)
+      }
+      for (const previous of previousLinkedModels) {
+        try {
+          api.CloseModel(previous.webIfcModelId)
+        } catch {
+          // Already closed/invalid handles must not break the new upload.
+        }
       }
 
       const data = new Uint8Array(buffer)
@@ -222,6 +268,22 @@ export function WorkspacePage({
       startTransition(() => {
         dispatch({ type: 'storeys-parsed', storeys: parsed, modelLengthUnit })
       })
+
+      if (linkedFiles.length > 0) {
+        // Linked models load BEFORE the floor auto-opens so the first opened
+        // floor already gets merged detection and the architecture underlay.
+        const { linkedModels: loadedLinkedModels, alignments } = await loadLinkedModels(
+          api,
+          { fileName: file.name, webIfcModelId: newModelId, lengthUnit: modelLengthUnit, storeys: parsed },
+          linkedFiles,
+        )
+        linkedModelsRef.current = loadedLinkedModels
+        storeyAlignmentsRef.current = alignments
+        startTransition(() => {
+          dispatch({ type: 'linked-models-loaded', linkedModels: loadedLinkedModels, alignments })
+        })
+      }
+
       preloadFloorInspectionModules()
       if (demoRuntime.enabled) {
         // Demo floor-selection semantics preserved untouched: the demo flow
@@ -304,25 +366,90 @@ export function WorkspacePage({
         dispatch({ type: 'floor-geometry-loaded', floorMeshes: meshes })
       })
 
-      try {
-        const [detectedFixtures, detectedKitchens] = await Promise.allSettled([
-          detectFixtures(api, modelId, id),
-          detectKitchens(api, modelId, id),
-        ])
+      // --- W4: architecture underlay + cross-file detection targets ---
+      // Linked storeys aligned to this host storey (empty on single-file
+      // uploads, which keeps the whole block inert).
+      const linkedTargets = collectLinkedDetectionTargets(
+        storeyAlignmentsRef.current,
+        linkedModelsRef.current,
+        id,
+      )
 
-        const fixturesResult =
-          detectedFixtures.status === 'fulfilled' ? detectedFixtures.value : []
-        const kitchensResult =
-          detectedKitchens.status === 'fulfilled' ? detectedKitchens.value : []
-
-        startTransition(() => {
-          dispatch({
-            type: 'floor-fixtures-detected',
-            fixtures: fixturesResult,
-            kitchens: kitchensResult,
-            hasRisers: risersRef.current.length > 0,
+      const underlaySource = linkedTargets.find((target) => target.hasWalls) ?? null
+      if (underlaySource !== null) {
+        try {
+          // Only the aligned storey of the linked model is tessellated — a
+          // full-model pass over a large architecture file is minutes-level.
+          const { extractStoreyUnderlayMeshes } = await import('@/shared/ifc/extractFloorMeshes')
+          const underlayMeshes = await extractStoreyUnderlayMeshes(
+            api,
+            underlaySource.webIfcModelId,
+            underlaySource.storeyId,
+            // The HOST frame keeps the underlay in the host's local origin;
+            // both buildings share plan coordinates (checked by alignment).
+            modelFrameRef.current ?? IDENTITY_MODEL_FRAME,
+          )
+          startTransition(() => {
+            dispatch({
+              type: 'underlay-loaded',
+              underlay: { meshes: underlayMeshes, sourceFileName: underlaySource.fileName },
+            })
           })
-        })
+        } catch (err) {
+          startTransition(() => {
+            dispatch({
+              type: 'underlay-failed',
+              message: `Architecture underlay from ${underlaySource.fileName} failed: ${
+                err instanceof Error ? err.message : 'unknown error'
+              }`,
+            })
+          })
+        }
+      }
+
+      try {
+        if (linkedTargets.length > 0) {
+          // Merged detection across host + aligned linked storeys, with the
+          // cross-file dedupe accounting surfaced in Decisions / debug JSON.
+          const { detectMergedStoreyFixtures } = await import('@/shared/ifc/detectMergedStoreyFixtures')
+          const merged = await detectMergedStoreyFixtures(
+            api,
+            {
+              webIfcModelId: modelId,
+              storeyId: id,
+              fileName: hostFileNameRef.current ?? 'host.ifc',
+            },
+            linkedTargets,
+          )
+          startTransition(() => {
+            dispatch({
+              type: 'floor-fixtures-detected',
+              fixtures: merged.fixtures,
+              kitchens: merged.kitchens,
+              hasRisers: risersRef.current.length > 0,
+              crossFileMerge: merged,
+            })
+          })
+        } else {
+          const [detectedFixtures, detectedKitchens] = await Promise.allSettled([
+            detectFixtures(api, modelId, id),
+            detectKitchens(api, modelId, id),
+          ])
+
+          const fixturesResult =
+            detectedFixtures.status === 'fulfilled' ? detectedFixtures.value : []
+          const kitchensResult =
+            detectedKitchens.status === 'fulfilled' ? detectedKitchens.value : []
+
+          startTransition(() => {
+            dispatch({
+              type: 'floor-fixtures-detected',
+              fixtures: fixturesResult,
+              kitchens: kitchensResult,
+              hasRisers: risersRef.current.length > 0,
+            })
+          })
+        }
       } catch {
         // Detection failure is non-fatal — floor plan stays visible, fixtures stay empty.
       } finally {
@@ -511,6 +638,16 @@ export function WorkspacePage({
           ...fullExport.debugMapping,
           placementRuleProfile: DEFAULT_RISER_PLACEMENT_RULE_PROFILE,
           initialStoreyDecision,
+          // Multi-IFC ingest (W4): storey mapping per linked file plus the
+          // cross-file fixture merge accounting for the exported floor.
+          linkedModels: linkedModels.map((model) => ({
+            fileName: model.fileName,
+            lengthUnit: model.lengthUnit,
+            storeyCount: model.storeyCount,
+            hasWalls: model.hasWalls,
+          })),
+          storeyAlignments,
+          crossFileMerge,
           floorClassification,
           validationReport: buildRiserValidationReport({
             exportRunId,
@@ -671,9 +808,11 @@ export function WorkspacePage({
     <>
       <IfcUpload
         onFileAccepted={handleFileAccepted}
+        onFilesAccepted={(files) => void handleFilesAccepted(files)}
         isLoading={isParsingStoreys}
         error={uploadError ?? demoUploadError ?? demoRuntimeConfigError}
         fileName={modelFileName}
+        linkedFileNames={linkedModels.map((model) => model.fileName)}
         storeyCount={storeys.length}
         // Demo mode only accepts the configured demo model, so the bundled
         // sample would always be rejected — hide the affordance instead.
@@ -682,6 +821,11 @@ export function WorkspacePage({
       {demoAssetError ? (
         <p style={{ marginTop: 8, color: 'var(--color-warning, #f59e0b)', fontSize: 13 }} role="status">
           {demoAssetError}
+        </p>
+      ) : null}
+      {underlayError ? (
+        <p style={{ marginTop: 8, color: 'var(--color-warning, #f59e0b)', fontSize: 13 }} role="status">
+          {underlayError}
         </p>
       ) : null}
       <StoreyList
@@ -723,6 +867,8 @@ export function WorkspacePage({
       <ViewTransition enter="slide-up" default="none">
         <FloorViewer
           floorMeshes={floorMeshes}
+          underlayMeshes={underlay?.meshes ?? null}
+          underlaySourceFileName={underlay?.sourceFileName ?? null}
           isLoading={isExtractingGeometry}
           error={geometryError}
           theme={theme}
@@ -777,6 +923,8 @@ export function WorkspacePage({
       validationReport={validationReport}
       detectionAggregation={detectionDebugRef.current}
       initialStoreyDecision={initialStoreyDecision}
+      storeyAlignments={storeyAlignments}
+      crossFileMerge={crossFileMerge}
       sanitaryRouteLimitations={sanitaryRoutingPreview.limitations}
       demoFlowEnabled={demoRuntime.enabled}
       demoFloorOpened={demoFloorOpened}
@@ -800,6 +948,128 @@ export function WorkspacePage({
       rightPanel={rightPanel}
     />
   )
+}
+
+interface HostModelInfo {
+  fileName: string
+  webIfcModelId: number
+  lengthUnit: LengthUnit | null
+  storeys: Storey[]
+}
+
+/**
+ * Opens each linked (non-host) file of a multi-file upload and aligns its
+ * storeys against the host by absolute elevation. A linked file that fails to
+ * open or parse becomes an explicitly blocked alignment entry (visible in the
+ * Decisions tab) instead of silently disappearing.
+ */
+async function loadLinkedModels(
+  api: Awaited<ReturnType<typeof getIfcApi>>,
+  host: HostModelInfo,
+  linkedFiles: File[],
+): Promise<{ linkedModels: LinkedModelState[]; alignments: StoreyAlignment[] }> {
+  const [{ readBuildingPlacementSourcePoint }, { IFCWALL, IFCWALLSTANDARDCASE }] =
+    await Promise.all([import('@/shared/ifc/readBuildingPlacement'), import('web-ifc')])
+
+  const hostInput: AlignmentModelInput = {
+    fileName: host.fileName,
+    lengthUnit: host.lengthUnit,
+    storeys: host.storeys.map((storey) => ({
+      id: storey.id,
+      name: storey.name,
+      elevation: storey.elevation,
+    })),
+    buildingPlacement: await readBuildingPlacementSourcePoint(api, host.webIfcModelId),
+  }
+
+  const linkedModels: LinkedModelState[] = []
+  const alignments: StoreyAlignment[] = []
+
+  for (const file of linkedFiles) {
+    let openedModelId: number | null = null
+    try {
+      const buffer = new Uint8Array(await file.arrayBuffer())
+      openedModelId = api.OpenModel(buffer)
+      const storeys = await parseStoreys(api, openedModelId, crypto.randomUUID())
+      const lengthUnit = await resolveModelLengthUnit(api, openedModelId)
+      const buildingPlacement = await readBuildingPlacementSourcePoint(api, openedModelId)
+      const hasWalls =
+        api.GetLineIDsWithType(openedModelId, IFCWALL).size() > 0 ||
+        api.GetLineIDsWithType(openedModelId, IFCWALLSTANDARDCASE).size() > 0
+
+      linkedModels.push({
+        fileName: file.name,
+        webIfcModelId: openedModelId,
+        lengthUnit,
+        storeyCount: storeys.length,
+        hasWalls,
+      })
+      alignments.push(
+        alignStoreysByElevation(hostInput, {
+          fileName: file.name,
+          lengthUnit,
+          storeys: storeys.map((storey) => ({
+            id: storey.id,
+            name: storey.name,
+            elevation: storey.elevation,
+          })),
+          buildingPlacement,
+        }),
+      )
+    } catch (err) {
+      if (openedModelId !== null) {
+        try {
+          api.CloseModel(openedModelId)
+        } catch {
+          // The model handle may already be invalid; the blocked entry below is the signal.
+        }
+      }
+      alignments.push({
+        hostFileName: host.fileName,
+        linkedFileName: file.name,
+        status: 'blocked',
+        blockedReason: `Failed to open or parse: ${err instanceof Error ? err.message : 'unknown error'}`,
+        toleranceMm: STOREY_ALIGNMENT_TOLERANCE_MM,
+        pairs: [],
+        unmappedHost: [],
+        unmappedLinked: [],
+        originAgreement: { status: 'unknown', distanceMm: null, warning: null },
+      })
+    }
+  }
+
+  return { linkedModels, alignments }
+}
+
+interface LinkedStoreyDetectionTarget {
+  webIfcModelId: number
+  /** The linked file's OWN storey express ID from the alignment pair. */
+  storeyId: StoreyId
+  fileName: string
+  hasWalls: boolean
+}
+
+/** Linked storeys aligned to the given host storey, in linked-model order. */
+function collectLinkedDetectionTargets(
+  alignments: StoreyAlignment[],
+  linkedModels: LinkedModelState[],
+  hostStoreyId: StoreyId,
+): LinkedStoreyDetectionTarget[] {
+  const targets: LinkedStoreyDetectionTarget[] = []
+  for (const alignment of alignments) {
+    if (alignment.status !== 'aligned') continue
+    const pair = alignment.pairs.find((candidate) => candidate.host.storeyId === hostStoreyId)
+    if (!pair) continue
+    const model = linkedModels.find((candidate) => candidate.fileName === alignment.linkedFileName)
+    if (!model) continue
+    targets.push({
+      webIfcModelId: model.webIfcModelId,
+      storeyId: pair.linked.storeyId,
+      fileName: model.fileName,
+      hasWalls: model.hasWalls,
+    })
+  }
+  return targets
 }
 
 function takeNextRiserLabel(nextRiserLabelRef: MutableRefObject<number>): string {
