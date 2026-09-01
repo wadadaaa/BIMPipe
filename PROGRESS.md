@@ -7,7 +7,7 @@ Privacy rule for this goal: `external/` and `refs/` hold private client data and
 | Task | Status | Notes |
 | --- | --- | --- |
 | W0 — Hygiene (gitignore, bim11 evidence, gate) | ✅ | commit `b06e3f2` + this entry; details below |
-| W0b | ⏳ | |
+| W0b — WorkspacePage state extraction (typed reducer) | ✅ | commits `0430fa7`, `ffe3af9` + this entry; details below |
 | W1 | ⏳ | |
 | W2 | ⏳ | |
 | W3 | ⏳ | |
@@ -25,6 +25,16 @@ Privacy rule for this goal: `external/` and `refs/` hold private client data and
 - **Nothing tracked**: `git ls-files -- refs external` outputs nothing (exit 0). `refs/096/096-floor01.pdf` remains on disk and untracked; after the ignore change, `git status` shows no `refs/`/`external/` entries at all.
 - **bim11 evidence (pre-existing fix, nothing re-fixed)**: `pnpm test src/domain/decideRiserStrategyPerToiletRoom.bim11.test.ts` → 13/13 passed. The 2 historically failing assertions use exact `toBe` on the full strings (`'inherits exception coverage from primary member: …'` at test lines 244 and 312 — no `toContain`/regex loosening). Git history: the prefix was introduced deliberately by the BIM-11 commits (`589e1ba`, `179ad83`, `e395ee5`, `5463f21`); commit `d9b5f4e` ("baseline: align bim11 reason expectations with intended inherited-coverage prefix") changed exactly those 2 assertions from the bare reason strings to the full prefixed strings — a tightening to the intended values, verified via `git log -S "inherits exception coverage"` and `git show d9b5f4e`.
 - **Full gate (2026-09-01 13:50)**: `pnpm lint` 0 errors, 1 known pre-existing warning (`FloorViewer.tsx` react-hooks/exhaustive-deps) · `pnpm test` **298/298** (36 files) · `pnpm build` green (`tsc -b` + vite; only the pre-existing >500 kB chunk-size warning).
+
+### W0b — WorkspacePage state extraction ✅ (2026-09-01, commits `0430fa7`, `ffe3af9` + this entry)
+
+Pure refactor, no behavior change intended. Parity baseline (pre-change HEAD): `a88e7f6bdacf42b4491920b2a0c0e2f75a04b73b`. **The coordinator runs the live demo-parity byte-diff check against the baseline and final commits.**
+
+- **New `src/pages/workspacePageState.ts`**: `WorkspacePageState` interface, `initialWorkspacePageState`, lazy `createInitialWorkspacePageState()` (resolves demo runtime config once per mount, same invalid-config fallback), 27-variant discriminated-union `WorkspacePageAction`, and pure `workspacePageReducer`. No React imports. Multi-setState sequences became single actions (`upload-started`/`upload-reset`, `floor-opened`, `floor-fixtures-detected`, `risers-suggested`, …) with urgent-vs-`startTransition` dispatch split preserved exactly where the old code split setter batches across lanes.
+- **`WorkspacePage.tsx`**: all 22 `useState` hooks replaced by one `useReducer`; the component now renders, derives memoized values, and dispatches. Refs kept for imperative plumbing only (`webIfcModelIdRef`, `sourceIfcBytesRef`, `nextRiserLabelRef`, `detectionDebugRef`, `risersRef`). Previously-stable setter props (`onObjectHover`, `onObjectSelect`, `onTabChange`) became `useCallback([])` dispatch wrappers so `FloorViewer` effects keyed on those identities don't re-run more than before.
+- **Parity details**: the reducer shallow-compares and returns the previous state object for value-identical updates, reproducing `useState`'s bail-out (matters for hover events and the suggest flow's `demoAssetError: null` re-set); `upload-reset` clears exactly the 16 slices the old transition cleared (incl. per-storey branch-route visibility map and all risers) while preserving in-flight flags, `downloadMode`, and the demo runtime; riser `source` (`manual` vs `placed`) is never rewritten by the reducer, keeping manual-placement semantics untouched; suggest still replaces the full riser set (existing behavior, unchanged).
+- **Tests**: 22 new pure reducer tests in `src/pages/workspacePageState.test.ts` (upload reset clear/preserve split, floor-open keeping risers, stack add/remove/move incl. unknown-id bail-outs, per-storey toggle defaults, download lifecycle, bail-out identity, determinism). Zero existing assertions changed.
+- **Full gate (2026-09-01 14:01)**: `pnpm lint` 0 errors, 1 known pre-existing warning (`FloorViewer.tsx`) · `pnpm test` **320/320** (37 files; 298 pre-existing + 22 new) · `pnpm build` green (only the pre-existing >500 kB chunk-size warning) · `npx react-doctor@latest`: no errors in touched files (only the known pre-existing `Model3DViewer` error and pre-existing warnings).
 
 ---
 
