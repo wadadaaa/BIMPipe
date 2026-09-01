@@ -9,7 +9,7 @@ Privacy rule for this goal: `external/` and `refs/` hold private client data and
 | W0 — Hygiene (gitignore, bim11 evidence, gate) | ✅ | commit `b06e3f2` + this entry; details below |
 | W0b — WorkspacePage state extraction (typed reducer) | ✅ | commits `0430fa7`, `ffe3af9` + this entry; details below |
 | W1 — Coordinate normalization (local render frame) | ✅ | commits `b4e26d5`, `1513ae7`, `298af8d`, `fa62536`; live 096 browser check pending (details below) |
-| W2 — Units single source of truth | ✅ | commits `508e2bb`, `ccb4a61`, `9dffed2`, `7cfe9a5`; core done, 3 call sites deferred behind W1 (details below) |
+| W2 — Units single source of truth | ✅ | commits `508e2bb`, `ccb4a61`, `9dffed2`, `7cfe9a5` + wiring `8f538ed`; fully wired, live-verified on 096-P (details below) |
 | W3 | ⏳ | |
 | W4 | ⏳ | |
 | W5 — Vertical continuity map | ✅ core | commits `a5dddcf`, `308c880`, `1dd1786`; debug overlay wiring deferred to post-W4 (details below) |
@@ -86,6 +86,14 @@ Pure refactor, no behavior change intended. Parity baseline (pre-change HEAD): `
 - **Offset-frame export round trip (new test file)**: building at 096-scale mm coords, riser placed via local-frame conversion, exported, reopened with a fresh engine — placement chain within 0.5 mm of absolute source coordinates. Existing round-trip suite untouched and green (export frame unchanged).
 - **Focused tests**: 112/112 across 10 files; ESLint + `tsc -b` clean; react-doctor only pre-existing findings.
 - **Pending**: live browser check on 096-P (render + FIT + drag) by the coordinator; far/near placement probe still uses `detectPlanUnits` heuristics (exact unit-assignment signal available from W2's reader — wiring next).
+
+### Wave-1 integration wiring ✅ (2026-09-01, commits `8f538ed` W2 wiring, `37daa53` W6 wiring)
+
+- **W2 wiring complete**: `resolveModelLengthUnit` runs after `parseStoreys`, unit stored on the `storeys-parsed` action (cleared on reset), passed to Sidebar and StoreyList; elevation chips now `formatLengthM` (null unit → raw number, no suffix — never assumed). Bonus: W1's far/near placement probe now accepts the declared unit instead of magnitude guessing.
+- **W6 adjust-log wiring complete**: `adjustLog` in reducer state; appends on manual move-commit (new `onRiserMoveCommit` fired once at pointer-up, not per drag frame), add, and remove; re-suggest and continuous drag never append; reset clears. Coordinates: source-frame plan metres (same frame export writes). Download flow emits `<sourceName>.adjustments.json` beside the exported IFC when non-empty.
+- **First full gate over the combined 5-task tree**: `pnpm lint` 0 errors (1 known warning) · `pnpm test` **487/487** (51 files) · `pnpm build` green · react-doctor only the known pre-existing Model3DViewer error.
+- **Live smoke (Playwright, plain dev)**: Duplex chips "6.00 m / 3.10 m / 0.00 m"; full loop on real 096-P — 44 storey chips correct incl. **"30.15 m"** for storey 01 (the original cm-as-mm regression, fixed), suggest placed 11 risers (matches the 11-toilet baseline), dragged R9 ~10 m, export produced 3 downloads incl. `096-P.adjustments.json` with exactly 1 move entry at source coordinates consistent with the panel. Client files purged from the automation cache afterwards.
+- **Pre-existing findings (not caused by the wave)**: (1) Duplex_MEP cannot export — `resolveBodyContext` requires a `'Body'`-labeled representation context and Duplex only has null-identifier contexts; visible error, honest failure; fix needs a validated exporter change — follow-up queued. (2) One more hardcoded elevation label in `FloorViewer.tsx` status bar — being fixed in W3. (3) Duplex "Level 2" is classified penthouse by the placement heuristic, so auto risers land on Level 1 — by-design, noted.
 
 ---
 
