@@ -1,3 +1,33 @@
+# Goal 2 — real-project 096 hardening (W0–W7)
+
+Branch: `goal/real-project-096` · Started: 2026-09-01 · Status legend: ⏳ pending · 🔄 in progress · ✅ done · ⛔ blocked
+
+Privacy rule for this goal: `external/` and `refs/` hold private client data and are never committed; committed content references the project only by the neutral code "096" (file codes like `096-P.ifc` are acceptable).
+
+| Task | Status | Notes |
+| --- | --- | --- |
+| W0 — Hygiene (gitignore, bim11 evidence, gate) | ✅ | commit `b06e3f2` + this entry; details below |
+| W0b | ⏳ | |
+| W1 | ⏳ | |
+| W2 | ⏳ | |
+| W3 | ⏳ | |
+| W4 | ⏳ | |
+| W5 | ⏳ | |
+| W6 | ⏳ | |
+| W7 | ⏳ | |
+| Push | ⏳ | |
+
+## Goal 2 milestones
+
+### W0 — Hygiene ✅ (2026-09-01, commit `b06e3f2` + PROGRESS commit)
+
+- **.gitignore**: `external/` was already ignored; added `refs/` alongside it with a shared comment marking both as private client data that must never be committed (commit `b06e3f2`).
+- **Nothing tracked**: `git ls-files -- refs external` outputs nothing (exit 0). `refs/096/096-floor01.pdf` remains on disk and untracked; after the ignore change, `git status` shows no `refs/`/`external/` entries at all.
+- **bim11 evidence (pre-existing fix, nothing re-fixed)**: `pnpm test src/domain/decideRiserStrategyPerToiletRoom.bim11.test.ts` → 13/13 passed. The 2 historically failing assertions use exact `toBe` on the full strings (`'inherits exception coverage from primary member: …'` at test lines 244 and 312 — no `toContain`/regex loosening). Git history: the prefix was introduced deliberately by the BIM-11 commits (`589e1ba`, `179ad83`, `e395ee5`, `5463f21`); commit `d9b5f4e` ("baseline: align bim11 reason expectations with intended inherited-coverage prefix") changed exactly those 2 assertions from the bare reason strings to the full prefixed strings — a tightening to the intended values, verified via `git log -S "inherits exception coverage"` and `git show d9b5f4e`.
+- **Full gate (2026-09-01 13:50)**: `pnpm lint` 0 errors, 1 known pre-existing warning (`FloorViewer.tsx` react-hooks/exhaustive-deps) · `pnpm test` **298/298** (36 files) · `pnpm build` green (`tsc -b` + vite; only the pre-existing >500 kB chunk-size warning).
+
+---
+
 # Goal progress — T0/T1/T2/T3-core
 
 Branch: `goal/t0-t3-routing` · Started: 2026-08-28 · Status legend: ⏳ pending · 🔄 in progress · ✅ done · ⛔ blocked
