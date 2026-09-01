@@ -1,4 +1,4 @@
-import { lazy, startTransition, Suspense, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
+import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, type MutableRefObject } from 'react'
 import { IfcUpload } from '@/features/ifc-upload/IfcUpload'
 import { StoreyList } from '@/features/storey-list/StoreyList'
 import { Sidebar } from '@/features/sidebar/Sidebar'
@@ -8,16 +8,16 @@ import { WorkspaceLayout } from '@/widgets/WorkspaceLayout'
 import { TopBar } from '@/widgets/TopBar'
 import type { ThemeMode } from '@/app/App'
 import { getIfcApi } from '@/shared/ifc/ifcApi'
-import type { FloorMeshes } from '@/shared/ifc/extractFloorMeshes'
 import { aggregateStoreyDetections } from '@/shared/ifc/aggregateStoreyDetections'
 import { parseStoreys } from '@/shared/ifc/parseStoreys'
-import type { Fixture, KitchenArea, Riser, RiserId, Storey, StoreyId, SidebarTab } from '@/domain/types'
-import { buildRiserStack, removeRiserStack } from '@/shared/routes/buildRiserStacks'
+import type { Riser, RiserId, Storey, StoreyId, SidebarTab } from '@/domain/types'
+import { createInitialWorkspacePageState, workspacePageReducer } from './workspacePageState'
+import { buildRiserStack } from '@/shared/routes/buildRiserStacks'
 import { classifyFloors } from '@/shared/routes/floorClassification'
 import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE } from '@/shared/routes/riserPlacementProfile'
 import { buildSuggestedRisers } from '@/shared/routes/buildSuggestedRisers'
 import { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
-import { buildDemoModeUploadError, getDemoRuntimeConfig, isStoreyIncludedInDemoScope } from '@/shared/demoConfig'
+import { buildDemoModeUploadError, isStoreyIncludedInDemoScope } from '@/shared/demoConfig'
 import { buildSanitaryRoutingDemoPlan, buildSanitaryRoutingPlan } from '@/shared/routes/buildSanitaryRoutes'
 import { buildBranchRoutesFromAssignments } from '@/shared/routes/buildBranchRoutes'
 import { assignFixturesToRisers } from '@/domain/assignFixturesToRisers'
@@ -84,64 +84,44 @@ export function WorkspacePage({
   theme = 'dark',
   onToggleTheme = () => {},
 }: Partial<WorkspacePageProps>) {
-  // --- file / model ---
+  // All domain state lives in the colocated reducer module; this component only
+  // renders, derives memoized values, and dispatches actions.
+  const [state, dispatch] = useReducer(workspacePageReducer, undefined, createInitialWorkspacePageState)
+  const {
+    webIfcModelId,
+    modelFileName,
+    storeys,
+    isParsingStoreys,
+    uploadError,
+    demoUploadError,
+    demoAssetError,
+    demoRuntime,
+    demoRuntimeConfigError,
+    selectedStoreyId,
+    floorMeshes,
+    isExtractingGeometry,
+    geometryError,
+    hoveredExpressId,
+    selectedExpressId,
+    fixtures,
+    kitchens,
+    isDetectingFixtures,
+    risers,
+    isAddingRiser,
+    downloadMode,
+    downloadError,
+    activeTab,
+    viewMode,
+    branchRoutesVisibleByStorey,
+  } = state
+
+  // Imperative viewer/export plumbing that intentionally stays outside the
+  // reducer: web-ifc handles, raw source bytes, the riser label counter, and
+  // detection debug output that is only read (never rendered reactively).
   const webIfcModelIdRef = useRef<number | null>(null)
-  const [webIfcModelId, setWebIfcModelId] = useState<number | null>(null)
   const sourceIfcBytesRef = useRef<Uint8Array | null>(null)
   const nextRiserLabelRef = useRef(1)
-  const [modelFileName, setModelFileName] = useState<string | null>(null)
-
-  // --- storey loading ---
-  const [storeys, setStoreys] = useState<Storey[]>([])
-  const [isParsingStoreys, setIsParsingStoreys] = useState(false)
-  const [uploadError, setUploadError] = useState<string | null>(null)
-  const [demoUploadError, setDemoUploadError] = useState<string | null>(null)
-  const [demoAssetError, setDemoAssetError] = useState<string | null>(null)
-  const [{ demoRuntime, demoRuntimeConfigError }] = useState(() => {
-    try {
-      return { demoRuntime: getDemoRuntimeConfig(), demoRuntimeConfigError: null }
-    } catch (error) {
-      return {
-        demoRuntime: { enabled: false } as const,
-        demoRuntimeConfigError: error instanceof Error ? error.message : 'Demo mode config is invalid.',
-      }
-    }
-  })
-
-  // --- floor extraction ---
-  const [selectedStoreyId, setSelectedStoreyId] = useState<StoreyId | null>(null)
-  const [floorMeshes, setFloorMeshes] = useState<FloorMeshes | null>(null)
-  const [isExtractingGeometry, setIsExtractingGeometry] = useState(false)
-  const [geometryError, setGeometryError] = useState<string | null>(null)
-
-  // --- viewer interaction ---
-  const [hoveredExpressId, setHoveredExpressId] = useState<number | null>(null)
-  const [selectedExpressId, setSelectedExpressId] = useState<number | null>(null)
-
-  // --- fixtures ---
-  const [fixtures, setFixtures] = useState<Fixture[]>([])
-  const [kitchens, setKitchens] = useState<KitchenArea[]>([])
-  const [isDetectingFixtures, setIsDetectingFixtures] = useState(false)
   const detectionDebugRef = useRef<Awaited<ReturnType<typeof aggregateStoreyDetections>> | null>(null)
-
-  // --- risers ---
-  const [risers, setRisers] = useState<Riser[]>([])
-  const [isAddingRiser, setIsAddingRiser] = useState(false)
-  const [downloadMode, setDownloadMode] = useState<'full' | null>(null)
-  const [downloadError, setDownloadError] = useState<string | null>(null)
-
-  // --- sidebar ---
-  const [activeTab, setActiveTab] = useState<SidebarTab>('fixtures')
-
-  // --- view mode ---
-  const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d')
-
-  // --- branch routes ---
-  // Per-storey visibility of the T3 branch route overlay. Absent storeys default
-  // to visible so routes show right after suggestion.
-  const [branchRoutesVisibleByStorey, setBranchRoutesVisibleByStorey] = useState<Map<StoreyId, boolean>>(
-    () => new Map(),
-  )
 
   // ---------------------------------------------------------------------------
 
@@ -157,7 +137,7 @@ export function WorkspacePage({
   useEffect(() => {
     const normalized = ensureRiserStackLabels(risers, nextRiserLabelRef)
     if (normalized !== risers) {
-      setRisers(normalized)
+      dispatch({ type: 'risers-normalized', risers: normalized })
       return
     }
 
@@ -167,35 +147,17 @@ export function WorkspacePage({
   async function handleFileAccepted(file: File) {
     const uploadDemoError = buildDemoModeUploadError(file.name, demoRuntime)
     if (uploadDemoError) {
-      setDemoUploadError(uploadDemoError)
+      dispatch({ type: 'demo-upload-rejected', message: uploadDemoError })
       return
     }
-    if (demoUploadError !== null) setDemoUploadError(null)
     sourceIfcBytesRef.current = null
     nextRiserLabelRef.current = 1
     // Sync the ref alongside the state update so openStorey sees the cleared
     // count when it runs synchronously after this transition is queued.
     risersRef.current = []
-    setIsParsingStoreys(true)
-    setModelFileName(file.name)
-    setUploadError(null)
+    dispatch({ type: 'upload-started', fileName: file.name })
     startTransition(() => {
-      setStoreys([])
-      setSelectedStoreyId(null)
-      setFloorMeshes(null)
-      setGeometryError(null)
-      setHoveredExpressId(null)
-      setSelectedExpressId(null)
-      setFixtures([])
-      setKitchens([])
-      setRisers([])
-      setIsAddingRiser(false)
-      setActiveTab('fixtures')
-      setDownloadError(null)
-      setDemoAssetError(null)
-      setViewMode('2d')
-      setBranchRoutesVisibleByStorey(new Map())
-      setWebIfcModelId(null)
+      dispatch({ type: 'upload-reset' })
     })
 
     try {
@@ -213,12 +175,12 @@ export function WorkspacePage({
       sourceIfcBytesRef.current = data.slice()
       const newModelId = api.OpenModel(data)
       webIfcModelIdRef.current = newModelId
-      setWebIfcModelId(newModelId)
+      dispatch({ type: 'model-opened', webIfcModelId: newModelId })
 
       const domainModelId = crypto.randomUUID()
       const parsed = await parseStoreys(api, newModelId, domainModelId)
       startTransition(() => {
-        setStoreys(parsed)
+        dispatch({ type: 'storeys-parsed', storeys: parsed })
       })
       preloadFloorInspectionModules()
       const defaultStoreyId = findDefaultStoreyId(parsed)
@@ -226,11 +188,12 @@ export function WorkspacePage({
         void openStorey(defaultStoreyId)
       }
     } catch (err) {
-      setUploadError(
-        err instanceof Error ? err.message : 'Failed to parse IFC file.',
-      )
+      dispatch({
+        type: 'upload-failed',
+        message: err instanceof Error ? err.message : 'Failed to parse IFC file.',
+      })
     } finally {
-      setIsParsingStoreys(false)
+      dispatch({ type: 'upload-parsing-finished' })
     }
   }
 
@@ -239,20 +202,8 @@ export function WorkspacePage({
     if (modelId === null) return
 
     // Keep the "opening floor" feedback urgent so the loader paints before IFC work begins.
-    setSelectedStoreyId(id)
-    setFloorMeshes(null)
-    setGeometryError(null)
-    setIsExtractingGeometry(true)
-    setHoveredExpressId(null)
-    setSelectedExpressId(null)
-    setFixtures([])
-    setKitchens([])
-    setIsDetectingFixtures(true)
     // Risers are NOT cleared — they span all floors and persist across selection.
-    setIsAddingRiser(false)
-    setActiveTab(risersRef.current.length > 0 ? 'risers' : 'fixtures')
-    setDownloadError(null)
-    setDemoAssetError(null)
+    dispatch({ type: 'floor-opened', storeyId: id, hasRisers: risersRef.current.length > 0 })
 
     await waitForNextPaint()
 
@@ -264,8 +215,7 @@ export function WorkspacePage({
 
       const meshes = await extractFloorMeshes(api, modelId, id)
       startTransition(() => {
-        setFloorMeshes(meshes)
-        setIsExtractingGeometry(false)
+        dispatch({ type: 'floor-geometry-loaded', floorMeshes: meshes })
       })
 
       try {
@@ -280,26 +230,24 @@ export function WorkspacePage({
           detectedKitchens.status === 'fulfilled' ? detectedKitchens.value : []
 
         startTransition(() => {
-          setFixtures(fixturesResult)
-          setKitchens(kitchensResult)
-          // Detection and placement are split into two distinct phases.
-          // Risers are placed only when the user explicitly clicks Suggest.
-          if (risersRef.current.length === 0) {
-            setActiveTab('fixtures')
-          }
+          dispatch({
+            type: 'floor-fixtures-detected',
+            fixtures: fixturesResult,
+            kitchens: kitchensResult,
+            hasRisers: risersRef.current.length > 0,
+          })
         })
       } catch {
         // Detection failure is non-fatal — floor plan stays visible, fixtures stay empty.
       } finally {
-        startTransition(() => setIsDetectingFixtures(false))
+        startTransition(() => dispatch({ type: 'fixture-detection-finished' }))
       }
     } catch (err) {
       startTransition(() => {
-        setGeometryError(
-          err instanceof Error ? err.message : 'Failed to extract floor geometry.',
-        )
-        setIsExtractingGeometry(false)
-        setIsDetectingFixtures(false)
+        dispatch({
+          type: 'floor-open-failed',
+          message: err instanceof Error ? err.message : 'Failed to extract floor geometry.',
+        })
       })
     }
   }
@@ -308,49 +256,52 @@ export function WorkspacePage({
     await openStorey(id)
   }
 
+  // Stable callback identities: these replace setState functions that were
+  // previously passed straight as props (FloorViewer re-runs effects when
+  // onObjectHover/onObjectSelect change identity), so they must not churn.
+  const handleObjectHover = useCallback((expressId: number | null) => {
+    dispatch({ type: 'object-hovered', expressId })
+  }, [])
+
+  const handleObjectSelect = useCallback((expressId: number | null) => {
+    dispatch({ type: 'object-selected', expressId })
+  }, [])
+
+  const handleTabChange = useCallback((tab: SidebarTab) => {
+    dispatch({ type: 'active-tab-set', tab })
+  }, [])
+
   // --- riser handlers ---
 
   function handleAddRiser(pos: { x: number; y: number; z: number }) {
     if (!selectedStoreyId) return
     startTransition(() =>
-      setRisers((prev) => [
-        ...prev,
-        ...buildRiserStack(storeys, selectedStoreyId, pos, takeNextRiserLabel(nextRiserLabelRef), 'manual'),
-      ]),
+      dispatch({
+        type: 'riser-stack-added',
+        stackRisers: buildRiserStack(storeys, selectedStoreyId, pos, takeNextRiserLabel(nextRiserLabelRef), 'manual'),
+      }),
     )
   }
 
   function handleRemoveRiser(id: RiserId) {
     // Deleting a riser removes the whole vertical stack across all floors immediately.
-    setRisers((prev) => removeRiserStack(prev, id))
+    dispatch({ type: 'riser-removed', riserId: id })
   }
 
   function handleMoveRiser(id: RiserId, pos: { x: number; y: number; z: number }) {
     // Propagate X/Z to every floor in the same stack; preserve each floor's Y.
-    setRisers((prev) => {
-      const movedRiser = prev.find((r) => r.id === id)
-      if (!movedRiser) return prev
-      return prev.map((r) =>
-        r.stackId === movedRiser.stackId
-          ? { ...r, position: { x: pos.x, y: r.position.y, z: pos.z } }
-          : r,
-      )
-    })
+    dispatch({ type: 'riser-moved', riserId: id, position: pos })
   }
 
   function handleToggleAddRiser() {
     startTransition(() => {
-      setIsAddingRiser((v) => !v)
+      dispatch({ type: 'add-riser-toggled' })
     })
   }
 
   function handleToggleBranchRoutes() {
     if (selectedStoreyId === null) return
-    setBranchRoutesVisibleByStorey((prev) => {
-      const next = new Map(prev)
-      next.set(selectedStoreyId, !(prev.get(selectedStoreyId) ?? true))
-      return next
-    })
+    dispatch({ type: 'branch-routes-toggled', storeyId: selectedStoreyId })
   }
 
   function handleSuggestRisers() {
@@ -363,14 +314,15 @@ export function WorkspacePage({
       const excludedFixtureCount = fixtures.filter((fixture) => !scopedStoreyIds.has(fixture.storeyId)).length
       const excludedKitchenCount = kitchens.filter((kitchen) => !scopedStoreyIds.has(kitchen.storeyId)).length
       if (excludedFixtureCount > 0 || excludedKitchenCount > 0) {
-        setDemoAssetError(
-          `Demo scope excluded ${excludedFixtureCount} fixture(s) and ${excludedKitchenCount} kitchen area(s) outside included floors.`,
-        )
+        dispatch({
+          type: 'demo-asset-error-set',
+          message: `Demo scope excluded ${excludedFixtureCount} fixture(s) and ${excludedKitchenCount} kitchen area(s) outside included floors.`,
+        })
       } else {
-        setDemoAssetError(null)
+        dispatch({ type: 'demo-asset-error-set', message: null })
       }
     } else {
-      setDemoAssetError(null)
+      dispatch({ type: 'demo-asset-error-set', message: null })
     }
 
     const modelId = webIfcModelIdRef.current
@@ -389,8 +341,9 @@ export function WorkspacePage({
     }
     startTransition(() => {
       nextRiserLabelRef.current = 1
-      setRisers(
-        buildSuggestedRisers(
+      dispatch({
+        type: 'risers-suggested',
+        risers: buildSuggestedRisers(
           storeys,
           selectedStoreyId,
           fixtures,
@@ -399,9 +352,7 @@ export function WorkspacePage({
           () => takeNextRiserLabel(nextRiserLabelRef),
           demoRuntime,
         ),
-      )
-      setIsAddingRiser(false)
-      setActiveTab('risers')
+      })
     })
   }
 
@@ -415,8 +366,7 @@ export function WorkspacePage({
       return
     }
 
-    setDownloadMode('full')
-    setDownloadError(null)
+    dispatch({ type: 'download-started' })
 
     try {
       const api = await getIfcApi()
@@ -474,13 +424,12 @@ export function WorkspacePage({
         buildExportDebugFileName(modelFileName, selectedStorey?.name ?? null),
       )
     } catch (err) {
-      setDownloadError(
-        err instanceof Error
-          ? err.message
-          : 'Failed to generate the IFC.',
-      )
+      dispatch({
+        type: 'download-failed',
+        message: err instanceof Error ? err.message : 'Failed to generate the IFC.',
+      })
     } finally {
-      setDownloadMode(null)
+      dispatch({ type: 'download-finished' })
     }
   }
 
@@ -608,7 +557,7 @@ export function WorkspacePage({
 
   function handleSwitch3D() {
     void loadModel3DViewerModule()
-    setViewMode('3d')
+    dispatch({ type: 'view-mode-set', viewMode: '3d' })
   }
 
   const centerPanel = viewMode === '3d' && webIfcModelId !== null ? (
@@ -618,7 +567,7 @@ export function WorkspacePage({
         storeys={storeys}
         risers={risers}
         theme={theme}
-        onSwitch2D={() => setViewMode('2d')}
+        onSwitch2D={() => dispatch({ type: 'view-mode-set', viewMode: '2d' })}
         branchRouteFloors={branchRouteFloors}
         branchRouteVisibility={branchRoutesVisibleByStorey}
       />
@@ -637,8 +586,8 @@ export function WorkspacePage({
           isLoading={isExtractingGeometry}
           error={geometryError}
           theme={theme}
-          onObjectHover={setHoveredExpressId}
-          onObjectSelect={setSelectedExpressId}
+          onObjectHover={handleObjectHover}
+          onObjectSelect={handleObjectSelect}
           modelFileName={modelFileName}
           selectedStoreyElevation={selectedStorey?.elevation ?? null}
           storeyCount={storeys.length}
@@ -666,7 +615,7 @@ export function WorkspacePage({
   const rightPanel = (
     <Sidebar
       activeTab={activeTab}
-      onTabChange={setActiveTab}
+      onTabChange={handleTabChange}
       selectedStoreyName={selectedStorey?.name ?? null}
       storeyCount={storeys.length}
       hasModel={modelFileName !== null}
