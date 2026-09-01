@@ -12,7 +12,7 @@ Privacy rule for this goal: `external/` and `refs/` hold private client data and
 | W2 — Units single source of truth | ✅ | commits `508e2bb`, `ccb4a61`, `9dffed2`, `7cfe9a5`; core done, 3 call sites deferred behind W1 (details below) |
 | W3 | ⏳ | |
 | W4 | ⏳ | |
-| W5 | 🔄 | continuity map in progress (parallel wave 1) |
+| W5 — Vertical continuity map | ✅ core | commits `a5dddcf`, `308c880`, `1dd1786`; debug overlay wiring deferred to post-W4 (details below) |
 | W6 — T4 export + adjust log | ✅ core | commits `887c3e0`, `17adbab`, `2fbcbb3`; log UI wiring deferred (details below) |
 | W7 | 🔄 | engineer extraction + metrics in progress (parallel wave 1) |
 | Push | ⏳ | |
@@ -56,6 +56,15 @@ Pure refactor, no behavior change intended. Parity baseline (pre-change HEAD): `
 - **Adjust log (pure)**: `src/domain/adjustLog.ts` — discriminated-union entries `{stackId, storey, from, to, action, ts}`, immutable append, deterministic pretty-JSON serialization; 7 unit tests. Reducer/download wiring deferred to the UI-lane wave (integration points documented in the worker report).
 - **Focused tests**: 39/39 across 5 export/log test files; ESLint + `tsc -b` clean on owned files.
 - **Known follow-up**: the same `RelatedObjectsType` IFC4 bug exists in `exportSanitaryRouteElements.ts` (unowned this wave) — fix dispatched as a W6 follow-up.
+
+### W5 — Vertical continuity map ✅ core (2026-09-01, commits `a5dddcf`, `308c880`, `1dd1786`)
+
+- **`src/domain/continuityMap.ts` (new, pure)**: obstruction grid (cell 250 mm / 0.25 m constant pair; row-major `Uint8Array` per storey) + shaft candidates from slab openings, shaft-named spaces (Hebrew "פיר" incl. bidi/RLM-mark handling, English "shaft"), and vertical voids aligned across ≥3 consecutive storeys (300 mm alignment tolerance). Deterministic ids/ordering; overlay-ready types (`StoreyObstructionGrid`, `ShaftCandidate` with center/bounds/polygon/storeyIds/name).
+- **`src/domain/continuityFootprints.ts` (new)**: vertex→plan-bbox math with local stray world-origin vertex filtering.
+- **Snapping flag**: `suggestRiserPositions` gained opt-in `continuitySnap` (+ `MAX_SNAP_MM/M` = 1500/1.5): snap to nearest free cell, prefer shaft candidates, explicit `snapMiss` reason beyond MAX_SNAP. Flag-off path is the untouched original code; a test pins `JSON.stringify` equality, and all 12 pre-existing suggest tests pass unmodified.
+- **`src/shared/ifc/extractContinuityInputs.ts` (new adapter)** + gated 096-A test which ran against the real file: 13 storeys, 443 IfcSpaces, 25 shaft-named spaces found (parse ~0.6 s; full geometry tessellation deliberately excluded from the test — minutes-level — left for the coordinator's live overlay check).
+- **Focused tests**: 63/63 across 4 files; ESLint + `tsc -b` clean.
+- **Deferred**: 2D debug overlay + flag-on wiring in the app (post-W4 phase per coordination plan). Caller note: 096 is cm — pass explicit cell/tolerance/maxSnap overrides (or convert via the W2 unit modules); `LengthUnit` in the continuity module is mm/m only.
 
 ---
 
