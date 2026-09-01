@@ -10,7 +10,7 @@ Privacy rule for this goal: `external/` and `refs/` hold private client data and
 | W0b — WorkspacePage state extraction (typed reducer) | ✅ | commits `0430fa7`, `ffe3af9` + this entry; details below |
 | W1 — Coordinate normalization (local render frame) | ✅ | commits `b4e26d5`, `1513ae7`, `298af8d`, `fa62536`; live 096 browser check pending (details below) |
 | W2 — Units single source of truth | ✅ | commits `508e2bb`, `ccb4a61`, `9dffed2`, `7cfe9a5` + wiring `8f538ed`; fully wired, live-verified on 096-P (details below) |
-| W3 | ⏳ | |
+| W3 — Floor auto-select by geometry | ✅ | commits `9b26b77`, `39de514`, `01eca39`, `bad90de`; opens "08" on 096-P (deviation explained below), never R2 |
 | W4 | ⏳ | |
 | W5 — Vertical continuity map | ✅ core | commits `a5dddcf`, `308c880`, `1dd1786`; debug overlay wiring deferred to post-W4 (details below) |
 | W6 — T4 export + adjust log | ✅ core | commits `887c3e0`, `17adbab`, `2fbcbb3`; log UI wiring deferred (details below) |
@@ -94,6 +94,16 @@ Pure refactor, no behavior change intended. Parity baseline (pre-change HEAD): `
 - **First full gate over the combined 5-task tree**: `pnpm lint` 0 errors (1 known warning) · `pnpm test` **487/487** (51 files) · `pnpm build` green · react-doctor only the known pre-existing Model3DViewer error.
 - **Live smoke (Playwright, plain dev)**: Duplex chips "6.00 m / 3.10 m / 0.00 m"; full loop on real 096-P — 44 storey chips correct incl. **"30.15 m"** for storey 01 (the original cm-as-mm regression, fixed), suggest placed 11 risers (matches the 11-toilet baseline), dragged R9 ~10 m, export produced 3 downloads incl. `096-P.adjustments.json` with exactly 1 move entry at source coordinates consistent with the panel. Client files purged from the automation cache afterwards.
 - **Pre-existing findings (not caused by the wave)**: (1) Duplex_MEP cannot export — `resolveBodyContext` requires a `'Body'`-labeled representation context and Duplex only has null-identifier contexts; visible error, honest failure; fix needs a validated exporter change — follow-up queued. (2) One more hardcoded elevation label in `FloorViewer.tsx` status bar — being fixed in W3. (3) Duplex "Level 2" is classified penthouse by the placement heuristic, so auto risers land on Level 1 — by-design, noted.
+
+### W3 — Floor auto-select by geometry ✅ (2026-09-01, commits `01eca39`, `bad90de` + W2 side commits `9b26b77`, `39de514`)
+
+- **`src/domain/chooseInitialStorey.ts` (new, pure)**: fingerprint = sorted non-zero per-kind counts (`KIND:count|…`); exact-equality grouping (deliberately conservative); six candidate tiers (regular toilet-bearing → technical toilet-bearing → regular fixture-bearing → … → everything), largest group wins, lowest member (elevation, then id) chosen; technical filter `^R\d+$`/"roof"/Hebrew "גג" (Hebrew "קומה N" never matches); deterministic ties; returns a human-readable reason.
+- **`src/shared/ifc/scanStoreyFixtures.ts` (new)**: geometry-free per-storey fixture classification (classifier extracted from `detectFixtures` into a reusable pure function; batched spatial-tree walk). Measured overhead at model open on 096-P: **9–10 ms** (Duplex 7 ms) — no full-floor meshes generated.
+- **Wired in plain mode only**; demo mode keeps its legacy name-based selection (asserted in tests, never invokes the chooser). Chooser reason surfaced in Decisions/debug JSON.
+- **W2 side fix**: FloorViewer status-bar elevation chip now unit-correct via `formatStoreyElevation` (standalone module for react-refresh lint).
+- **Full gate**: lint 0 errors · **505/505** tests (54 files, gated 096 test ran) · build green · react-doctor only the known pre-existing error.
+- **Live (Playwright)**: 096-P auto-opens **"08"**, never R2, chip "52.55 m"; Duplex auto-opens **Level 1** (intended change from Level 2), demo config still opens Level 2 via legacy heuristic (stand-in asset).
+- **Deviation, honest**: the brief predicted "01 (or 09/10)" but real 096-P has modeled sanitary fixtures only on Sea Level/01/08/37/38; the largest exact-fingerprint toilet group is 2 storeys sharing `TOILETPAN:3`, lowest = 08. Storey 01 (11 toilets) is a singleton fingerprint, so the "largest similar group" rule correctly passes it over. The critical invariant (never roof/technical R2) holds. If product prefers "lowest toilet-bearing storey", it's a one-tier change.
 
 ---
 
