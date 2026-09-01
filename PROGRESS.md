@@ -11,7 +11,7 @@ Privacy rule for this goal: `external/` and `refs/` hold private client data and
 | W1 — Coordinate normalization (local render frame) | ✅ | commits `b4e26d5`, `1513ae7`, `298af8d`, `fa62536`; live 096 browser check pending (details below) |
 | W2 — Units single source of truth | ✅ | commits `508e2bb`, `ccb4a61`, `9dffed2`, `7cfe9a5` + wiring `8f538ed`; fully wired, live-verified on 096-P (details below) |
 | W3 — Floor auto-select by geometry | ✅ | commits `9b26b77`, `39de514`, `01eca39`, `bad90de`; opens "08" on 096-P (deviation explained below), never R2 |
-| W4 | ⏳ | |
+| W4 — Multi-IFC ingest + storey mapping | ✅ | commits `4fca5d2`, `d4998d5`, `3604831`, `d3449fe`, `8cecf7d`; live-verified on full 096-A+096-P (details below) |
 | W5 — Vertical continuity map | ✅ core | commits `a5dddcf`, `308c880`, `1dd1786`; debug overlay wiring deferred to post-W4 (details below) |
 | W6 — T4 export + adjust log | ✅ core | commits `887c3e0`, `17adbab`, `2fbcbb3`; log UI wiring deferred (details below) |
 | W7 — Engineer baseline extraction + metrics | ✅ core | commits `0b0e096`, `d177c28`, `1668b7a`, `ad71263`; overlay + metrics display deferred to post-W4 (details below) |
@@ -104,6 +104,18 @@ Pure refactor, no behavior change intended. Parity baseline (pre-change HEAD): `
 - **Full gate**: lint 0 errors · **505/505** tests (54 files, gated 096 test ran) · build green · react-doctor only the known pre-existing error.
 - **Live (Playwright)**: 096-P auto-opens **"08"**, never R2, chip "52.55 m"; Duplex auto-opens **Level 1** (intended change from Level 2), demo config still opens Level 2 via legacy heuristic (stand-in asset).
 - **Deviation, honest**: the brief predicted "01 (or 09/10)" but real 096-P has modeled sanitary fixtures only on Sea Level/01/08/37/38; the largest exact-fingerprint toilet group is 2 storeys sharing `TOILETPAN:3`, lowest = 08. Storey 01 (11 toilets) is a singleton fingerprint, so the "largest similar group" rule correctly passes it over. The critical invariant (never roof/technical R2) holds. If product prefers "lowest toilet-bearing storey", it's a one-tier change.
+
+### W4 — Multi-IFC ingest ✅ (2026-09-01, commits `4fca5d2`, `d4998d5`, `3604831`, `d3449fe`, `8cecf7d`)
+
+- **Upload**: multiple `.ifc` in one flow — first file is host, rest linked (rule stated in the upload hint); single-file flow byte-identical; demo mode untouched.
+- **`src/domain/alignStoreys.ts` (pure)**: absolute-elevation alignment (raw elevation + world-resolved IfcBuilding placement Z, per-file unit conversion) with 150 mm tolerance, greedy smallest-delta matching, deterministic ties, 0.1 mm comparison resolution; shared-origin XY check (500 mm) with explicit mismatch warning; missing unit/placement blocks alignment visibly, never guesses.
+- **`src/domain/mergeFixturesAcrossFiles.ts` (pure)**: cross-file dedupe at 120 mm plan distance, same kind only, host instance kept, every drop recorded (kept/dropped IDs + distance); kitchens concatenated from all files; linked express IDs strided by 1e9 to avoid collisions.
+- **Underlay**: `extractStoreyUnderlayMeshes` renders the architecture file's walls/columns as a faint non-interactive layer on aligned storeys, sharing the host's W1 local frame; storey-scoped tessellation only.
+- **Decisions/debug**: mapping table (pairs + absolute elevations), unmapped lists both sides, origin status, per-file merge accounting.
+- **Actual 096 mapping (P host ↔ A linked)**: Sea Level↔SL (0.00 m), B1↔B1 (17.00 m), R2↔B1M (20.00 m), **GF↔00 (23.65 m)**, 01↔01 (30.15 m) — all Δ 0 mm, origin 0 mm apart; 39/8 unmapped listed. Podium GF: 11 merged fixtures (5 toilets + 6 basins, all from A), zero double counting; gated test also exercises dedupe on real coordinates (A"00" vs itself → 11 dropped at 0 mm).
+- **No trimmed copy needed** (full 096-A opens ~0.3 s; gated test 1.3 s) — `tools/trim-ifc-storeys.mjs` not written.
+- **Full gate**: lint 0 errors · **537/537** (59 files, gated test on real files) · build green · react-doctor only known pre-existing error. **Live (Playwright)**: 096-P+096-A → mapping table + underlay on GF with 11 fixtures verified; Duplex single-file unchanged; caches cleaned.
+- **Known limits**: host order is user-controlled (plumbing-host heuristic is a possible later improvement); kitchens never deduped (no IfcSpace kitchens in 096); origin check ignores site-rotation differences (096 shares one rotation).
 
 ---
 
