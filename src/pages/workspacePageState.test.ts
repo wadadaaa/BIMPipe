@@ -368,3 +368,50 @@ describe('workspacePageReducer branch routes and misc', () => {
     expect(workspacePageReducer(base, move)).toEqual(workspacePageReducer(base, move))
   })
 })
+
+describe('workspacePageReducer model origin (W1 local frame)', () => {
+  const farDecision = {
+    origin: { x: 181_441, y: 0, z: -664_624 },
+    detectedBy: 'site-placement',
+  } as const
+
+  it('model-origin-resolved stores the decision once per model', () => {
+    const base = makeLoadedState()
+    expect(base.modelOrigin).toBeNull()
+
+    const resolved = workspacePageReducer(base, { type: 'model-origin-resolved', decision: farDecision })
+    expect(resolved.modelOrigin).toEqual(farDecision)
+  })
+
+  it('ignores a second resolution so the frame can never drift mid-session', () => {
+    const resolved = workspacePageReducer(makeLoadedState(), {
+      type: 'model-origin-resolved',
+      decision: farDecision,
+    })
+    const repeat = workspacePageReducer(resolved, {
+      type: 'model-origin-resolved',
+      decision: { origin: { x: 1, y: 0, z: 1 }, detectedBy: 'storey-geometry' },
+    })
+
+    expect(repeat).toBe(resolved)
+    expect(repeat.modelOrigin).toEqual(farDecision)
+  })
+
+  it('upload-reset clears the origin so the next model resolves its own frame', () => {
+    const resolved = workspacePageReducer(makeLoadedState(), {
+      type: 'model-origin-resolved',
+      decision: farDecision,
+    })
+    const reset = workspacePageReducer(resolved, { type: 'upload-reset' })
+    expect(reset.modelOrigin).toBeNull()
+  })
+
+  it('floor-opened keeps the origin: it is per model, not per floor', () => {
+    const resolved = workspacePageReducer(makeLoadedState(), {
+      type: 'model-origin-resolved',
+      decision: farDecision,
+    })
+    const nextFloor = workspacePageReducer(resolved, { type: 'floor-opened', storeyId: 3, hasRisers: true })
+    expect(nextFloor.modelOrigin).toEqual(farDecision)
+  })
+})

@@ -10,7 +10,17 @@ import type { ThemeMode } from '@/app/App'
 import { getIfcApi } from '@/shared/ifc/ifcApi'
 import { aggregateStoreyDetections } from '@/shared/ifc/aggregateStoreyDetections'
 import { parseStoreys } from '@/shared/ifc/parseStoreys'
-import type { Riser, RiserId, Storey, StoreyId, SidebarTab } from '@/domain/types'
+import type { Fixture, KitchenArea, PlanBounds, Riser, RiserId, Storey, StoreyId, SidebarTab } from '@/domain/types'
+import type { FloorMeshes } from '@/shared/ifc/extractFloorMeshes'
+import type { FloorRoutes, RouteSegment } from '@/domain/branchRouting'
+import type { SanitaryFixtureRoute } from '@/shared/routes/buildSanitaryRoutes'
+import {
+  IDENTITY_MODEL_FRAME,
+  isIdentityModelFrame,
+  toLocalPoint,
+  toSourcePoint,
+  type ModelFrame,
+} from '@/shared/frame/modelFrame'
 import { createInitialWorkspacePageState, workspacePageReducer } from './workspacePageState'
 import { buildRiserStack } from '@/shared/routes/buildRiserStacks'
 import { classifyFloors } from '@/shared/routes/floorClassification'
@@ -29,6 +39,7 @@ let floorSelectionModulesPromise: Promise<
     typeof import('@/shared/ifc/extractFloorMeshes'),
     typeof import('@/shared/ifc/detectFixtures'),
     typeof import('@/shared/ifc/detectKitchens'),
+    typeof import('@/shared/ifc/resolveModelOrigin'),
   ]
 > | null = null
 
@@ -47,6 +58,7 @@ function loadFloorSelectionModules() {
     import('@/shared/ifc/extractFloorMeshes'),
     import('@/shared/ifc/detectFixtures'),
     import('@/shared/ifc/detectKitchens'),
+    import('@/shared/ifc/resolveModelOrigin'),
   ])
   return floorSelectionModulesPromise
 }
@@ -101,6 +113,7 @@ export function WorkspacePage({
     floorMeshes,
     isExtractingGeometry,
     geometryError,
+    modelOrigin,
     hoveredExpressId,
     selectedExpressId,
     fixtures,
@@ -122,6 +135,17 @@ export function WorkspacePage({
   const sourceIfcBytesRef = useRef<Uint8Array | null>(null)
   const nextRiserLabelRef = useRef(1)
   const detectionDebugRef = useRef<Awaited<ReturnType<typeof aggregateStoreyDetections>> | null>(null)
+  // Local-frame origin for rendering, mirrored from state so the async openStorey
+  // flow can read the resolved frame across awaits. null = not resolved yet for
+  // the current model (resolution happens on the first storey with geometry).
+  const modelFrameRef = useRef<ModelFrame | null>(null)
+
+  // Rendering frame derived from the reducer state. Identity for near-origin
+  // models, so localization below is a no-op that preserves array identities.
+  const modelFrame = useMemo<ModelFrame>(
+    () => (modelOrigin ? { origin: modelOrigin.origin } : IDENTITY_MODEL_FRAME),
+    [modelOrigin],
+  )
 
   // ---------------------------------------------------------------------------
 
@@ -152,9 +176,10 @@ export function WorkspacePage({
     }
     sourceIfcBytesRef.current = null
     nextRiserLabelRef.current = 1
-    // Sync the ref alongside the state update so openStorey sees the cleared
-    // count when it runs synchronously after this transition is queued.
+    // Sync the refs alongside the state update so openStorey sees the cleared
+    // count and unresolved frame when it runs after this transition is queued.
     risersRef.current = []
+    modelFrameRef.current = null
     dispatch({ type: 'upload-started', fileName: file.name })
     startTransition(() => {
       dispatch({ type: 'upload-reset' })
@@ -208,12 +233,35 @@ export function WorkspacePage({
     await waitForNextPaint()
 
     try {
-      const [[{ extractFloorMeshes }, { detectFixtures }, { detectKitchens }], api] = await Promise.all([
+      const [
+        [{ extractFloorMeshes }, { detectFixtures }, { detectKitchens }, { resolveModelOriginDecision }],
+        api,
+      ] = await Promise.all([
         loadFloorSelectionModules(),
         getIfcApi(),
       ])
 
-      const meshes = await extractFloorMeshes(api, modelId, id)
+      const knownFrame = modelFrameRef.current
+      let meshes =
+        knownFrame !== null && !isIdentityModelFrame(knownFrame)
+          ? await extractFloorMeshes(api, modelId, id, knownFrame)
+          : await extractFloorMeshes(api, modelId, id)
+
+      if (knownFrame === null) {
+        // First storey with geometry decides the model origin (once per model).
+        // Null decision = no usable bounds on this floor; retry on the next one.
+        const decision = await resolveModelOriginDecision(api, modelId, readSourcePlanBounds(meshes))
+        if (decision !== null) {
+          const frame: ModelFrame = { origin: decision.origin }
+          modelFrameRef.current = frame
+          dispatch({ type: 'model-origin-resolved', decision })
+          if (!isIdentityModelFrame(frame)) {
+            // Re-extract so the Float32 geometry is baked in the local frame.
+            meshes = await extractFloorMeshes(api, modelId, id, frame)
+          }
+        }
+      }
+
       startTransition(() => {
         dispatch({ type: 'floor-geometry-loaded', floorMeshes: meshes })
       })
@@ -272,9 +320,13 @@ export function WorkspacePage({
   }, [])
 
   // --- riser handlers ---
+  // The viewer works in the local frame, so click/drag positions arrive local
+  // and are converted back to source coordinates (local + origin) before they
+  // touch domain state. Export therefore keeps writing source coordinates.
 
-  function handleAddRiser(pos: { x: number; y: number; z: number }) {
+  function handleAddRiser(localPos: { x: number; y: number; z: number }) {
     if (!selectedStoreyId) return
+    const pos = toSourcePoint(modelFrame, localPos)
     startTransition(() =>
       dispatch({
         type: 'riser-stack-added',
@@ -288,9 +340,9 @@ export function WorkspacePage({
     dispatch({ type: 'riser-removed', riserId: id })
   }
 
-  function handleMoveRiser(id: RiserId, pos: { x: number; y: number; z: number }) {
+  function handleMoveRiser(id: RiserId, localPos: { x: number; y: number; z: number }) {
     // Propagate X/Z to every floor in the same stack; preserve each floor's Y.
-    dispatch({ type: 'riser-moved', riserId: id, position: pos })
+    dispatch({ type: 'riser-moved', riserId: id, position: toSourcePoint(modelFrame, localPos) })
   }
 
   function handleToggleAddRiser() {
@@ -348,7 +400,9 @@ export function WorkspacePage({
           selectedStoreyId,
           fixtures,
           kitchens,
-          floorMeshes,
+          // Suggestion mixes plan bounds with source-frame fixture positions,
+          // so it must see the source-frame bounding box, not the local one.
+          floorMeshes ? { ...floorMeshes, boundingBox: pickSourceBoundingBox(floorMeshes) } : null,
           () => takeNextRiserLabel(nextRiserLabelRef),
           demoRuntime,
         ),
@@ -378,14 +432,7 @@ export function WorkspacePage({
         sourceIfcBytesRef.current,
         selectedStoreyId,
         risers,
-        floorMeshes
-          ? {
-              minX: floorMeshes.boundingBox.min.x,
-              maxX: floorMeshes.boundingBox.max.x,
-              minZ: floorMeshes.boundingBox.min.z,
-              maxZ: floorMeshes.boundingBox.max.z,
-            }
-          : null,
+        floorMeshes ? readSourcePlanBounds(floorMeshes) : null,
         {
           exportRunId,
           timestamp,
@@ -479,22 +526,48 @@ export function WorkspacePage({
   const shouldLoadViewer =
     isExtractingGeometry || geometryError !== null || floorMeshes !== null
 
-  // Risers for the currently-viewed floor only (viewer + panel display).
+  // Risers for the currently-viewed floor only (panel display, source frame).
   // The full `risers` array spans all floors and is used for export.
   const currentFloorRisers =
     selectedStoreyId !== null
       ? risers.filter((r) => r.storeyId === selectedStoreyId)
       : []
-  const viewerFixtures = isExtractingGeometry ? [] : fixtures
-  const viewerKitchens = isExtractingGeometry ? [] : kitchens
-  const viewerRisers = isExtractingGeometry ? [] : currentFloorRisers
+  const sidebarRisers = isExtractingGeometry ? [] : currentFloorRisers
 
-  // Branch route segments for the currently-viewed floor only (2D overlay).
-  const selectedFloorBranchSegments =
-    selectedStoreyId !== null
-      ? (branchRouteFloors.find((floor) => floor.storeyId === selectedStoreyId)?.segments ?? [])
-      : []
-  const viewerBranchRouteSegments = isExtractingGeometry ? [] : selectedFloorBranchSegments
+  // --- viewer boundary: convert to the local rendering frame ---
+  // Everything the viewers consume gets the model origin subtracted; domain
+  // state stays in source coordinates. With the identity frame these helpers
+  // return the original references, so near-origin models are untouched.
+  const localViewerFixtures = useMemo(
+    () => (isExtractingGeometry ? [] : localizeFixtures(fixtures, modelFrame)),
+    [isExtractingGeometry, fixtures, modelFrame],
+  )
+  const localViewerKitchens = useMemo(
+    () => (isExtractingGeometry ? [] : localizeKitchens(kitchens, modelFrame)),
+    [isExtractingGeometry, kitchens, modelFrame],
+  )
+  const localViewerRisers = useMemo(() => {
+    if (isExtractingGeometry || selectedStoreyId === null) return []
+    return localizeRisers(
+      risers.filter((riser) => riser.storeyId === selectedStoreyId),
+      modelFrame,
+    )
+  }, [isExtractingGeometry, risers, selectedStoreyId, modelFrame])
+  const localAllRisers = useMemo(() => localizeRisers(risers, modelFrame), [risers, modelFrame])
+  const localSanitaryRoutes = useMemo(
+    () => localizeSanitaryRoutes(sanitaryRoutingPreview.routes, modelFrame),
+    [sanitaryRoutingPreview.routes, modelFrame],
+  )
+  const localViewerBranchRouteSegments = useMemo(() => {
+    if (isExtractingGeometry || selectedStoreyId === null) return []
+    const segments =
+      branchRouteFloors.find((floor) => floor.storeyId === selectedStoreyId)?.segments ?? []
+    return localizeBranchSegments(segments, modelFrame)
+  }, [isExtractingGeometry, branchRouteFloors, selectedStoreyId, modelFrame])
+  const localBranchRouteFloors = useMemo(
+    () => localizeBranchRouteFloors(branchRouteFloors, modelFrame),
+    [branchRouteFloors, modelFrame],
+  )
   const branchRoutesVisibleOnSelectedFloor =
     selectedStoreyId === null || (branchRoutesVisibleByStorey.get(selectedStoreyId) ?? true)
 
@@ -565,11 +638,12 @@ export function WorkspacePage({
       <Model3DViewer
         webIfcModelId={webIfcModelId}
         storeys={storeys}
-        risers={risers}
+        risers={localAllRisers}
         theme={theme}
         onSwitch2D={() => dispatch({ type: 'view-mode-set', viewMode: '2d' })}
-        branchRouteFloors={branchRouteFloors}
+        branchRouteFloors={localBranchRouteFloors}
         branchRouteVisibility={branchRoutesVisibleByStorey}
+        modelFrame={modelFrame}
       />
     </Suspense>
   ) : shouldLoadViewer ? (
@@ -593,16 +667,16 @@ export function WorkspacePage({
           storeyCount={storeys.length}
           hoveredExpressId={hoveredExpressId}
           selectedExpressId={selectedExpressId}
-          fixtures={viewerFixtures}
-          kitchens={viewerKitchens}
-          risers={viewerRisers}
+          fixtures={localViewerFixtures}
+          kitchens={localViewerKitchens}
+          risers={localViewerRisers}
           isAddingRiser={isAddingRiser}
           onRiserAdd={handleAddRiser}
           onRiserMove={handleMoveRiser}
           onSwitch3D={storeys.length > 0 ? handleSwitch3D : undefined}
-          sanitaryRoutes={sanitaryRoutingPreview.routes}
+          sanitaryRoutes={localSanitaryRoutes}
           demoFlowEnabled={demoRuntime.enabled}
-          branchRouteSegments={viewerBranchRouteSegments}
+          branchRouteSegments={localViewerBranchRouteSegments}
           branchRoutesVisible={branchRoutesVisibleOnSelectedFloor}
           onToggleBranchRoutes={handleToggleBranchRoutes}
         />
@@ -623,7 +697,7 @@ export function WorkspacePage({
       kitchens={kitchens}
       fixtureAssignments={fixtureAssignments}
       isDetectingFixtures={isDetectingFixtures}
-      risers={viewerRisers}
+      risers={sidebarRisers}
       isAddingRiser={isAddingRiser}
       onToggleAddRiser={handleToggleAddRiser}
       onSuggestRisers={handleSuggestRisers}
@@ -801,4 +875,90 @@ function extractSignedNumericTokens(name: string): number[] {
   return (name.match(/[-−]?\s*\d+/g) ?? [])
     .map((token) => Number(token.replace(/\s+/g, '').replace('−', '-')))
     .filter((value) => Number.isFinite(value))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Local-frame helpers (viewer boundary)
+//
+// Domain state is kept in source coordinates; the viewers render in a local
+// frame (source minus model origin). These pure helpers convert viewer-bound
+// props. With the identity frame they return the input reference unchanged,
+// so near-origin models keep referential equality and skip re-renders.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function pickSourceBoundingBox(meshes: FloorMeshes): FloorMeshes['sourceBoundingBox'] {
+  // Fallback covers FloorMeshes stubs (tests) created before sourceBoundingBox
+  // existed; for real extractions both boxes are always present.
+  return meshes.sourceBoundingBox ?? meshes.boundingBox
+}
+
+function readSourcePlanBounds(meshes: FloorMeshes): PlanBounds | null {
+  const box = pickSourceBoundingBox(meshes)
+  const bounds = { minX: box.min.x, maxX: box.max.x, minZ: box.min.z, maxZ: box.max.z }
+  if (![bounds.minX, bounds.maxX, bounds.minZ, bounds.maxZ].every(Number.isFinite)) return null
+  return bounds
+}
+
+function localizeFixtures(fixtures: Fixture[], frame: ModelFrame): Fixture[] {
+  if (isIdentityModelFrame(frame)) return fixtures
+  return fixtures.map((fixture) =>
+    fixture.position === null ? fixture : { ...fixture, position: toLocalPoint(frame, fixture.position) },
+  )
+}
+
+function localizeKitchens(kitchens: KitchenArea[], frame: ModelFrame): KitchenArea[] {
+  if (isIdentityModelFrame(frame)) return kitchens
+  return kitchens.map((kitchen) => ({
+    ...kitchen,
+    position: kitchen.position === null ? null : toLocalPoint(frame, kitchen.position),
+    planBounds: kitchen.planBounds && {
+      minX: kitchen.planBounds.minX - frame.origin.x,
+      maxX: kitchen.planBounds.maxX - frame.origin.x,
+      minZ: kitchen.planBounds.minZ - frame.origin.z,
+      maxZ: kitchen.planBounds.maxZ - frame.origin.z,
+    },
+    planCorners: kitchen.planCorners?.map((corner) => ({
+      x: corner.x - frame.origin.x,
+      z: corner.z - frame.origin.z,
+    })),
+  }))
+}
+
+function localizeRisers(risers: Riser[], frame: ModelFrame): Riser[] {
+  if (isIdentityModelFrame(frame)) return risers
+  return risers.map((riser) => ({ ...riser, position: toLocalPoint(frame, riser.position) }))
+}
+
+function localizeSanitaryRoutes(
+  routes: SanitaryFixtureRoute[],
+  frame: ModelFrame,
+): SanitaryFixtureRoute[] {
+  if (isIdentityModelFrame(frame)) return routes
+  return routes.map((route) => ({
+    ...route,
+    segments: route.segments.map((segment) => ({
+      ...segment,
+      from: toLocalPoint(frame, segment.from),
+      to: toLocalPoint(frame, segment.to),
+    })),
+  }))
+}
+
+function localizeBranchSegments(segments: RouteSegment[], frame: ModelFrame): RouteSegment[] {
+  if (isIdentityModelFrame(frame)) return segments
+  return segments.map((segment) => ({
+    ...segment,
+    // Endpoint elevations are relative to the riser junction on the storey,
+    // so only the plan axes shift between frames.
+    start: { ...segment.start, x: segment.start.x - frame.origin.x, z: segment.start.z - frame.origin.z },
+    end: { ...segment.end, x: segment.end.x - frame.origin.x, z: segment.end.z - frame.origin.z },
+  }))
+}
+
+function localizeBranchRouteFloors(floors: FloorRoutes[], frame: ModelFrame): FloorRoutes[] {
+  if (isIdentityModelFrame(frame)) return floors
+  return floors.map((floor) => ({
+    ...floor,
+    segments: localizeBranchSegments(floor.segments, frame),
+  }))
 }

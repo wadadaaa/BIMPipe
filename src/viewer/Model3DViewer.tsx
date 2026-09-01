@@ -7,6 +7,7 @@ import type { FloorRoutes } from '@/domain/branchRouting'
 import type { Riser, Storey, StoreyId } from '@/domain/types'
 import { getIfcApi } from '@/shared/ifc/ifcApi'
 import { extractFloorMeshes } from '@/shared/ifc/extractFloorMeshes'
+import { IDENTITY_MODEL_FRAME, type ModelFrame } from '@/shared/frame/modelFrame'
 import { buildBranchRouteWorldSegments, type BranchRouteViewSegment } from './branchRoutePresentation'
 import './Model3DViewer.css'
 
@@ -24,6 +25,12 @@ interface Model3DViewerProps {
   branchRouteFloors?: FloorRoutes[]
   /** Per-storey branch route visibility; absent storeys default to visible. */
   branchRouteVisibility?: ReadonlyMap<StoreyId, boolean>
+  /**
+   * Local rendering frame. Geometry is extracted with the frame origin
+   * subtracted, and the riser/branch-route props are expected to arrive
+   * already converted to the same local frame by the caller.
+   */
+  modelFrame?: ModelFrame
 }
 
 // Tints per floor level, cycling through blue-cyan palette
@@ -55,6 +62,7 @@ export function Model3DViewer({
   onSwitch2D,
   branchRouteFloors = EMPTY_BRANCH_ROUTE_FLOORS,
   branchRouteVisibility = EMPTY_BRANCH_ROUTE_VISIBILITY,
+  modelFrame = IDENTITY_MODEL_FRAME,
 }: Model3DViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
@@ -223,6 +231,7 @@ export function Model3DViewer({
             api,
             webIfcModelId,
             sorted[i].id,
+            modelFrame,
           )
           if (cancelled) { disposeGroup(group); return }
 
@@ -274,7 +283,7 @@ export function Model3DViewer({
 
     void load()
     return () => { cancelled = true }
-  }, [webIfcModelId, storeys])
+  }, [webIfcModelId, storeys, modelFrame])
 
   useEffect(() => {
     const scene = sceneRef.current
@@ -377,7 +386,8 @@ function buildWirefloor(
   sourceGroup.traverse((obj) => {
     if (!(obj instanceof THREE.Mesh) || !obj.geometry) return
     const g = obj.geometry.clone()
-    // Bake the mesh's local transform (set by extractFloorMeshes via applyMatrix4)
+    // extractFloorMeshes now bakes placements into the vertex data (identity
+    // mesh transform), but composing keeps this robust to either convention.
     const m = new THREE.Matrix4().compose(obj.position, obj.quaternion, obj.scale)
     g.applyMatrix4(m)
     clones.push(g)

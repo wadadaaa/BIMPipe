@@ -1,5 +1,6 @@
 import type { Fixture, KitchenArea, Riser, RiserId, Storey, StoreyId, SidebarTab } from '@/domain/types'
 import type { FloorMeshes } from '@/shared/ifc/extractFloorMeshes'
+import type { ModelOriginDecision } from '@/shared/frame/modelFrame'
 import { getDemoRuntimeConfig, type DemoRuntimeConfig } from '@/shared/demoConfig'
 import { removeRiserStack } from '@/shared/routes/buildRiserStacks'
 
@@ -26,6 +27,13 @@ export interface WorkspacePageState {
   floorMeshes: FloorMeshes | null
   isExtractingGeometry: boolean
   geometryError: string | null
+
+  // --- model frame ---
+  // Origin for local-frame rendering (viewer metres, Y-up), resolved once per
+  // model from the first storey with usable geometry. null = not resolved yet.
+  // Domain state (fixtures, risers, routes) always stays in SOURCE coordinates;
+  // only the props handed to the viewers are converted through this origin.
+  modelOrigin: ModelOriginDecision | null
 
   // --- viewer interaction ---
   hoveredExpressId: number | null
@@ -71,6 +79,7 @@ export const initialWorkspacePageState: WorkspacePageState = {
   floorMeshes: null,
   isExtractingGeometry: false,
   geometryError: null,
+  modelOrigin: null,
   hoveredExpressId: null,
   selectedExpressId: null,
   fixtures: [],
@@ -118,6 +127,9 @@ export type WorkspacePageAction =
   // `hasRisers` is sampled from the live riser ref at dispatch time because the
   // async openStorey flow reads it across awaits (see WorkspacePage).
   | { type: 'floor-opened'; storeyId: StoreyId; hasRisers: boolean }
+  // Resolved once per model from the first storey with usable geometry; the
+  // reducer ignores repeats so the origin can never drift mid-session.
+  | { type: 'model-origin-resolved'; decision: ModelOriginDecision }
   | { type: 'floor-geometry-loaded'; floorMeshes: FloorMeshes }
   | { type: 'floor-fixtures-detected'; fixtures: Fixture[]; kitchens: KitchenArea[]; hasRisers: boolean }
   | { type: 'fixture-detection-finished' }
@@ -189,6 +201,7 @@ function reduce(state: WorkspacePageState, action: WorkspacePageAction): Workspa
         viewMode: '2d',
         branchRoutesVisibleByStorey: new Map(),
         webIfcModelId: null,
+        modelOrigin: null,
       }
 
     case 'model-opened':
@@ -221,6 +234,12 @@ function reduce(state: WorkspacePageState, action: WorkspacePageAction): Workspa
         downloadError: null,
         demoAssetError: null,
       }
+
+    case 'model-origin-resolved':
+      // Computed once per model: a second resolution (e.g. re-opening a floor)
+      // must never move the frame under existing localized state.
+      if (state.modelOrigin !== null) return state
+      return { ...state, modelOrigin: action.decision }
 
     case 'floor-geometry-loaded':
       return { ...state, floorMeshes: action.floorMeshes, isExtractingGeometry: false }
