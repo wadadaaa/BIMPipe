@@ -8,13 +8,13 @@ Privacy rule for this goal: `external/` and `refs/` hold private client data and
 | --- | --- | --- |
 | W0 — Hygiene (gitignore, bim11 evidence, gate) | ✅ | commit `b06e3f2` + this entry; details below |
 | W0b — WorkspacePage state extraction (typed reducer) | ✅ | commits `0430fa7`, `ffe3af9` + this entry; details below |
-| W1 | ⏳ | |
-| W2 | ⏳ | |
+| W1 | 🔄 | coordinate normalization in progress (parallel wave 1) |
+| W2 — Units single source of truth | ✅ | commits `508e2bb`, `ccb4a61`, `9dffed2`, `7cfe9a5`; core done, 3 call sites deferred behind W1 (details below) |
 | W3 | ⏳ | |
 | W4 | ⏳ | |
-| W5 | ⏳ | |
-| W6 | ⏳ | |
-| W7 | ⏳ | |
+| W5 | 🔄 | continuity map in progress (parallel wave 1) |
+| W6 | 🔄 | export extensions + adjust log in progress (parallel wave 1) |
+| W7 | 🔄 | engineer extraction + metrics in progress (parallel wave 1) |
 | Push | ⏳ | |
 
 ## Goal 2 milestones
@@ -37,6 +37,15 @@ Pure refactor, no behavior change intended. Parity baseline (pre-change HEAD): `
 - **Parity details**: the reducer shallow-compares and returns the previous state object for value-identical updates, reproducing `useState`'s bail-out (matters for hover events and the suggest flow's `demoAssetError: null` re-set); `upload-reset` clears exactly the 16 slices the old transition cleared (incl. per-storey branch-route visibility map and all risers) while preserving in-flight flags, `downloadMode`, and the demo runtime; riser `source` (`manual` vs `placed`) is never rewritten by the reducer, keeping manual-placement semantics untouched; suggest still replaces the full riser set (existing behavior, unchanged).
 - **Tests**: 22 new pure reducer tests in `src/pages/workspacePageState.test.ts` (upload reset clear/preserve split, floor-open keeping risers, stack add/remove/move incl. unknown-id bail-outs, per-storey toggle defaults, download lifecycle, bail-out identity, determinism). Zero existing assertions changed.
 - **Full gate (2026-09-01 14:01)**: `pnpm lint` 0 errors, 1 known pre-existing warning (`FloorViewer.tsx`) · `pnpm test` **320/320** (37 files; 298 pre-existing + 22 new) · `pnpm build` green (only the pre-existing >500 kB chunk-size warning) · `npx react-doctor@latest`: no errors in touched files (only the known pre-existing `Model3DViewer` error and pre-existing warnings).
+
+### W2 — Units single source of truth ✅ core (2026-09-01, commits `508e2bb`, `ccb4a61`, `9dffed2`, `7cfe9a5`)
+
+- **`src/shared/ifc/resolveModelLengthUnit.ts` (new)**: reads `IfcProject.UnitsInContext` LENGTHUNIT — SI METRE + CENTI → `cm`, MILLI → `mm`, no prefix → `m`; conversion-based units (feet), unsupported prefixes, or missing assignment return `null` (never guesses). Primary unit signal; `detectPlanUnits` stays as fallback.
+- **`src/shared/lengthUnits.ts` (new)**: canonical converter/formatter — `LengthUnit = 'mm' | 'cm' | 'm'`, `toMeters`/`toMm`/`formatLengthM`/`formatLengthMm`, negative-zero normalization, no implicit defaults.
+- **Sidebar wired**: `RisersPanel` (coords + demo distances through the converter, Y sign corrected to match IFC world coords as written by the exporter), `Sidebar` passes `modelLengthUnit`; `RoutesPanel`/`ValidationPanel` (currently unrendered) switched from string `unitLabel` to typed `unit`.
+- **Key confirmed fact**: mesh/viewer coordinates are web-ifc-normalized meters when the model declares its unit; raw IFC attributes (storey elevations) stay in source units — the root cause of cm values labelled "mm".
+- **Tests (focused)**: 19 converter + 8 unit-reader (real web-ifc engine on minimal crafted mm/cm/m/feet models) + **gated 096-P test passed live** (unit resolves to `cm`, storey 01 → "30.15 m"; skips cleanly when absent) + Sidebar 12/12. ESLint clean on touched files.
+- **Deferred behind W1 (sibling owns the files this wave)**: (1) call `resolveModelLengthUnit` after `parseStoreys` in `WorkspacePage.tsx` and store in reducer state; (2) pass `modelLengthUnit` to `<Sidebar>`; (3) `StoreyList.tsx` elevation chip → `formatLengthM` (the visible "3,015 mm" → "30.15 m" fix) + its test. Coordinator wires these right after W1 lands.
 
 ---
 
