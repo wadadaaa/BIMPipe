@@ -2,6 +2,7 @@ import type { Fixture, KitchenArea, Riser, RiserId, Storey, StoreyId, SidebarTab
 import type { FloorMeshes } from '@/shared/ifc/extractFloorMeshes'
 import type { ModelOriginDecision } from '@/shared/frame/modelFrame'
 import type { LengthUnit } from '@/shared/lengthUnits'
+import { appendAdjustment, createAdjustLog, type AdjustLog } from '@/domain/adjustLog'
 import { getDemoRuntimeConfig, type DemoRuntimeConfig } from '@/shared/demoConfig'
 import { removeRiserStack } from '@/shared/routes/buildRiserStacks'
 
@@ -55,6 +56,13 @@ export interface WorkspacePageState {
   // reducer never rewrites `source`, so that separation survives every action.
   risers: Riser[]
   isAddingRiser: boolean
+  // Log of manual riser adjustments (add / drag-commit move / remove), offered
+  // as a JSON download alongside the exported IFC. Coordinate frame: SOURCE
+  // plan coordinates (the same frame riser positions are stored and exported
+  // in — viewer metres BEFORE the W1 local-origin subtraction), mapped to the
+  // adjust-log convention x = plan X, y = plan Z. Re-suggest and continuous
+  // drag updates do NOT append; upload-reset starts a fresh log.
+  adjustLog: AdjustLog
   downloadMode: 'full' | null
   downloadError: string | null
 
@@ -93,6 +101,7 @@ export const initialWorkspacePageState: WorkspacePageState = {
   isDetectingFixtures: false,
   risers: [],
   isAddingRiser: false,
+  adjustLog: createAdjustLog(),
   downloadMode: null,
   downloadError: null,
   activeTab: 'fixtures',
@@ -145,9 +154,22 @@ export type WorkspacePageAction =
   | { type: 'object-hovered'; expressId: number | null }
   | { type: 'object-selected'; expressId: number | null }
   // Stack risers are built at dispatch time (label counter lives in a ref).
-  | { type: 'riser-stack-added'; stackRisers: Riser[] }
-  | { type: 'riser-removed'; riserId: RiserId }
+  // `ts` is the ISO timestamp for the adjust-log entry, created at dispatch
+  // time by the component so the reducer stays pure.
+  | { type: 'riser-stack-added'; stackRisers: Riser[]; ts: string }
+  | { type: 'riser-removed'; riserId: RiserId; ts: string }
+  // Continuous drag update — positions only, never logged (see riser-move-committed).
   | { type: 'riser-moved'; riserId: RiserId; position: { x: number; y: number; z: number } }
+  // Drag commit (pointer-up): appends one 'move' adjust-log entry. `from`/`to`
+  // are SOURCE-frame positions; the risers themselves were already moved by the
+  // continuous riser-moved dispatches during the drag.
+  | {
+      type: 'riser-move-committed'
+      riserId: RiserId
+      from: { x: number; y: number; z: number }
+      to: { x: number; y: number; z: number }
+      ts: string
+    }
   // Label normalization computed by the page effect from the current risers.
   | { type: 'risers-normalized'; risers: Riser[] }
   | { type: 'risers-suggested'; risers: Riser[] }
@@ -211,6 +233,7 @@ function reduce(state: WorkspacePageState, action: WorkspacePageAction): Workspa
         webIfcModelId: null,
         modelOrigin: null,
         modelLengthUnit: null,
+        adjustLog: createAdjustLog(),
       }
 
     case 'model-opened':
@@ -280,14 +303,45 @@ function reduce(state: WorkspacePageState, action: WorkspacePageAction): Workspa
     case 'object-selected':
       return { ...state, selectedExpressId: action.expressId }
 
-    case 'riser-stack-added':
-      return { ...state, risers: [...state.risers, ...action.stackRisers] }
+    case 'riser-stack-added': {
+      // One 'add' log entry per stack, anchored to the floor it was placed on
+      // (the whole stack shares the same plan position).
+      const placed =
+        action.stackRisers.find((riser) => riser.storeyId === state.selectedStoreyId) ??
+        action.stackRisers[0]
+      return {
+        ...state,
+        risers: [...state.risers, ...action.stackRisers],
+        adjustLog: placed
+          ? appendAdjustment(state.adjustLog, {
+              action: 'add',
+              stackId: placed.stackId,
+              storey: placed.storeyId,
+              from: toAdjustPlanPoint(placed.position),
+              to: toAdjustPlanPoint(placed.position),
+              ts: action.ts,
+            })
+          : state.adjustLog,
+      }
+    }
 
     case 'riser-removed': {
       // Deleting a riser removes the whole vertical stack across all floors immediately.
+      const removed = state.risers.find((riser) => riser.id === action.riserId)
       const risers = removeRiserStack(state.risers, action.riserId)
-      if (risers === state.risers) return state
-      return { ...state, risers }
+      if (risers === state.risers || !removed) return state
+      return {
+        ...state,
+        risers,
+        adjustLog: appendAdjustment(state.adjustLog, {
+          action: 'remove',
+          stackId: removed.stackId,
+          storey: removed.storeyId,
+          from: toAdjustPlanPoint(removed.position),
+          to: null,
+          ts: action.ts,
+        }),
+      }
     }
 
     case 'riser-moved': {
@@ -301,6 +355,25 @@ function reduce(state: WorkspacePageState, action: WorkspacePageAction): Workspa
             ? { ...r, position: { x: action.position.x, y: r.position.y, z: action.position.z } }
             : r,
         ),
+      }
+    }
+
+    case 'riser-move-committed': {
+      // Drag already applied the position via riser-moved; here we only record
+      // the adjustment. from/to arrive in SOURCE plan coordinates (see the
+      // adjustLog field comment), so no conversion happens in the reducer.
+      const moved = state.risers.find((riser) => riser.id === action.riserId)
+      if (!moved) return state
+      return {
+        ...state,
+        adjustLog: appendAdjustment(state.adjustLog, {
+          action: 'move',
+          stackId: moved.stackId,
+          storey: moved.storeyId,
+          from: toAdjustPlanPoint(action.from),
+          to: toAdjustPlanPoint(action.to),
+          ts: action.ts,
+        }),
       }
     }
 
@@ -337,6 +410,11 @@ function reduce(state: WorkspacePageState, action: WorkspacePageAction): Workspa
     case 'view-mode-set':
       return { ...state, viewMode: action.viewMode }
   }
+}
+
+/** Adjust-log plan point from a 3D riser position: x = plan X, y = plan Z. */
+function toAdjustPlanPoint(position: { x: number; z: number }): { x: number; y: number } {
+  return { x: position.x, y: position.z }
 }
 
 function shallowEqual(a: WorkspacePageState, b: WorkspacePageState): boolean {

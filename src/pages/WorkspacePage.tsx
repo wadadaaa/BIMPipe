@@ -23,6 +23,7 @@ import {
   toSourcePoint,
   type ModelFrame,
 } from '@/shared/frame/modelFrame'
+import { serializeAdjustLog } from '@/domain/adjustLog'
 import { createInitialWorkspacePageState, workspacePageReducer } from './workspacePageState'
 import { buildRiserStack } from '@/shared/routes/buildRiserStacks'
 import { classifyFloors } from '@/shared/routes/floorClassification'
@@ -124,6 +125,7 @@ export function WorkspacePage({
     isDetectingFixtures,
     risers,
     isAddingRiser,
+    adjustLog,
     downloadMode,
     downloadError,
     activeTab,
@@ -349,18 +351,35 @@ export function WorkspacePage({
       dispatch({
         type: 'riser-stack-added',
         stackRisers: buildRiserStack(storeys, selectedStoreyId, pos, takeNextRiserLabel(nextRiserLabelRef), 'manual'),
+        ts: new Date().toISOString(),
       }),
     )
   }
 
   function handleRemoveRiser(id: RiserId) {
     // Deleting a riser removes the whole vertical stack across all floors immediately.
-    dispatch({ type: 'riser-removed', riserId: id })
+    dispatch({ type: 'riser-removed', riserId: id, ts: new Date().toISOString() })
   }
 
   function handleMoveRiser(id: RiserId, localPos: { x: number; y: number; z: number }) {
     // Propagate X/Z to every floor in the same stack; preserve each floor's Y.
     dispatch({ type: 'riser-moved', riserId: id, position: toSourcePoint(modelFrame, localPos) })
+  }
+
+  function handleMoveRiserCommit(
+    id: RiserId,
+    localFrom: { x: number; y: number; z: number },
+    localTo: { x: number; y: number; z: number },
+  ) {
+    // Adjust-log entries are recorded in SOURCE coordinates (local + origin),
+    // the same frame riser positions are stored and exported in.
+    dispatch({
+      type: 'riser-move-committed',
+      riserId: id,
+      from: toSourcePoint(modelFrame, localFrom),
+      to: toSourcePoint(modelFrame, localTo),
+      ts: new Date().toISOString(),
+    })
   }
 
   function handleToggleAddRiser() {
@@ -488,6 +507,15 @@ export function WorkspacePage({
         },
         buildExportDebugFileName(modelFileName, selectedStorey?.name ?? null),
       )
+      if (adjustLog.entries.length > 0) {
+        // Manual adjustments travel with the IFC as a JSON artifact so the
+        // engineer's decisions survive outside the session.
+        downloadBinary(
+          serializeAdjustLog(adjustLog),
+          buildAdjustmentsFileName(modelFileName),
+          'application/json',
+        )
+      }
     } catch (err) {
       dispatch({
         type: 'download-failed',
@@ -692,6 +720,7 @@ export function WorkspacePage({
           isAddingRiser={isAddingRiser}
           onRiserAdd={handleAddRiser}
           onRiserMove={handleMoveRiser}
+          onRiserMoveCommit={handleMoveRiserCommit}
           onSwitch3D={storeys.length > 0 ? handleSwitch3D : undefined}
           sanitaryRoutes={localSanitaryRoutes}
           demoFlowEnabled={demoRuntime.enabled}
@@ -823,14 +852,18 @@ function buildExportDebugFileName(
   return buildExportFileName(fileName, storeyName).replace(/\.ifc$/i, '-riser-mapping.json')
 }
 
+function buildAdjustmentsFileName(fileName: string): string {
+  return `${fileName.replace(/\.ifc$/i, '')}.adjustments.json`
+}
+
 function createExportRunId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `riser-export-${Date.now().toString(36)}`
 }
 
-function downloadBinary(bytes: Uint8Array, fileName: string) {
+function downloadBinary(bytes: Uint8Array, fileName: string, mimeType = 'application/octet-stream') {
   const buffer = new ArrayBuffer(bytes.byteLength)
   new Uint8Array(buffer).set(bytes)
-  const blob = new Blob([buffer], { type: 'application/octet-stream' })
+  const blob = new Blob([buffer], { type: mimeType })
   downloadBlob(blob, fileName)
 }
 

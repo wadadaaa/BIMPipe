@@ -40,6 +40,15 @@ interface FloorViewerProps {
   onFixtureAdd?: (pos: { x: number; y: number; z: number }) => void
   onRiserAdd?: (pos: { x: number; y: number; z: number }) => void
   onRiserMove?: (id: RiserId, pos: { x: number; y: number; z: number }) => void
+  /**
+   * Fired once per drag, on pointer-up, when the riser actually changed plan
+   * position. `from`/`to` are in the viewer's local frame, like onRiserMove.
+   */
+  onRiserMoveCommit?: (
+    id: RiserId,
+    from: { x: number; y: number; z: number },
+    to: { x: number; y: number; z: number },
+  ) => void
   onSwitch3D?: () => void
   sanitaryRoutes?: SanitaryFixtureRoute[]
   demoFlowEnabled?: boolean
@@ -70,6 +79,7 @@ export function FloorViewer({
   onFixtureAdd = () => {},
   onRiserAdd = () => {},
   onRiserMove = () => {},
+  onRiserMoveCommit = () => {},
   onSwitch3D,
   sanitaryRoutes = [],
   demoFlowEnabled = false,
@@ -109,6 +119,8 @@ export function FloorViewer({
     riserId: RiserId
     startClickWorld: THREE.Vector3
     startPos: { x: number; y: number; z: number }
+    // Last position sent through onRiserMove; undefined until the pointer moves.
+    lastPos?: { x: number; y: number; z: number }
   } | null>(null)
   // Pointer-down position — used to distinguish a click from a pan gesture
   const clickStartRef = useRef<{ x: number; y: number } | null>(null)
@@ -389,17 +401,25 @@ export function FloorViewer({
     if (!drag || drag.riserId !== riser.id) return
     const currentWorld = eventToFloorWorld(e)
     if (!currentWorld) return
-    onRiserMove(drag.riserId, {
+    drag.lastPos = {
       x: drag.startPos.x + (currentWorld.x - drag.startClickWorld.x),
       y: drag.startPos.y + (currentWorld.y - drag.startClickWorld.y),
       z: drag.startPos.z + (currentWorld.z - drag.startClickWorld.z),
-    })
+    }
+    onRiserMove(drag.riserId, drag.lastPos)
   }
 
   function handleRiserPointerUp(e: React.PointerEvent<HTMLButtonElement>) {
-    if (riserDragRef.current) {
+    const drag = riserDragRef.current
+    if (drag) {
       e.currentTarget.releasePointerCapture(e.pointerId)
       riserDragRef.current = null
+      // Commit exactly once per drag, and only when the plan position changed
+      // (a plain click without movement is not an adjustment).
+      const { startPos, lastPos } = drag
+      if (lastPos && (lastPos.x !== startPos.x || lastPos.z !== startPos.z)) {
+        onRiserMoveCommit(drag.riserId, startPos, lastPos)
+      }
     }
   }
 

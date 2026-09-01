@@ -253,7 +253,13 @@ describe('WorkspacePage', () => {
     expect(new Set(risers.map((riser: { stackLabel: string }) => riser.stackLabel))).toEqual(
       new Set(['R1', 'R3']),
     )
-    expect(anchorClick).toHaveBeenCalledTimes(2)
+    // Removing R2 above is a logged manual adjustment, so the export offers
+    // three files: the IFC, the debug mapping, and the adjustments JSON.
+    expect(anchorClick).toHaveBeenCalledTimes(3)
+    const downloadNames = anchorClick.mock.contexts.map(
+      (anchor) => (anchor as HTMLAnchorElement).download,
+    )
+    expect(downloadNames[2]).toBe('tower.adjustments.json')
   })
 
   it('writes IFC + debug mapping and keeps basement/roof/penthouse exclusions explicit in counts', async () => {

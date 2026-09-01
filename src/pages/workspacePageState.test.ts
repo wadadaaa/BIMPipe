@@ -44,6 +44,9 @@ const floorMeshesStub = {
   boundingBox: { min: { x: 0, z: 0 }, max: { x: 10, z: 10 } },
 } as unknown as FloorMeshes
 
+/** Fixed dispatch-time timestamp for adjust-log actions. */
+const TS = '2026-09-01T12:00:00.000Z'
+
 /** A state mid-session: model open, floor selected, fixtures detected, mixed risers. */
 function makeLoadedState(): WorkspacePageState {
   return {
@@ -250,7 +253,7 @@ describe('workspacePageReducer riser actions', () => {
       makeRiser({ id: 'new-1', stackId: 'stack-n', stackLabel: 'R3', storeyId: 2, source: 'manual' }),
       makeRiser({ id: 'new-2', stackId: 'stack-n', stackLabel: 'R3', storeyId: 3, source: 'manual' }),
     ]
-    const after = workspacePageReducer(before, { type: 'riser-stack-added', stackRisers: stack })
+    const after = workspacePageReducer(before, { type: 'riser-stack-added', stackRisers: stack, ts: TS })
 
     expect(after.risers).toEqual([...before.risers, ...stack])
     // Prior entries keep their identity and their source discrimination.
@@ -266,7 +269,7 @@ describe('workspacePageReducer riser actions', () => {
 
   it('riser-removed drops the whole vertical stack and leaves other stacks alone', () => {
     const before = makeLoadedState()
-    const after = workspacePageReducer(before, { type: 'riser-removed', riserId: 'auto-1' })
+    const after = workspacePageReducer(before, { type: 'riser-removed', riserId: 'auto-1', ts: TS })
 
     expect(after.risers.map((riser) => riser.id)).toEqual(['manual-1'])
     // The manually placed riser (separate stack) is untouched.
@@ -275,7 +278,7 @@ describe('workspacePageReducer riser actions', () => {
 
   it('riser-removed with an unknown id bails out with the identical state object', () => {
     const before = makeLoadedState()
-    expect(workspacePageReducer(before, { type: 'riser-removed', riserId: 'ghost' })).toBe(before)
+    expect(workspacePageReducer(before, { type: 'riser-removed', riserId: 'ghost', ts: TS })).toBe(before)
   })
 
   it('riser-moved propagates X/Z across the stack and preserves each floor Y', () => {
@@ -378,6 +381,133 @@ describe('workspacePageReducer branch routes and misc', () => {
 
     const move = { type: 'riser-moved', riserId: 'auto-1', position: { x: 4, y: 5, z: 6 } } as const
     expect(workspacePageReducer(base, move)).toEqual(workspacePageReducer(base, move))
+  })
+})
+
+describe('workspacePageReducer adjust log (W6)', () => {
+  it('starts as an empty metre-unit log', () => {
+    const state = createInitialWorkspacePageState()
+    expect(state.adjustLog).toEqual({ units: 'm', entries: [] })
+  })
+
+  it('riser-stack-added appends one add entry anchored to the floor it was placed on', () => {
+    const before = makeLoadedState()
+    const stack = [
+      makeRiser({ id: 'new-1', stackId: 'stack-n', storeyId: 2, source: 'manual', position: { x: 4, y: 0, z: 5 } }),
+      makeRiser({ id: 'new-2', stackId: 'stack-n', storeyId: 3, source: 'manual', position: { x: 4, y: 3, z: 5 } }),
+    ]
+    const after = workspacePageReducer(before, { type: 'riser-stack-added', stackRisers: stack, ts: TS })
+
+    // One entry per stack (not per floor), keyed to selectedStoreyId = 2.
+    expect(after.adjustLog.entries).toEqual([
+      {
+        action: 'add',
+        stackId: 'stack-n',
+        storey: 2,
+        from: { x: 4, y: 5 },
+        to: { x: 4, y: 5 },
+        ts: TS,
+      },
+    ])
+  })
+
+  it('riser-removed appends one remove entry with a null destination', () => {
+    const before = makeLoadedState()
+    const after = workspacePageReducer(before, { type: 'riser-removed', riserId: 'manual-1', ts: TS })
+
+    expect(after.adjustLog.entries).toEqual([
+      {
+        action: 'remove',
+        stackId: 'stack-m',
+        storey: 2,
+        from: { x: 0, y: 0 },
+        to: null,
+        ts: TS,
+      },
+    ])
+  })
+
+  it('riser-moved (continuous drag updates) never appends to the log', () => {
+    const before = makeLoadedState()
+    const after = workspacePageReducer(before, {
+      type: 'riser-moved',
+      riserId: 'auto-1',
+      position: { x: 7, y: 0, z: 8 },
+    })
+    expect(after.adjustLog).toBe(before.adjustLog)
+    expect(after.adjustLog.entries).toHaveLength(0)
+  })
+
+  it('riser-move-committed appends one move entry with the given from/to and leaves risers untouched', () => {
+    const before = makeLoadedState()
+    const after = workspacePageReducer(before, {
+      type: 'riser-move-committed',
+      riserId: 'auto-1',
+      from: { x: 0, y: 0, z: 0 },
+      to: { x: 7, y: 0, z: 8 },
+      ts: TS,
+    })
+
+    expect(after.risers).toBe(before.risers)
+    expect(after.adjustLog.entries).toEqual([
+      {
+        action: 'move',
+        stackId: 'stack-a',
+        storey: 2,
+        from: { x: 0, y: 0 },
+        to: { x: 7, y: 8 },
+        ts: TS,
+      },
+    ])
+  })
+
+  it('riser-move-committed with an unknown id bails out with the identical state object', () => {
+    const before = makeLoadedState()
+    const action = {
+      type: 'riser-move-committed',
+      riserId: 'ghost',
+      from: { x: 0, y: 0, z: 0 },
+      to: { x: 1, y: 0, z: 1 },
+      ts: TS,
+    } as const
+    expect(workspacePageReducer(before, action)).toBe(before)
+  })
+
+  it('accumulates entries in dispatch order across actions', () => {
+    let state = makeLoadedState()
+    state = workspacePageReducer(state, {
+      type: 'riser-move-committed',
+      riserId: 'auto-1',
+      from: { x: 0, y: 0, z: 0 },
+      to: { x: 2, y: 0, z: 2 },
+      ts: '2026-09-01T12:00:01.000Z',
+    })
+    state = workspacePageReducer(state, { type: 'riser-removed', riserId: 'manual-1', ts: '2026-09-01T12:00:02.000Z' })
+
+    expect(state.adjustLog.entries.map((entry) => [entry.action, entry.ts])).toEqual([
+      ['move', '2026-09-01T12:00:01.000Z'],
+      ['remove', '2026-09-01T12:00:02.000Z'],
+    ])
+  })
+
+  it('re-suggest (risers-suggested) does not append: only manual adjustments are logged', () => {
+    const before = makeLoadedState()
+    const suggested = [makeRiser({ id: 'sug-1', stackId: 'stack-s', source: 'placed' })]
+    const after = workspacePageReducer(before, { type: 'risers-suggested', risers: suggested })
+    expect(after.adjustLog).toBe(before.adjustLog)
+  })
+
+  it('upload-reset (model replace) starts a fresh empty log', () => {
+    const withEntry = workspacePageReducer(makeLoadedState(), {
+      type: 'riser-removed',
+      riserId: 'manual-1',
+      ts: TS,
+    })
+    expect(withEntry.adjustLog.entries).toHaveLength(1)
+
+    const reset = workspacePageReducer(withEntry, { type: 'upload-reset' })
+    expect(reset.adjustLog.entries).toEqual([])
+    expect(reset.adjustLog.units).toBe('m')
   })
 })
 
