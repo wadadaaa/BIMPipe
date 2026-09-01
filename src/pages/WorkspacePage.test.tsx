@@ -6,6 +6,7 @@ import { WorkspacePage } from './WorkspacePage'
 const mocks = vi.hoisted(() => ({
   getIfcApi: vi.fn(),
   parseStoreys: vi.fn(),
+  resolveModelLengthUnit: vi.fn(),
   extractFloorMeshes: vi.fn(),
   detectFixtures: vi.fn(),
   detectKitchens: vi.fn(),
@@ -20,6 +21,10 @@ vi.mock('@/shared/ifc/ifcApi', () => ({
 
 vi.mock('@/shared/ifc/parseStoreys', () => ({
   parseStoreys: mocks.parseStoreys,
+}))
+
+vi.mock('@/shared/ifc/resolveModelLengthUnit', () => ({
+  resolveModelLengthUnit: mocks.resolveModelLengthUnit,
 }))
 
 vi.mock('@/shared/ifc/extractFloorMeshes', () => ({
@@ -117,6 +122,7 @@ describe('WorkspacePage', () => {
     }
 
     mocks.getIfcApi.mockResolvedValue(api)
+    mocks.resolveModelLengthUnit.mockResolvedValue('mm')
     mocks.parseStoreys.mockResolvedValue([
       { id: 102, name: 'מרתף 2', elevation: -600, modelId: 'model-1' },
       { id: 2, name: 'קומה 2', elevation: 612, modelId: 'model-1' },
@@ -174,6 +180,7 @@ describe('WorkspacePage', () => {
     window.cancelAnimationFrame = originalCancelAnimationFrame
     mocks.getIfcApi.mockReset()
     mocks.parseStoreys.mockReset()
+    mocks.resolveModelLengthUnit.mockReset()
     mocks.extractFloorMeshes.mockReset()
     mocks.detectFixtures.mockReset()
     mocks.detectKitchens.mockReset()

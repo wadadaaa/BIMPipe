@@ -10,6 +10,8 @@ import type { ThemeMode } from '@/app/App'
 import { getIfcApi } from '@/shared/ifc/ifcApi'
 import { aggregateStoreyDetections } from '@/shared/ifc/aggregateStoreyDetections'
 import { parseStoreys } from '@/shared/ifc/parseStoreys'
+import { resolveModelLengthUnit } from '@/shared/ifc/resolveModelLengthUnit'
+import type { LengthUnit } from '@/shared/lengthUnits'
 import type { Fixture, KitchenArea, PlanBounds, Riser, RiserId, Storey, StoreyId, SidebarTab } from '@/domain/types'
 import type { FloorMeshes } from '@/shared/ifc/extractFloorMeshes'
 import type { FloorRoutes, RouteSegment } from '@/domain/branchRouting'
@@ -103,6 +105,7 @@ export function WorkspacePage({
     webIfcModelId,
     modelFileName,
     storeys,
+    modelLengthUnit,
     isParsingStoreys,
     uploadError,
     demoUploadError,
@@ -139,6 +142,9 @@ export function WorkspacePage({
   // flow can read the resolved frame across awaits. null = not resolved yet for
   // the current model (resolution happens on the first storey with geometry).
   const modelFrameRef = useRef<ModelFrame | null>(null)
+  // Declared length unit mirrored from state for the same reason: openStorey
+  // runs before the storeys-parsed transition flushes, so it reads the ref.
+  const modelLengthUnitRef = useRef<LengthUnit | null>(null)
 
   // Rendering frame derived from the reducer state. Identity for near-origin
   // models, so localization below is a no-op that preserves array identities.
@@ -180,6 +186,7 @@ export function WorkspacePage({
     // count and unresolved frame when it runs after this transition is queued.
     risersRef.current = []
     modelFrameRef.current = null
+    modelLengthUnitRef.current = null
     dispatch({ type: 'upload-started', fileName: file.name })
     startTransition(() => {
       dispatch({ type: 'upload-reset' })
@@ -204,8 +211,12 @@ export function WorkspacePage({
 
       const domainModelId = crypto.randomUUID()
       const parsed = await parseStoreys(api, newModelId, domainModelId)
+      // Declared IFC length unit for raw attribute values (storey elevations).
+      // null = undeclared/unsupported — the UI then shows raw values, no guessing.
+      const modelLengthUnit = await resolveModelLengthUnit(api, newModelId)
+      modelLengthUnitRef.current = modelLengthUnit
       startTransition(() => {
-        dispatch({ type: 'storeys-parsed', storeys: parsed })
+        dispatch({ type: 'storeys-parsed', storeys: parsed, modelLengthUnit })
       })
       preloadFloorInspectionModules()
       const defaultStoreyId = findDefaultStoreyId(parsed)
@@ -250,7 +261,14 @@ export function WorkspacePage({
       if (knownFrame === null) {
         // First storey with geometry decides the model origin (once per model).
         // Null decision = no usable bounds on this floor; retry on the next one.
-        const decision = await resolveModelOriginDecision(api, modelId, readSourcePlanBounds(meshes))
+        // The declared unit (when known) replaces the placement probe's
+        // magnitude heuristic for the far-from-origin verdict.
+        const decision = await resolveModelOriginDecision(
+          api,
+          modelId,
+          readSourcePlanBounds(meshes),
+          modelLengthUnitRef.current,
+        )
         if (decision !== null) {
           const frame: ModelFrame = { origin: decision.origin }
           modelFrameRef.current = frame
@@ -624,6 +642,7 @@ export function WorkspacePage({
         selectedId={selectedStoreyId}
         isLoading={isExtractingGeometry}
         onSelect={handleStoreySelect}
+        modelLengthUnit={modelLengthUnit}
       />
     </>
   )
@@ -712,6 +731,7 @@ export function WorkspacePage({
       demoFlowEnabled={demoRuntime.enabled}
       demoFloorOpened={demoFloorOpened}
       sanitaryRouteCount={sanitaryRoutesForExport.length}
+      modelLengthUnit={modelLengthUnit}
     />
   )
 

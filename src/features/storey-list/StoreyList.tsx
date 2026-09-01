@@ -1,4 +1,5 @@
 import type { Storey, StoreyId } from '@/domain/types'
+import { formatLengthM, type LengthUnit } from '@/shared/lengthUnits'
 import { ViewTransition } from '@/shared/reactViewTransition'
 import './StoreyList.css'
 
@@ -7,9 +8,20 @@ interface StoreyListProps {
   selectedId: StoreyId | null
   isLoading: boolean
   onSelect: (id: StoreyId) => void
+  /**
+   * Declared IFC length unit of raw attribute values such as `Storey.elevation`.
+   * null = the model does not declare a supported unit; elevations are then
+   * shown as raw numbers with no unit suffix (we never assume a unit).
+   */
+  modelLengthUnit: LengthUnit | null
 }
 
-export function StoreyList({ storeys, selectedId, isLoading, onSelect }: StoreyListProps) {
+function formatElevation(elevation: number, unit: LengthUnit | null): string {
+  if (unit === null) return Math.round(elevation).toLocaleString()
+  return formatLengthM(elevation, unit)
+}
+
+export function StoreyList({ storeys, selectedId, isLoading, onSelect, modelLengthUnit }: StoreyListProps) {
   if (storeys.length === 0) return null
 
   // Highest elevation at top (architectural convention)
@@ -56,7 +68,7 @@ export function StoreyList({ storeys, selectedId, isLoading, onSelect }: StoreyL
                     </>
                   ) : (
                     <span className="storey-list__elev">
-                      {Math.round(s.elevation).toLocaleString()} mm
+                      {formatElevation(s.elevation, modelLengthUnit)}
                     </span>
                   )}
                 </span>

@@ -1,6 +1,7 @@
 import type { Fixture, KitchenArea, Riser, RiserId, Storey, StoreyId, SidebarTab } from '@/domain/types'
 import type { FloorMeshes } from '@/shared/ifc/extractFloorMeshes'
 import type { ModelOriginDecision } from '@/shared/frame/modelFrame'
+import type { LengthUnit } from '@/shared/lengthUnits'
 import { getDemoRuntimeConfig, type DemoRuntimeConfig } from '@/shared/demoConfig'
 import { removeRiserStack } from '@/shared/routes/buildRiserStacks'
 
@@ -14,6 +15,10 @@ export interface WorkspacePageState {
 
   // --- storey loading ---
   storeys: Storey[]
+  // Declared IFC length unit for RAW attribute values (storey elevations), read
+  // from IfcUnitAssignment once per model right after parseStoreys. null = the
+  // model does not declare a supported unit — display raw values, never guess.
+  modelLengthUnit: LengthUnit | null
   isParsingStoreys: boolean
   uploadError: string | null
   demoUploadError: string | null
@@ -69,6 +74,7 @@ export const initialWorkspacePageState: WorkspacePageState = {
   webIfcModelId: null,
   modelFileName: null,
   storeys: [],
+  modelLengthUnit: null,
   isParsingStoreys: false,
   uploadError: null,
   demoUploadError: null,
@@ -121,7 +127,9 @@ export type WorkspacePageAction =
   // Transition part of accepting a file: clear all model-derived state.
   | { type: 'upload-reset' }
   | { type: 'model-opened'; webIfcModelId: number }
-  | { type: 'storeys-parsed'; storeys: Storey[] }
+  // Carries the declared length unit alongside the storeys: both are read from
+  // the same freshly-opened model, so they land in state atomically.
+  | { type: 'storeys-parsed'; storeys: Storey[]; modelLengthUnit: LengthUnit | null }
   | { type: 'upload-failed'; message: string }
   | { type: 'upload-parsing-finished' }
   // `hasRisers` is sampled from the live riser ref at dispatch time because the
@@ -202,13 +210,14 @@ function reduce(state: WorkspacePageState, action: WorkspacePageAction): Workspa
         branchRoutesVisibleByStorey: new Map(),
         webIfcModelId: null,
         modelOrigin: null,
+        modelLengthUnit: null,
       }
 
     case 'model-opened':
       return { ...state, webIfcModelId: action.webIfcModelId }
 
     case 'storeys-parsed':
-      return { ...state, storeys: action.storeys }
+      return { ...state, storeys: action.storeys, modelLengthUnit: action.modelLengthUnit }
 
     case 'upload-failed':
       return { ...state, uploadError: action.message }

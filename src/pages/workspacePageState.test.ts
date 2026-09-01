@@ -50,6 +50,7 @@ function makeLoadedState(): WorkspacePageState {
     ...initialWorkspacePageState,
     webIfcModelId: 101,
     modelFileName: 'tower.ifc',
+    modelLengthUnit: 'cm',
     storeys: [makeStorey({ id: 2, elevation: 3 }), makeStorey({ id: 3, elevation: 6 })],
     selectedStoreyId: 2,
     floorMeshes: floorMeshesStub,
@@ -122,6 +123,7 @@ describe('workspacePageReducer upload flow', () => {
     expect(after.viewMode).toBe('2d')
     expect(after.branchRoutesVisibleByStorey.size).toBe(0)
     expect(after.webIfcModelId).toBeNull()
+    expect(after.modelLengthUnit).toBeNull()
 
     // Preserved (owned by other actions or immutable per mount):
     expect(after.modelFileName).toBe('next.ifc')
@@ -139,13 +141,23 @@ describe('workspacePageReducer upload flow', () => {
     })
     state = workspacePageReducer(state, { type: 'upload-reset' })
     state = workspacePageReducer(state, { type: 'model-opened', webIfcModelId: 101 })
-    state = workspacePageReducer(state, { type: 'storeys-parsed', storeys })
+    state = workspacePageReducer(state, { type: 'storeys-parsed', storeys, modelLengthUnit: 'mm' })
     state = workspacePageReducer(state, { type: 'upload-parsing-finished' })
 
     expect(state.webIfcModelId).toBe(101)
     expect(state.storeys).toBe(storeys)
+    expect(state.modelLengthUnit).toBe('mm')
     expect(state.isParsingStoreys).toBe(false)
     expect(state.uploadError).toBeNull()
+  })
+
+  it('storeys-parsed stores a null unit as-is: undeclared units are never guessed', () => {
+    const after = workspacePageReducer(makeLoadedState(), {
+      type: 'storeys-parsed',
+      storeys: [makeStorey({ id: 4 })],
+      modelLengthUnit: null,
+    })
+    expect(after.modelLengthUnit).toBeNull()
   })
 
   it('upload-failed and demo-upload-rejected only touch their error slice', () => {

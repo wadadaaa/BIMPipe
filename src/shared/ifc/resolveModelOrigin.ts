@@ -3,6 +3,7 @@ import { detectPlanUnits, type Point3D } from '@/shared/routes/planGeometry'
 import {
   chooseModelOrigin,
   isFarFromOrigin,
+  type LengthUnit,
   type ModelOriginDecision,
 } from '@/shared/frame/modelFrame'
 import { resolveLocalPlacementWorldMatrix } from './localPlacementMatrix'
@@ -19,11 +20,11 @@ export interface PlacementOriginProbe {
   sourcePoint: { x: number; y: number; z: number }
   entity: 'site' | 'building'
   /**
-   * Far verdict using the detectPlanUnits convention (coords > 1000 are treated
-   * as mm-scale, otherwise metres). The real unit assignment is not read here —
-   * that belongs to the units task — so this is a detection signal only; the
-   * origin value always comes from geometry, which web-ifc already normalizes
-   * to metres.
+   * Far verdict. When the caller passes the model's declared length unit
+   * (from `resolveModelLengthUnit`) it is used directly; otherwise this falls
+   * back to the detectPlanUnits convention (coords > 1000 treated as mm-scale,
+   * else metres). Either way this is a detection signal only; the origin value
+   * always comes from geometry, which web-ifc already normalizes to metres.
    */
   farFromOrigin: boolean
 }
@@ -36,6 +37,7 @@ export interface PlacementOriginProbe {
 export async function readPlacementOriginProbe(
   api: IfcAPI,
   modelId: number,
+  declaredUnit: LengthUnit | null = null,
 ): Promise<PlacementOriginProbe | null> {
   const { IFCSITE, IFCBUILDING } = await import('web-ifc')
 
@@ -55,11 +57,13 @@ export async function readPlacementOriginProbe(
         const elements = matrix.elements
         const sourcePoint = { x: elements[12], y: elements[13], z: elements[14] }
         // IFC placements are Z-up: the horizontal plan axes are X and Y.
-        const unitGuess = detectPlanUnits([{ x: sourcePoint.x, y: 0, z: sourcePoint.y }])
+        // Prefer the declared unit assignment; heuristics only when undeclared.
+        const unit =
+          declaredUnit ?? detectPlanUnits([{ x: sourcePoint.x, y: 0, z: sourcePoint.y }])
         return {
           sourcePoint,
           entity,
-          farFromOrigin: isFarFromOrigin(sourcePoint.x, sourcePoint.y, unitGuess),
+          farFromOrigin: isFarFromOrigin(sourcePoint.x, sourcePoint.y, unit),
         }
       }
     } catch {
@@ -85,6 +89,7 @@ export async function resolveModelOriginDecision(
   api: IfcAPI,
   modelId: number,
   sourcePlanBoundsM: PlanBoundsM | null,
+  declaredUnit: LengthUnit | null = null,
 ): Promise<ModelOriginDecision | null> {
   if (sourcePlanBoundsM === null) return null
   const { minX, maxX, minZ, maxZ } = sourcePlanBoundsM
@@ -99,7 +104,7 @@ export async function resolveModelOriginDecision(
     return { origin: { x: 0, y: 0, z: 0 }, detectedBy: 'none' }
   }
 
-  const probe = await readPlacementOriginProbe(api, modelId)
+  const probe = await readPlacementOriginProbe(api, modelId, declaredUnit)
   if (probe?.farFromOrigin) {
     return chooseModelOrigin({
       // The placement provides the detection label; the centroid provides the
