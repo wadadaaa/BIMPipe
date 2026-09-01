@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { IfcAPI } from 'web-ifc'
-import { exportFullIfcWithRisers } from './exportFullIfcWithRisers'
+import { exportFullIfcWithRisers, type ExportRiser } from './exportFullIfcWithRisers'
+import type { FloorRoutes } from '@/domain/branchRouting'
 import type { Riser } from '@/domain/types'
 
 type ImportedIfc = Awaited<typeof import('web-ifc')>
@@ -59,6 +60,47 @@ const risers: Riser[] = [
   { id: 's2-f3', stackId: 'stack-2', stackLabel: 'R2', storeyId: 73, position: { x: 3, y: 0, z: 2 } },
 ]
 
+// Same stacks, but stack-2 carries an explicit non-default diameter (Ø160);
+// stack-1 stays unspecified and must fall back to the Ø110 default.
+const risersWithDiameters: ExportRiser[] = [
+  { id: 's1-f2', stackId: 'stack-1', stackLabel: 'R1', storeyId: 70, position: { x: 1, y: 0, z: 1 } },
+  { id: 's1-f3', stackId: 'stack-1', stackLabel: 'R1', storeyId: 73, position: { x: 1, y: 0, z: 1 } },
+  { id: 's2-f2', stackId: 'stack-2', stackLabel: 'R2', storeyId: 70, position: { x: 3, y: 0, z: 2 }, diameterMm: 160 },
+  { id: 's2-f3', stackId: 'stack-2', stackLabel: 'R2', storeyId: 73, position: { x: 3, y: 0, z: 2 }, diameterMm: 160 },
+]
+
+// Two branch runs on storey #70 draining to the two stacks; endpoint elevations
+// use the routing datum (0 = the branch connection at the riser).
+const BRANCH_SEGMENT_COUNT = 2
+const branchRoutes: FloorRoutes[] = [
+  {
+    storeyId: 70,
+    planUnits: 'm',
+    segments: [
+      {
+        id: 'branch-seg|70|s1-f2|0',
+        start: { x: 2, z: 1, elevation: 0.02 },
+        end: { x: 1, z: 1, elevation: 0 },
+        axis: 'x',
+        kind: 'fixture-branch',
+        servedFixtureExpressIds: [901],
+        riserId: 's1-f2',
+        riserStackId: 'stack-1',
+      },
+      {
+        id: 'branch-seg|70|s2-f2|0',
+        start: { x: 3, z: 4, elevation: 0.04 },
+        end: { x: 3, z: 2, elevation: 0 },
+        axis: 'z',
+        kind: 'trunk',
+        servedFixtureExpressIds: [902, 903],
+        riserId: 's2-f2',
+        riserStackId: 'stack-2',
+      },
+    ],
+  },
+]
+
 function idsOfType(api: IfcAPI, modelId: number, type: number): number[] {
   const vector = api.GetLineIDsWithType(modelId, type)
   const ids: number[] = []
@@ -102,7 +144,10 @@ function attachedDefinitionNames(
   return names
 }
 
-async function exportAndReopen(schema: 'IFC2X3' | 'IFC4'): Promise<{
+async function exportAndReopen(
+  schema: 'IFC2X3' | 'IFC4',
+  options: { risers?: ExportRiser[]; branchRoutes?: FloorRoutes[] } = {},
+): Promise<{
   ifc: ImportedIfc
   api: IfcAPI
   modelId: number
@@ -115,9 +160,10 @@ async function exportAndReopen(schema: 'IFC2X3' | 'IFC4'): Promise<{
     exportApi,
     new TextEncoder().encode(buildMinimalIfc(schema)),
     70,
-    risers,
+    options.risers ?? risers,
     null,
     [],
+    options.branchRoutes ?? [],
   )
   expect(exportedBytes).toBeInstanceOf(Uint8Array)
   expect(exportedBytes.length).toBeGreaterThan(0)
@@ -127,6 +173,45 @@ async function exportAndReopen(schema: 'IFC2X3' | 'IFC4'): Promise<{
   await reopenApi.Init()
   const modelId = reopenApi.OpenModel(exportedBytes)
   return { ifc, api: reopenApi, modelId }
+}
+
+function readRadiusValue(api: IfcAPI, modelId: number, profileId: number): number | null {
+  const line = api.GetLine(modelId, profileId, false) as { Radius?: { value?: number } | number | null } | null
+  const radius = line?.Radius
+  if (typeof radius === 'number') return radius
+  if (typeof radius?.value === 'number') return radius.value
+  return null
+}
+
+/** Express IDs grouped into the IfcSystem with the given name via IfcRelAssignsToGroup. */
+function systemMemberIds(api: IfcAPI, modelId: number, ifc: ImportedIfc, systemName: string): number[] {
+  for (const relId of idsOfType(api, modelId, ifc.IFCRELASSIGNSTOGROUP)) {
+    const relation = api.GetLine(modelId, relId, false) as {
+      RelatedObjects?: Array<{ value?: number } | null> | null
+      RelatingGroup?: { value?: number } | null
+    } | null
+    const groupId = relation?.RelatingGroup?.value
+    if (typeof groupId !== 'number') continue
+    if (readNameValue(api, modelId, groupId) !== systemName) continue
+    return (relation?.RelatedObjects ?? [])
+      .flatMap((ref) => (typeof ref?.value === 'number' ? [ref.value] : []))
+  }
+  return []
+}
+
+/** Values of every IfcQuantityLength with the given name, across the whole model. */
+function quantityLengthValues(api: IfcAPI, modelId: number, ifc: ImportedIfc, name: string): number[] {
+  const values: number[] = []
+  for (const quantityId of idsOfType(api, modelId, ifc.IFCQUANTITYLENGTH)) {
+    if (readNameValue(api, modelId, quantityId) !== name) continue
+    const line = api.GetLine(modelId, quantityId, false) as {
+      LengthValue?: { value?: number } | number | null
+    } | null
+    const raw = line?.LengthValue
+    const value = typeof raw === 'number' ? raw : raw?.value
+    if (typeof value === 'number') values.push(value)
+  }
+  return values
 }
 
 describe('exportFullIfcWithRisers round-trip (reopen exported bytes with web-ifc)', () => {
@@ -195,5 +280,142 @@ describe('exportFullIfcWithRisers round-trip (reopen exported bytes with web-ifc
     } finally {
       api.CloseModel(modelId)
     }
+  })
+
+  for (const schema of ['IFC2X3', 'IFC4'] as const) {
+    it(`${schema}: branch segments and stack diameters reopen correctly (count, system, profiles, quantities)`, async () => {
+      const { ifc, api, modelId } = await exportAndReopen(schema, {
+        risers: risersWithDiameters,
+        branchRoutes,
+      })
+
+      try {
+        const elementType = schema === 'IFC2X3' ? ifc.IFCFLOWSEGMENT : ifc.IFCPIPESEGMENT
+        const otherType = schema === 'IFC2X3' ? ifc.IFCPIPESEGMENT : ifc.IFCFLOWSEGMENT
+
+        // Segment count = stacks + branch segments, all on the schema's element type.
+        const elementIds = idsOfType(api, modelId, elementType)
+        expect(elementIds).toHaveLength(STACK_COUNT + BRANCH_SEGMENT_COUNT)
+        expect(idsOfType(api, modelId, otherType)).toHaveLength(0)
+
+        // Branch elements are named after their role and target stack.
+        const elementNames = elementIds.map((id) => readNameValue(api, modelId, id))
+        expect(elementNames).toContain('BIMPipe Branch 110mm -> R1')
+        expect(elementNames).toContain('BIMPipe Trunk 110mm -> R2')
+
+        // The stacks system groups stacks AND branch segments.
+        const memberIds = systemMemberIds(api, modelId, ifc, 'BIMPipe Sanitary Stacks')
+        expect(memberIds).toHaveLength(STACK_COUNT + BRANCH_SEGMENT_COUNT)
+        expect([...memberIds].sort((a, b) => a - b)).toEqual([...elementIds].sort((a, b) => a - b))
+
+        // Diameters round-trip through the written circle profiles (source units = mm):
+        // Ø110 default -> radius 55 (stack-1 + both branches), explicit Ø160 -> radius 80.
+        const radii = idsOfType(api, modelId, ifc.IFCCIRCLEPROFILEDEF)
+          .map((id) => readRadiusValue(api, modelId, id))
+          .sort((a, b) => (a ?? 0) - (b ?? 0))
+        expect(radii).toEqual([55, 55, 55, 80])
+
+        // ...and through the NominalDiameter base quantity on every segment.
+        const diameterQuantities = quantityLengthValues(api, modelId, ifc, 'NominalDiameter').sort((a, b) => a - b)
+        expect(diameterQuantities).toEqual([110, 110, 110, 160])
+
+        if (schema === 'IFC2X3') {
+          // One type per stack + one shared branch type, each with the type-common pset.
+          expect(idsOfType(api, modelId, ifc.IFCPIPESEGMENTTYPE)).toHaveLength(STACK_COUNT + 1)
+          const psetNames = idsOfType(api, modelId, ifc.IFCPROPERTYSET).map((id) => readNameValue(api, modelId, id))
+          expect(psetNames.filter((name) => name === 'Pset_PipeSegmentTypeCommon')).toHaveLength(STACK_COUNT + 1)
+        } else {
+          // TODO(BIM-51) parity: the IFC4 path still writes no type objects/psets,
+          // for branches exactly as for stacks.
+          expect(idsOfType(api, modelId, ifc.IFCPIPESEGMENTTYPE)).toHaveLength(0)
+          const psetNames = idsOfType(api, modelId, ifc.IFCPROPERTYSET).map((id) => readNameValue(api, modelId, id))
+          expect(psetNames.filter((name) => name === 'Pset_PipeSegmentTypeCommon')).toHaveLength(0)
+        }
+
+        // Every element (stack or branch) carries the occurrence pset and base quantities.
+        for (const elementId of elementIds) {
+          const attached = attachedDefinitionNames(api, modelId, ifc, elementId)
+          expect(attached).toContain('Pset_FlowSegmentOccurrence')
+          expect(attached).toContain('Qto_PipeSegmentBaseQuantities')
+        }
+      } finally {
+        api.CloseModel(modelId)
+      }
+    })
+  }
+
+  it('refuses to export branch routes whose riser has drifted, naming the riser and distance', async () => {
+    const ifc = await import('web-ifc')
+    const api = new ifc.IfcAPI()
+    await api.Init()
+
+    // Riser s1-f2 sits at (1, 1) m but the routes (in mm plan units here to cover
+    // unit conversion) connect to it at (1050, 1000) mm -> 50 mm drift.
+    const driftedRoutes: FloorRoutes[] = [
+      {
+        storeyId: 70,
+        planUnits: 'mm',
+        segments: [
+          {
+            id: 'branch-seg|70|s1-f2|0',
+            start: { x: 2050, z: 1000, elevation: 20 },
+            end: { x: 1050, z: 1000, elevation: 0 },
+            axis: 'x',
+            kind: 'fixture-branch',
+            servedFixtureExpressIds: [901],
+            riserId: 's1-f2',
+            riserStackId: 'stack-1',
+          },
+        ],
+      },
+    ]
+
+    await expect(
+      exportFullIfcWithRisers(
+        api,
+        new TextEncoder().encode(buildMinimalIfc('IFC2X3')),
+        70,
+        risers,
+        null,
+        [],
+        driftedRoutes,
+      ),
+    ).rejects.toThrow(/riser s1-f2 \(stack R1\).*50\.0 mm drift.*Recompute branch routes/s)
+  })
+
+  it('refuses to export branch routes that reference a riser which no longer exists', async () => {
+    const ifc = await import('web-ifc')
+    const api = new ifc.IfcAPI()
+    await api.Init()
+
+    const staleRoutes: FloorRoutes[] = [
+      {
+        storeyId: 70,
+        planUnits: 'm',
+        segments: [
+          {
+            id: 'branch-seg|70|ghost|0',
+            start: { x: 2, z: 1, elevation: 0.02 },
+            end: { x: 1, z: 1, elevation: 0 },
+            axis: 'x',
+            kind: 'fixture-branch',
+            servedFixtureExpressIds: [901],
+            riserId: 'ghost',
+          },
+        ],
+      },
+    ]
+
+    await expect(
+      exportFullIfcWithRisers(
+        api,
+        new TextEncoder().encode(buildMinimalIfc('IFC2X3')),
+        70,
+        risers,
+        null,
+        [],
+        staleRoutes,
+      ),
+    ).rejects.toThrow(/riser ghost, which no longer exists.*Recompute branch routes/s)
   })
 })
