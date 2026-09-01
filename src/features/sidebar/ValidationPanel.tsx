@@ -1,4 +1,5 @@
 import type { Fixture, Riser, Route, RiserId } from '@/domain/types'
+import { formatLengthM, formatLengthMm, type LengthUnit } from '@/shared/lengthUnits'
 import { findUncoveredToilets, getMaxRiserToWcDistance } from '@/shared/routes/riserCoverage'
 import './ValidationPanel.css'
 
@@ -6,7 +7,8 @@ interface ValidationPanelProps {
   routes: Route[]
   fixtures: Fixture[]
   risers: Riser[]
-  unitLabel: string
+  /** Unit of the position/drop values ('m' for web-ifc-normalized geometry). */
+  unit: LengthUnit
   screedDepth: number
   riserLabels: Map<RiserId, string>
 }
@@ -15,12 +17,14 @@ export function ValidationPanel({
   routes,
   fixtures,
   risers,
-  unitLabel,
+  unit,
   screedDepth,
   riserLabels,
 }: ValidationPanelProps) {
   const uncoveredToilets = findUncoveredToilets(fixtures, risers)
-  const wcCoverageLimit = getMaxRiserToWcDistance(unitLabel === 'm' ? 'm' : 'mm')
+  // Positions can only be in mm or m in practice (see RisersPanel note on
+  // web-ifc metre normalization), so map anything non-mm to the metre limit.
+  const wcCoverageLimit = getMaxRiserToWcDistance(unit === 'mm' ? 'mm' : 'm')
 
   if (routes.length === 0 && uncoveredToilets.length === 0) {
     return (
@@ -46,7 +50,7 @@ export function ValidationPanel({
             <strong className="validation-panel__coverage-count">{uncoveredToilets.length}</strong>
           </div>
           <p className="validation-panel__coverage-copy">
-            Each toilet must have its own riser within {fmtDistance(wcCoverageLimit)} {unitLabel}.
+            Each toilet must have its own riser within {formatLengthMm(wcCoverageLimit, unit)}.
           </p>
 
           <ul className="validation-panel__issue-list">
@@ -60,7 +64,7 @@ export function ValidationPanel({
                   WC
                 </span>
                 <span className="validation-panel__issue-drop">
-                  {formatCoverageIssue(issue, unitLabel)}
+                  {formatCoverageIssue(issue, unit)}
                 </span>
               </li>
             ))}
@@ -86,12 +90,12 @@ export function ValidationPanel({
           <div className="validation-panel__stats">
             <div className="validation-panel__stat">
               <span className="validation-panel__stat-label">Limit</span>
-              <strong className="validation-panel__stat-value">{screedDepth} {unitLabel}</strong>
+              <strong className="validation-panel__stat-value">{formatLengthMm(screedDepth, unit)}</strong>
             </div>
             <div className="validation-panel__stat">
               <span className="validation-panel__stat-label">Max drop</span>
               <strong className={['validation-panel__stat-value', maxDrop > screedDepth ? 'validation-panel__stat-value--fail' : ''].filter(Boolean).join(' ')}>
-                {fmtDrop(maxDrop)} {unitLabel}
+                {formatLengthMm(maxDrop, unit)}
               </strong>
             </div>
             <div className="validation-panel__stat">
@@ -115,9 +119,9 @@ export function ValidationPanel({
                       {riserLabels.get(route.riserId) ?? '—'}
                     </span>
                     <span className="validation-panel__issue-drop">
-                      {fmtDrop(route.drop)} {unitLabel}
+                      {formatLengthMm(route.drop, unit)}
                       <span className="validation-panel__issue-over">
-                        {' '}+{fmtDrop(route.drop - screedDepth)}
+                        {' '}+{formatLengthMm(route.drop - screedDepth, unit)}
                       </span>
                     </span>
                   </li>
@@ -128,7 +132,7 @@ export function ValidationPanel({
 
           {failing === 0 && (
             <div className="validation-panel__clear">
-              All {routes.length} route{routes.length > 1 ? 's' : ''} fit within the {screedDepth} {unitLabel} screed zone.
+              All {routes.length} route{routes.length > 1 ? 's' : ''} fit within the {formatLengthMm(screedDepth, unit)} screed zone.
             </div>
           )}
         </>
@@ -137,19 +141,11 @@ export function ValidationPanel({
   )
 }
 
-function fmtDrop(v: number): string {
-  return v < 10 ? v.toFixed(2) : Math.round(v).toLocaleString()
-}
-
-function fmtDistance(v: number): string {
-  return v < 10 ? v.toFixed(2) : Math.round(v).toLocaleString()
-}
-
 function formatCoverageIssue(
   issue: { nearestDistance: number | null; reason: 'no_riser' | 'out_of_range' | 'shared_riser' },
-  unitLabel: string,
+  unit: LengthUnit,
 ): string {
   if (issue.reason === 'no_riser' || issue.nearestDistance === null) return 'no riser'
-  if (issue.reason === 'shared_riser') return `shared ${fmtDistance(issue.nearestDistance)} ${unitLabel}`
-  return `nearest ${fmtDistance(issue.nearestDistance)} ${unitLabel}`
+  if (issue.reason === 'shared_riser') return `shared ${formatLengthM(issue.nearestDistance, unit)}`
+  return `nearest ${formatLengthM(issue.nearestDistance, unit)}`
 }

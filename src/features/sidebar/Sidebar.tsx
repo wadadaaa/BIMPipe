@@ -3,6 +3,7 @@ import type { Fixture, KitchenArea, Riser, RiserId, SidebarTab } from '@/domain/
 import type { FixtureRiserAssignment } from '@/domain/assignFixturesToRisers'
 import type { StoreyDetectionAggregation } from '@/shared/ifc/aggregateStoreyDetections'
 import type { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
+import type { LengthUnit } from '@/shared/lengthUnits'
 import { ViewTransition } from '@/shared/reactViewTransition'
 import { FixturesPanel } from './FixturesPanel'
 import { RisersPanel } from './RisersPanel'
@@ -34,6 +35,8 @@ interface SidebarProps {
   demoFlowEnabled?: boolean
   demoFloorOpened?: boolean
   sanitaryRouteCount?: number
+  /** Model length unit resolved from IfcUnitAssignment; null when unknown. */
+  modelLengthUnit?: LengthUnit | null
 }
 
 const TABS: { id: SidebarTab; label: string; focus: string; hint: string }[] = [
@@ -82,6 +85,7 @@ export function Sidebar({
   demoFlowEnabled = false,
   demoFloorOpened = false,
   sanitaryRouteCount = 0,
+  modelLengthUnit = null,
 }: SidebarProps) {
   const activeTabMeta = TABS.find((tab) => tab.id === activeTab)!
   const riserPanelKey = risers.map((riser) => riser.id).join(':') || 'empty'
@@ -202,6 +206,7 @@ export function Sidebar({
                 demoFlowEnabled={demoFlowEnabled}
                 demoFloorOpened={demoFloorOpened}
                 sanitaryRouteCount={sanitaryRouteCount}
+                modelLengthUnit={modelLengthUnit}
               />
             ) : (
               <PlacementValidationPanel

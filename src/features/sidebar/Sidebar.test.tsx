@@ -198,7 +198,8 @@ describe('Sidebar', () => {
     )
 
     expect(screen.getByText(/near WC-1/i)).toBeInTheDocument()
-    expect(screen.queryByText(/125\.0 m, 220\.0 m/)).not.toBeInTheDocument()
+    // W2: coordinates are formatted via the canonical converter with IFC-Y sign.
+    expect(screen.queryByText(/125\.00 m, -220\.00 m/)).not.toBeInTheDocument()
   })
 
   it('keeps exact riser coordinates visible outside demo mode', () => {
@@ -216,7 +217,42 @@ describe('Sidebar', () => {
       />,
     )
 
-    expect(screen.getByText('125.0 m, 220.0 m')).toBeInTheDocument()
+    // W2 intended change: viewer z is -(IFC Y), so the displayed Y is negated,
+    // and both components go through the canonical metre formatter (2 decimals).
+    expect(screen.getByText('125.00 m, -220.00 m')).toBeInTheDocument()
     expect(screen.queryByText(/near WC-1/i)).not.toBeInTheDocument()
+  })
+
+  it('converts raw-mm coordinates to metres when the model unit is unknown (heuristic fallback)', () => {
+    render(
+      <Sidebar
+        activeTab="risers"
+        onTabChange={vi.fn()}
+        selectedStoreyName="02"
+        risers={[
+          { id: 'r1', stackId: 'stack-1', stackLabel: 'R1', storeyId: 2, position: { x: 12500, y: 0, z: -3000 } },
+        ]}
+      />,
+    )
+
+    expect(screen.getByText('12.50 m, 3.00 m')).toBeInTheDocument()
+  })
+
+  it('treats coordinates as metres when the model length unit is resolved', () => {
+    // Positions above the mm heuristic threshold: a resolved model unit means
+    // web-ifc already normalized geometry to metres, so no heuristic applies.
+    render(
+      <Sidebar
+        activeTab="risers"
+        onTabChange={vi.fn()}
+        selectedStoreyName="02"
+        modelLengthUnit="cm"
+        risers={[
+          { id: 'r1', stackId: 'stack-1', stackLabel: 'R1', storeyId: 2, position: { x: 1250, y: 0, z: -300 } },
+        ]}
+      />,
+    )
+
+    expect(screen.getByText('1250.00 m, 300.00 m')).toBeInTheDocument()
   })
 })
