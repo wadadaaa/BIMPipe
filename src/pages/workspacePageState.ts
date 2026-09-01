@@ -1,5 +1,6 @@
 import type { Fixture, KitchenArea, Riser, RiserId, Storey, StoreyId, SidebarTab } from '@/domain/types'
 import type { FloorMeshes } from '@/shared/ifc/extractFloorMeshes'
+import type { InitialStoreyDecision } from '@/shared/ifc/scanStoreyFixtures'
 import type { ModelOriginDecision } from '@/shared/frame/modelFrame'
 import type { LengthUnit } from '@/shared/lengthUnits'
 import { appendAdjustment, createAdjustLog, type AdjustLog } from '@/domain/adjustLog'
@@ -33,6 +34,12 @@ export interface WorkspacePageState {
   floorMeshes: FloorMeshes | null
   isExtractingGeometry: boolean
   geometryError: string | null
+
+  // --- initial floor auto-select (plain mode) ---
+  // Why the chooser auto-opened a floor after upload, surfaced in the
+  // Decisions tab and the exported debug JSON. null in demo mode (demo keeps
+  // its legacy floor-selection semantics) and before any model is loaded.
+  initialStoreyDecision: InitialStoreyDecision | null
 
   // --- model frame ---
   // Origin for local-frame rendering (viewer metres, Y-up), resolved once per
@@ -93,6 +100,7 @@ export const initialWorkspacePageState: WorkspacePageState = {
   floorMeshes: null,
   isExtractingGeometry: false,
   geometryError: null,
+  initialStoreyDecision: null,
   modelOrigin: null,
   hoveredExpressId: null,
   selectedExpressId: null,
@@ -139,6 +147,9 @@ export type WorkspacePageAction =
   // Carries the declared length unit alongside the storeys: both are read from
   // the same freshly-opened model, so they land in state atomically.
   | { type: 'storeys-parsed'; storeys: Storey[]; modelLengthUnit: LengthUnit | null }
+  // Plain-mode floor auto-select outcome (chooser or its fallback), recorded
+  // for the Decisions tab / debug JSON before the floor actually opens.
+  | { type: 'initial-storey-chosen'; decision: InitialStoreyDecision }
   | { type: 'upload-failed'; message: string }
   | { type: 'upload-parsing-finished' }
   // `hasRisers` is sampled from the live riser ref at dispatch time because the
@@ -233,6 +244,7 @@ function reduce(state: WorkspacePageState, action: WorkspacePageAction): Workspa
         webIfcModelId: null,
         modelOrigin: null,
         modelLengthUnit: null,
+        initialStoreyDecision: null,
         adjustLog: createAdjustLog(),
       }
 
@@ -241,6 +253,9 @@ function reduce(state: WorkspacePageState, action: WorkspacePageAction): Workspa
 
     case 'storeys-parsed':
       return { ...state, storeys: action.storeys, modelLengthUnit: action.modelLengthUnit }
+
+    case 'initial-storey-chosen':
+      return { ...state, initialStoreyDecision: action.decision }
 
     case 'upload-failed':
       return { ...state, uploadError: action.message }

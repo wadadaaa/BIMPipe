@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   exportFullIfcWithRisers: vi.fn(),
   exportFullIfcWithRisersWithDebug: vi.fn(),
   getDemoRuntimeConfig: vi.fn(),
+  chooseInitialStoreyByFixtures: vi.fn(),
 }))
 
 vi.mock('@/shared/ifc/ifcApi', () => ({
@@ -37,6 +38,10 @@ vi.mock('@/shared/ifc/detectFixtures', () => ({
 
 vi.mock('@/shared/ifc/detectKitchens', () => ({
   detectKitchens: mocks.detectKitchens,
+}))
+
+vi.mock('@/shared/ifc/scanStoreyFixtures', () => ({
+  chooseInitialStoreyByFixtures: mocks.chooseInitialStoreyByFixtures,
 }))
 
 vi.mock('@/shared/ifc/exportFullIfcWithRisers', () => ({
@@ -123,6 +128,14 @@ describe('WorkspacePage', () => {
 
     mocks.getIfcApi.mockResolvedValue(api)
     mocks.resolveModelLengthUnit.mockResolvedValue('mm')
+    // Plain-mode auto-select goes through the fixture chooser; keep the mocked
+    // choice on קומה 2 so plain-mode flows open the same floor as before.
+    mocks.chooseInitialStoreyByFixtures.mockResolvedValue({
+      storeyId: 2,
+      storeyName: 'קומה 2',
+      reason: 'Lowest of 1 toilet-bearing storeys sharing fixture fingerprint "TOILETPAN:2" (test).',
+      scanMs: 5,
+    })
     mocks.parseStoreys.mockResolvedValue([
       { id: 102, name: 'מרתף 2', elevation: -600, modelId: 'model-1' },
       { id: 2, name: 'קומה 2', elevation: 612, modelId: 'model-1' },
@@ -187,6 +200,7 @@ describe('WorkspacePage', () => {
     mocks.exportFullIfcWithRisers.mockReset()
     mocks.exportFullIfcWithRisersWithDebug.mockReset()
     mocks.getDemoRuntimeConfig.mockReset()
+    mocks.chooseInitialStoreyByFixtures.mockReset()
   })
 
   it('auto-opens קומה 2 instead of מרתף 2 and excludes penthouse floor from auto-generated risers by default', async () => {
@@ -202,6 +216,9 @@ describe('WorkspacePage', () => {
       expect(levelTwoButton).toHaveClass('storey-list__item--selected')
     })
     expect(mocks.extractFloorMeshes).toHaveBeenCalledWith(expect.anything(), 101, 2)
+    // Demo mode keeps its legacy floor-selection semantics: the fixture-scan
+    // chooser must never run in the demo flow.
+    expect(mocks.chooseInitialStoreyByFixtures).not.toHaveBeenCalled()
 
     // Detection and placement are split — risers only appear after the user
     // explicitly clicks Place risers in the fixtures panel.
@@ -360,6 +377,37 @@ describe('WorkspacePage', () => {
       expect(mocks.extractFloorMeshes).not.toHaveBeenCalled()
     })
     expect(screen.getByText(/no active floor/i)).toBeInTheDocument()
+  })
+
+  it('plain mode auto-opens the chooser-selected storey and surfaces its reason in Decisions', async () => {
+    mocks.getDemoRuntimeConfig.mockReturnValue({ enabled: false as const })
+    // The chooser picks קומה 3 — NOT the "floor named 2" the legacy heuristic
+    // would pick — proving the open-model flow follows the fixture chooser.
+    mocks.chooseInitialStoreyByFixtures.mockResolvedValue({
+      storeyId: 3,
+      storeyName: 'קומה 3',
+      reason: 'Distinctive chooser test reason for the decisions surface.',
+      scanMs: 7,
+    })
+
+    const user = userEvent.setup()
+    render(<WorkspacePage />)
+
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]')
+    expect(input).not.toBeNull()
+    await user.upload(input!, new File([new ArrayBuffer(128)], 'anytower.ifc'))
+
+    const levelThreeButton = await screen.findByRole('button', { name: /קומה 3/i })
+    await waitFor(() => {
+      expect(levelThreeButton).toHaveClass('storey-list__item--selected')
+    })
+    expect(mocks.extractFloorMeshes).toHaveBeenCalledWith(expect.anything(), 101, 3)
+    expect(mocks.chooseInitialStoreyByFixtures).toHaveBeenCalledTimes(1)
+
+    await user.click(screen.getByRole('tab', { name: 'Decisions' }))
+    expect(await screen.findByText(/Auto-opened floor:/)).toBeInTheDocument()
+    expect(screen.getByText(/Distinctive chooser test reason/)).toBeInTheDocument()
+    expect(screen.getByText(/Fixture scan took 7 ms/)).toBeInTheDocument()
   })
 
   it('computes and surfaces sanitary routes without demo mode once fixtures and risers exist on the floor', async () => {

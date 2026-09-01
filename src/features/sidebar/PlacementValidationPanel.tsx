@@ -1,4 +1,5 @@
 import type { StoreyDetectionAggregation } from '@/shared/ifc/aggregateStoreyDetections'
+import type { InitialStoreyDecision } from '@/shared/ifc/scanStoreyFixtures'
 import type { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
 
 type ValidationReport = ReturnType<typeof buildRiserValidationReport>
@@ -7,6 +8,8 @@ interface PlacementValidationPanelProps {
   report: ValidationReport | null
   detectionAggregation: StoreyDetectionAggregation | null
   demoFlowEnabled?: boolean
+  /** Why the initial floor was auto-opened (plain mode); null in demo mode. */
+  initialStoreyDecision?: InitialStoreyDecision | null
 }
 
 function getUserFacingIssue(
@@ -59,9 +62,24 @@ export function PlacementValidationPanel({
   report,
   detectionAggregation,
   demoFlowEnabled = false,
+  initialStoreyDecision = null,
 }: PlacementValidationPanelProps) {
+  const autoOpenDecision = initialStoreyDecision && (
+    <p className="sidebar__panel-copy">
+      <strong>Auto-opened floor:</strong> <span dir="auto">{initialStoreyDecision.storeyName ?? 'none'}</span>
+      {' — '}
+      {initialStoreyDecision.reason}
+      {initialStoreyDecision.scanMs !== null ? ` Fixture scan took ${initialStoreyDecision.scanMs} ms.` : ''}
+    </p>
+  )
+
   if (!report) {
-    return <p className="sidebar__panel-copy">Suggest risers to populate export validation details.</p>
+    return (
+      <>
+        {autoOpenDecision}
+        <p className="sidebar__panel-copy">Suggest risers to populate export validation details.</p>
+      </>
+    )
   }
 
   const classCounts = report.floorClassifications.reduce<Record<string, number>>((acc, floor) => {
@@ -74,6 +92,7 @@ export function PlacementValidationPanel({
 
   return (
     <section className="sidebar__panel">
+      {autoOpenDecision}
       <p className="sidebar__panel-title">Placement and export readiness</p>
       <ul className="risers-panel__legend-list">
         <li><strong>Processed floors:</strong> {report.summary.processedFloorCount}</li>

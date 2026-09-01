@@ -14,6 +14,7 @@ import { resolveModelLengthUnit } from '@/shared/ifc/resolveModelLengthUnit'
 import type { LengthUnit } from '@/shared/lengthUnits'
 import type { Fixture, KitchenArea, PlanBounds, Riser, RiserId, Storey, StoreyId, SidebarTab } from '@/domain/types'
 import type { FloorMeshes } from '@/shared/ifc/extractFloorMeshes'
+import type { InitialStoreyDecision } from '@/shared/ifc/scanStoreyFixtures'
 import type { FloorRoutes, RouteSegment } from '@/domain/branchRouting'
 import type { SanitaryFixtureRoute } from '@/shared/routes/buildSanitaryRoutes'
 import {
@@ -117,6 +118,7 @@ export function WorkspacePage({
     floorMeshes,
     isExtractingGeometry,
     geometryError,
+    initialStoreyDecision,
     modelOrigin,
     hoveredExpressId,
     selectedExpressId,
@@ -221,9 +223,25 @@ export function WorkspacePage({
         dispatch({ type: 'storeys-parsed', storeys: parsed, modelLengthUnit })
       })
       preloadFloorInspectionModules()
-      const defaultStoreyId = findDefaultStoreyId(parsed)
-      if (defaultStoreyId !== null) {
-        void openStorey(defaultStoreyId)
+      if (demoRuntime.enabled) {
+        // Demo floor-selection semantics preserved untouched: the demo flow
+        // keeps the legacy name-based default floor (its configured scope is
+        // built around that floor), independent of the fixture chooser.
+        const defaultStoreyId = findDefaultStoreyId(parsed)
+        if (defaultStoreyId !== null) {
+          void openStorey(defaultStoreyId)
+        }
+      } else {
+        // Plain mode: pick the floor to open from per-storey fixture evidence
+        // (geometry-free scan + pure chooser). The decision, including its
+        // human-readable reason, lands in the Decisions tab and debug JSON.
+        const decision = await resolveInitialStoreyDecision(api, newModelId, parsed)
+        startTransition(() => {
+          dispatch({ type: 'initial-storey-chosen', decision })
+        })
+        if (decision.storeyId !== null) {
+          void openStorey(decision.storeyId)
+        }
       }
     } catch (err) {
       dispatch({
@@ -492,6 +510,7 @@ export function WorkspacePage({
         {
           ...fullExport.debugMapping,
           placementRuleProfile: DEFAULT_RISER_PLACEMENT_RULE_PROFILE,
+          initialStoreyDecision,
           floorClassification,
           validationReport: buildRiserValidationReport({
             exportRunId,
@@ -757,6 +776,7 @@ export function WorkspacePage({
       onDownloadFullIfc={() => void handleDownloadIfc()}
       validationReport={validationReport}
       detectionAggregation={detectionDebugRef.current}
+      initialStoreyDecision={initialStoreyDecision}
       sanitaryRouteLimitations={sanitaryRoutingPreview.limitations}
       demoFlowEnabled={demoRuntime.enabled}
       demoFloorOpened={demoFloorOpened}
@@ -885,6 +905,32 @@ function downloadBlob(blob: Blob, fileName: string) {
   window.setTimeout(() => {
     URL.revokeObjectURL(url)
   }, 1000)
+}
+
+/**
+ * Plain-mode initial floor decision: geometry-free per-storey fixture scan +
+ * pure chooser. If the scan fails (malformed relations, engine error) the
+ * legacy name-based heuristic still opens a floor, and the failure reason is
+ * recorded instead of silently swallowed.
+ */
+async function resolveInitialStoreyDecision(
+  api: Awaited<ReturnType<typeof getIfcApi>>,
+  webIfcModelId: number,
+  storeys: Storey[],
+): Promise<InitialStoreyDecision> {
+  try {
+    const { chooseInitialStoreyByFixtures } = await import('@/shared/ifc/scanStoreyFixtures')
+    return await chooseInitialStoreyByFixtures(api, webIfcModelId, storeys)
+  } catch (err) {
+    const fallbackStoreyId = findDefaultStoreyId(storeys)
+    const fallbackStorey = storeys.find((storey) => storey.id === fallbackStoreyId) ?? null
+    return {
+      storeyId: fallbackStoreyId,
+      storeyName: fallbackStorey?.name ?? null,
+      reason: `Fixture scan failed (${err instanceof Error ? err.message : 'unknown error'}); fell back to name-based floor selection.`,
+      scanMs: null,
+    }
+  }
 }
 
 function findDefaultStoreyId(storeys: Storey[]): StoreyId | null {
