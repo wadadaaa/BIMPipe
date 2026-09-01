@@ -14,7 +14,7 @@ Privacy rule for this goal: `external/` and `refs/` hold private client data and
 | W4 | ⏳ | |
 | W5 — Vertical continuity map | ✅ core | commits `a5dddcf`, `308c880`, `1dd1786`; debug overlay wiring deferred to post-W4 (details below) |
 | W6 — T4 export + adjust log | ✅ core | commits `887c3e0`, `17adbab`, `2fbcbb3`; log UI wiring deferred (details below) |
-| W7 | 🔄 | engineer extraction + metrics in progress (parallel wave 1) |
+| W7 — Engineer baseline extraction + metrics | ✅ core | commits `0b0e096`, `d177c28`, `1668b7a`, `ad71263`; overlay + metrics display deferred to post-W4 (details below) |
 | Push | ⏳ | |
 
 ## Goal 2 milestones
@@ -65,6 +65,16 @@ Pure refactor, no behavior change intended. Parity baseline (pre-change HEAD): `
 - **`src/shared/ifc/extractContinuityInputs.ts` (new adapter)** + gated 096-A test which ran against the real file: 13 storeys, 443 IfcSpaces, 25 shaft-named spaces found (parse ~0.6 s; full geometry tessellation deliberately excluded from the test — minutes-level — left for the coordinator's live overlay check).
 - **Focused tests**: 63/63 across 4 files; ESLint + `tsc -b` clean.
 - **Deferred**: 2D debug overlay + flag-on wiring in the app (post-W4 phase per coordination plan). Caller note: 096 is cm — pass explicit cell/tolerance/maxSnap overrides (or convert via the W2 unit modules); `LengthUnit` in the continuity module is mm/m only.
+
+### W7 — Engineer baseline extraction + comparison metrics ✅ core (2026-09-01, commits `0b0e096`, `d177c28`, `1668b7a`, `ad71263`)
+
+- **`src/shared/ifc/extractEngineerPipeNetwork.ts` (new)**: system-prefix-filtered pipe segment extraction (IfcFlowSegment/IfcPipeSegment) with storey resolution, centreline endpoints from the extrusion axis through the local-placement chain (mesh-bounds fallback filters stray world-origin vertices), IfcCircleProfileDef diameters → mm, pset `Length`/`InvertElevation` → metres null-safe, explicit unit resolution that throws instead of assuming.
+- **`src/domain/engineerPipes.ts` (new, pure)**: `groupEngineerRiserStacks` — vertical segments (5° tolerance) of SW-GRV/VNT with Ø ≥ 110 mm, union-find grouped by plan midpoint within 250 mm / 0.25 m.
+- **`src/domain/engineerComparisonMetrics.ts` (new, pure)**: JSON-ready comparison report — riser counts ours vs engineer, mean nearest-engineer-riser distance, branch length ratio (null-safe), fixtures assigned vs engineer-connected (honestly `null` + note: would need IfcRelConnectsPorts topology).
+- **Gated 096-P test passed against the real file** (6 tests, <1 s — no mesh generation needed): storey "01" SW-GRV segments = **exactly 129**; diameters observed **{50, 63, 110} mm** (within the allowed {50, 63, 110, 160}; 160 not present on storey-01 SW-GRV); **0 null InvertElevations**; all 129 endpoints via extrusion axis; **50 engineer riser stacks, max span 3 storeys**. Synthetic real-engine tests on a programmatic cm-unit IFC2X3 model with neutral names cover slope, prefixes, psets, determinism, origin artifacts.
+- **Focused tests**: 34/34 across 4 files; ESLint + tsc clean.
+- **Known caveats (documented in code)**: stack storey span uses containment (096 models some risers as single full-height pipes → span understates Z-extent; Z-extent span is a natural follow-up); metrics require frame alignment between viewer plan and IFC source plan — belongs to the overlay wave.
+- **Deferred**: 2D engineer-network overlay layer + metrics in Decisions/debug JSON (post-W4 phase).
 
 ---
 
