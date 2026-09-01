@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { formatStoreyElevationChip } from './FloorViewer'
+import { formatStoreyElevationChip } from './formatStoreyElevation'
 
 describe('FloorViewer status bar elevation chip', () => {
   it('formats the raw IFC elevation as metres using the declared model unit', () => {
