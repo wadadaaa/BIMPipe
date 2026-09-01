@@ -732,7 +732,7 @@ describe('exportFullIfcWithRisers', () => {
       Name: { value: 'Qto_PipeSegmentBaseQuantities' },
       MethodOfMeasurement: null,
     })
-    expect(quantitySets[0].Quantities).toHaveLength(2)
+    expect(quantitySets[0].Quantities).toHaveLength(3)
     expect(getQuantityLength(writtenLines, 'NetLength')?.LengthValue).toMatchObject({
       type: 9,
       value: 300,
@@ -741,7 +741,69 @@ describe('exportFullIfcWithRisers', () => {
       type: 9,
       value: 300,
     })
+    // Mock unit is CENTI (10 mm per source unit): default Ø110 -> 11 source units.
+    expect(getQuantityLength(writtenLines, 'NominalDiameter')?.LengthValue).toMatchObject({
+      type: 9,
+      value: 11,
+    })
     expect(result.debugMapping.risers[0].createdEntityIds.qtoSet).toEqual(quantitySets[0].expressID)
+  })
+
+  it('writes an explicit stack diameter into profile radius, psets, and quantities', async () => {
+    const { api, writtenLines } = makeMockApi()
+
+    const result = await exportFullIfcWithRisersWithDebug(api, new Uint8Array([1, 2, 3]), 66, [
+      { id: 'a-1', stackId: 'stack-a', stackLabel: 'R1', storeyId: 66, position: { x: 10, y: 100, z: 5 }, diameterMm: 160 },
+      { id: 'a-2', stackId: 'stack-a', stackLabel: 'R1', storeyId: 67, position: { x: 10, y: 400, z: 5 } },
+    ])
+
+    // Mock unit is CENTI (10 mm per source unit): Ø160 -> radius 8 source units.
+    const circleProfiles = getLinesByType(writtenLines, 4)
+    expect(circleProfiles).toHaveLength(1)
+    expect(circleProfiles[0].Radius).toMatchObject({ type: 9, value: 8 })
+    expect(getPropertySingleValue(writtenLines, 'NominalDiameter')?.NominalValue).toMatchObject({
+      type: IFCPOSITIVELENGTHMEASURE,
+      value: 16,
+    })
+    expect(getPropertySingleValue(writtenLines, 'OuterDiameter')?.NominalValue).toMatchObject({
+      type: IFCPOSITIVELENGTHMEASURE,
+      value: 16,
+    })
+    // InnerDiameter = diameter - 2 x 5 mm wall = 150 mm -> 15 source units.
+    expect(getPropertySingleValue(writtenLines, 'InnerDiameter')?.NominalValue).toMatchObject({
+      type: IFCPOSITIVELENGTHMEASURE,
+      value: 15,
+    })
+    expect(getQuantityLength(writtenLines, 'NominalDiameter')?.LengthValue).toMatchObject({
+      type: 9,
+      value: 16,
+    })
+    expect(result.debugMapping.risers[0].diameterMm).toBe(160)
+  })
+
+  it('defaults the stack diameter to 110 mm and records it in the debug mapping', async () => {
+    const { api, writtenLines } = makeMockApi()
+
+    const result = await exportFullIfcWithRisersWithDebug(api, new Uint8Array([1, 2, 3]), 66, [
+      { id: 'a-1', stackId: 'stack-a', stackLabel: 'R1', storeyId: 66, position: { x: 10, y: 100, z: 5 } },
+      { id: 'a-2', stackId: 'stack-a', stackLabel: 'R1', storeyId: 67, position: { x: 10, y: 400, z: 5 } },
+    ])
+
+    const circleProfiles = getLinesByType(writtenLines, 4)
+    expect(circleProfiles).toHaveLength(1)
+    expect(circleProfiles[0].Radius).toMatchObject({ type: 9, value: 5.5 })
+    expect(result.debugMapping.risers[0].diameterMm).toBe(110)
+  })
+
+  it('throws when one stack carries conflicting diameters', async () => {
+    const { api } = makeMockApi()
+
+    await expect(
+      exportFullIfcWithRisers(api, new Uint8Array([1, 2, 3]), 66, [
+        { id: 'a-1', stackId: 'stack-a', stackLabel: 'R1', storeyId: 66, position: { x: 10, y: 100, z: 5 }, diameterMm: 110 },
+        { id: 'a-2', stackId: 'stack-a', stackLabel: 'R1', storeyId: 67, position: { x: 10, y: 400, z: 5 }, diameterMm: 160 },
+      ]),
+    ).rejects.toThrow(/Riser stack R1 .*conflicting diameters: 110, 160 mm/)
   })
 
   it('emits one IfcRelDefinesByProperties per stack referencing the quantity set', async () => {
