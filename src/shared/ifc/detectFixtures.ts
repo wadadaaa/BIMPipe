@@ -1,6 +1,7 @@
 import type { IfcAPI } from 'web-ifc'
 import type { Fixture, FixtureKind, StoreyId } from '@/domain/types'
 import { detectPlanUnits, planDistance } from '@/shared/routes/planGeometry'
+import { createArtifactAwareBoundsAccumulator } from '@/shared/frame/modelFrame'
 import { collectSpatialTreeElements } from './collectSpatialTreeElements'
 
 interface DetectedFixtureCandidate extends Fixture {
@@ -14,6 +15,11 @@ interface DetectedFixtureCandidate extends Fixture {
  *
  * This is more accurate than reading t[12,13,14] (the insertion origin), which
  * points to the pipe-connection stub rather than the visible body of the fixture.
+ *
+ * Bounds are artifact-aware: stray (0,0,0)-adjacent vertices in otherwise
+ * far-from-origin meshes are dropped before the centre is computed, so a single
+ * zero vertex cannot drag a fixture centroid hundreds of kilometres off the
+ * building. Near-origin models keep every vertex.
  */
 export function getIfcElementPosition(
   api: IfcAPI,
@@ -24,8 +30,7 @@ export function getIfcElementPosition(
     const flatMesh = api.GetFlatMesh(webIfcModelId, expressId)
     if (flatMesh.geometries.size() === 0) return null
 
-    let minX = Infinity, minY = Infinity, minZ = Infinity
-    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
+    const bounds = createArtifactAwareBoundsAccumulator()
 
     for (let gi = 0; gi < flatMesh.geometries.size(); gi++) {
       const placed = flatMesh.geometries.get(gi)
@@ -46,20 +51,16 @@ export function getIfcElementPosition(
         const wx = t[0] * lx + t[4] * ly + t[8] * lz + t[12]
         const wy = t[1] * lx + t[5] * ly + t[9] * lz + t[13]
         const wz = t[2] * lx + t[6] * ly + t[10] * lz + t[14]
-        if (wx < minX) minX = wx
-        if (wx > maxX) maxX = wx
-        if (wy < minY) minY = wy
-        if (wy > maxY) maxY = wy
-        if (wz < minZ) minZ = wz
-        if (wz > maxZ) maxZ = wz
+        bounds.add(wx, wy, wz)
       }
     }
 
-    if (!isFinite(minX)) return null
+    const box = bounds.result()
+    if (box === null) return null
     return {
-      x: (minX + maxX) / 2,
-      y: (minY + maxY) / 2,
-      z: (minZ + maxZ) / 2,
+      x: (box.minX + box.maxX) / 2,
+      y: (box.minY + box.maxY) / 2,
+      z: (box.minZ + box.maxZ) / 2,
     }
   } catch {
     return null

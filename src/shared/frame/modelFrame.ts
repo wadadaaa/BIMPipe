@@ -58,6 +58,69 @@ export function shouldDropOriginArtifacts(maxPlanDistanceM: number): boolean {
   return maxPlanDistanceM > FAR_FROM_ORIGIN_THRESHOLD_M
 }
 
+/** Axis-aligned bounds in viewer metres (Y-up). */
+export interface Bounds3D {
+  minX: number
+  minY: number
+  minZ: number
+  maxX: number
+  maxY: number
+  maxZ: number
+}
+
+/**
+ * Accumulates vertex bounds while tracking origin-artifact vertices
+ * ((0,0,0)-adjacent strays) separately. `result()` returns the bounds with
+ * artifacts dropped when the rest of the geometry is far from the origin;
+ * for near-origin geometry (e.g. Duplex) every vertex counts, so legitimate
+ * near-zero coordinates are never discarded.
+ */
+export interface ArtifactAwareBoundsAccumulator {
+  add(x: number, y: number, z: number): void
+  /** null when no vertices were added. */
+  result(): Bounds3D | null
+}
+
+export function createArtifactAwareBoundsAccumulator(): ArtifactAwareBoundsAccumulator {
+  let allMinX = Infinity, allMinY = Infinity, allMinZ = Infinity
+  let allMaxX = -Infinity, allMaxY = -Infinity, allMaxZ = -Infinity
+  let keptMinX = Infinity, keptMinY = Infinity, keptMinZ = Infinity
+  let keptMaxX = -Infinity, keptMaxY = -Infinity, keptMaxZ = -Infinity
+  let maxPlanDistance = 0
+
+  return {
+    add(x, y, z) {
+      if (x < allMinX) allMinX = x
+      if (x > allMaxX) allMaxX = x
+      if (y < allMinY) allMinY = y
+      if (y > allMaxY) allMaxY = y
+      if (z < allMinZ) allMinZ = z
+      if (z > allMaxZ) allMaxZ = z
+
+      if (isOriginArtifactVertex(x, y, z)) return
+
+      if (x < keptMinX) keptMinX = x
+      if (x > keptMaxX) keptMaxX = x
+      if (y < keptMinY) keptMinY = y
+      if (y > keptMaxY) keptMaxY = y
+      if (z < keptMinZ) keptMinZ = z
+      if (z > keptMaxZ) keptMaxZ = z
+
+      // Far-from-origin verdict comes from the non-artifact vertices (plan
+      // axes X/Z in viewer metres) so artifacts cannot veto their own removal.
+      const planDistance = Math.hypot(x, z)
+      if (planDistance > maxPlanDistance) maxPlanDistance = planDistance
+    },
+    result() {
+      if (!Number.isFinite(allMinX)) return null
+      const useFiltered = Number.isFinite(keptMinX) && shouldDropOriginArtifacts(maxPlanDistance)
+      return useFiltered
+        ? { minX: keptMinX, minY: keptMinY, minZ: keptMinZ, maxX: keptMaxX, maxY: keptMaxY, maxZ: keptMaxZ }
+        : { minX: allMinX, minY: allMinY, minZ: allMinZ, maxX: allMaxX, maxY: allMaxY, maxZ: allMaxZ }
+    },
+  }
+}
+
 /**
  * A rendering frame for one model. `origin` is in viewer metres (Y-up). The
  * identity frame (origin 0,0,0) leaves all coordinates untouched, which keeps

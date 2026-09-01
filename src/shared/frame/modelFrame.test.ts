@@ -5,6 +5,7 @@ import {
   ONE_KILOMETRE_BY_UNIT,
   ORIGIN_ARTIFACT_RADIUS_M,
   chooseModelOrigin,
+  createArtifactAwareBoundsAccumulator,
   createModelFrame,
   isFarFromOrigin,
   isIdentityModelFrame,
@@ -58,6 +59,44 @@ describe('origin-artifact vertex predicates', () => {
     // Near-origin meshes (Duplex/ADAM) must never have vertices dropped.
     expect(shouldDropOriginArtifacts(FAR_FROM_ORIGIN_THRESHOLD_M - 1)).toBe(false)
     expect(shouldDropOriginArtifacts(0)).toBe(false)
+  })
+})
+
+describe('createArtifactAwareBoundsAccumulator', () => {
+  it('drops (0,0,0)-adjacent strays from the bounds of far-from-origin geometry', () => {
+    const acc = createArtifactAwareBoundsAccumulator()
+    acc.add(0, 0, 0) // exporter artifact
+    acc.add(0.2, 0.1, -0.3) // exporter artifact
+    acc.add(181_420, 28, -664_640)
+    acc.add(181_445, 33, -664_615)
+
+    expect(acc.result()).toEqual({
+      minX: 181_420,
+      minY: 28,
+      minZ: -664_640,
+      maxX: 181_445,
+      maxY: 33,
+      maxZ: -664_615,
+    })
+  })
+
+  it('keeps every vertex for near-origin geometry so Duplex-scale models never change', () => {
+    const acc = createArtifactAwareBoundsAccumulator()
+    acc.add(0, 0, 0) // legitimate wall corner at the model origin
+    acc.add(8.4, 3, -17.4)
+
+    expect(acc.result()).toEqual({ minX: 0, minY: 0, minZ: -17.4, maxX: 8.4, maxY: 3, maxZ: 0 })
+  })
+
+  it('falls back to the unfiltered bounds when every vertex is artifact-like', () => {
+    const acc = createArtifactAwareBoundsAccumulator()
+    acc.add(0.1, 0.2, 0.3)
+
+    expect(acc.result()).toEqual({ minX: 0.1, minY: 0.2, minZ: 0.3, maxX: 0.1, maxY: 0.2, maxZ: 0.3 })
+  })
+
+  it('returns null when no vertices were added', () => {
+    expect(createArtifactAwareBoundsAccumulator().result()).toBeNull()
   })
 })
 
