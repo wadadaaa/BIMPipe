@@ -55,7 +55,7 @@ Pure refactor, no behavior change intended. Parity baseline (pre-change HEAD): `
 - **Round-trip proof**: extended tests reopen the bytes with a fresh engine — segment count = stacks + branches, branch system membership, Ø110 default + Ø160 explicit round-trip via profile radii and quantities, both drift-error paths. **Bonus real-bug fix**: IFC4 `IfcRelAssignsToGroup` without explicit `RelatedObjectsType` reopened with `RelatingGroup: null` (corrupt system membership) — fixed in the full exporter.
 - **Adjust log (pure)**: `src/domain/adjustLog.ts` — discriminated-union entries `{stackId, storey, from, to, action, ts}`, immutable append, deterministic pretty-JSON serialization; 7 unit tests. Reducer/download wiring deferred to the UI-lane wave (integration points documented in the worker report).
 - **Focused tests**: 39/39 across 5 export/log test files; ESLint + `tsc -b` clean on owned files.
-- **Known follow-up**: the same `RelatedObjectsType` IFC4 bug exists in `exportSanitaryRouteElements.ts` (unowned this wave) — fix dispatched as a W6 follow-up.
+- **Follow-up done (commit `aec607d`)**: the same `RelatedObjectsType` IFC4 bug in `exportSanitaryRouteElements.ts` fixed (explicit null instead of omitted attribute) and round-trip proven — new per-schema tests reopen the bytes and assert the sanitary-route `IfcRelAssignsToGroup` keeps a non-null `RelatingGroup` with exactly correct, disjoint membership across both systems; a negative check confirmed the IFC4 test fails without the fix. Export test suite now 34/34.
 
 ### W5 — Vertical continuity map ✅ core (2026-09-01, commits `a5dddcf`, `308c880`, `1dd1786`)
 
