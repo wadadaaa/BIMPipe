@@ -8,7 +8,7 @@ Privacy rule for this goal: `external/` and `refs/` hold private client data and
 | --- | --- | --- |
 | W0 — Hygiene (gitignore, bim11 evidence, gate) | ✅ | commit `b06e3f2` + this entry; details below |
 | W0b — WorkspacePage state extraction (typed reducer) | ✅ | commits `0430fa7`, `ffe3af9` + this entry; details below |
-| W1 | 🔄 | coordinate normalization in progress (parallel wave 1) |
+| W1 — Coordinate normalization (local render frame) | ✅ | commits `b4e26d5`, `1513ae7`, `298af8d`, `fa62536`; live 096 browser check pending (details below) |
 | W2 — Units single source of truth | ✅ | commits `508e2bb`, `ccb4a61`, `9dffed2`, `7cfe9a5`; core done, 3 call sites deferred behind W1 (details below) |
 | W3 | ⏳ | |
 | W4 | ⏳ | |
@@ -75,6 +75,17 @@ Pure refactor, no behavior change intended. Parity baseline (pre-change HEAD): `
 - **Focused tests**: 34/34 across 4 files; ESLint + tsc clean.
 - **Known caveats (documented in code)**: stack storey span uses containment (096 models some risers as single full-height pipes → span understates Z-extent; Z-extent span is a natural follow-up); metrics require frame alignment between viewer plan and IFC source plan — belongs to the overlay wave.
 - **Deferred**: 2D engineer-network overlay layer + metrics in Decisions/debug JSON (post-W4 phase).
+
+### W1 — Coordinate normalization ✅ (2026-09-01, commits `b4e26d5`, `1513ae7`, `298af8d`, `fa62536`)
+
+- **`src/shared/frame/modelFrame.ts` (new, pure)**: `isFarFromOrigin` (>1 km, unit-aware), `chooseModelOrigin` (site placement → building placement → artifact-filtered storey-geometry centroid; candidates adopted only when far), `toLocalPoint`/`toSourcePoint`, origin-artifact predicates, artifact-aware bounds accumulator. Origins quantized to whole metres → **source→local→source is bit-exact at 096 scale** (tested).
+- **`src/shared/ifc/resolveModelOrigin.ts` (new)**: probes IfcSite/IfcBuilding placement for the far/near verdict; the origin value always comes from artifact-filtered geometry (web-ifc geometry is metres). Resolved once per model, stored via reducer (`model-origin-resolved`, repeats ignored — frame can never drift mid-session), cleared on `upload-reset`.
+- **Viewer in local frame, domain in source**: `extractFloorMeshes` bakes the origin subtraction in double precision and returns dual bounding boxes (local for viewer/FIT, source for domain/export); markers/FIT/3D localized via memoized props; drag/add hand back local positions converted with `toSourcePoint` before dispatch. Near-origin models (Duplex/ADAM) go through the identity frame — localization helpers return original array references.
+- **`detectFixtures` position math is artifact-aware** (bbox center only; rendered geometry untouched).
+- **Gated 096-P test ran against the real file**: origin (181 416, −664 632) m via site placement, 688 947 m from zero; storey "01" local footprint **25.68 × 22.71 m** (within 26×23 ±3) centred at (−0.07, −0.42); **11 TOILETPAN fixtures** inside the footprint (WC-centre spread 17.65 × 19.21 m).
+- **Offset-frame export round trip (new test file)**: building at 096-scale mm coords, riser placed via local-frame conversion, exported, reopened with a fresh engine — placement chain within 0.5 mm of absolute source coordinates. Existing round-trip suite untouched and green (export frame unchanged).
+- **Focused tests**: 112/112 across 10 files; ESLint + `tsc -b` clean; react-doctor only pre-existing findings.
+- **Pending**: live browser check on 096-P (render + FIT + drag) by the coordinator; far/near placement probe still uses `detectPlanUnits` heuristics (exact unit-assignment signal available from W2's reader — wiring next).
 
 ---
 
