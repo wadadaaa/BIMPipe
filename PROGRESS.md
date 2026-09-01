@@ -13,7 +13,7 @@ Privacy rule for this goal: `external/` and `refs/` hold private client data and
 | W3 | ⏳ | |
 | W4 | ⏳ | |
 | W5 | 🔄 | continuity map in progress (parallel wave 1) |
-| W6 | 🔄 | export extensions + adjust log in progress (parallel wave 1) |
+| W6 — T4 export + adjust log | ✅ core | commits `887c3e0`, `17adbab`, `2fbcbb3`; log UI wiring deferred (details below) |
 | W7 | 🔄 | engineer extraction + metrics in progress (parallel wave 1) |
 | Push | ⏳ | |
 
@@ -46,6 +46,16 @@ Pure refactor, no behavior change intended. Parity baseline (pre-change HEAD): `
 - **Key confirmed fact**: mesh/viewer coordinates are web-ifc-normalized meters when the model declares its unit; raw IFC attributes (storey elevations) stay in source units — the root cause of cm values labelled "mm".
 - **Tests (focused)**: 19 converter + 8 unit-reader (real web-ifc engine on minimal crafted mm/cm/m/feet models) + **gated 096-P test passed live** (unit resolves to `cm`, storey 01 → "30.15 m"; skips cleanly when absent) + Sidebar 12/12. ESLint clean on touched files.
 - **Deferred behind W1 (sibling owns the files this wave)**: (1) call `resolveModelLengthUnit` after `parseStoreys` in `WorkspacePage.tsx` and store in reducer state; (2) pass `modelLengthUnit` to `<Sidebar>`; (3) `StoreyList.tsx` elevation chip → `formatLengthM` (the visible "3,015 mm" → "30.15 m" fix) + its test. Coordinator wires these right after W1 lands.
+
+### W6 — T4 export extensions + adjust log ✅ core (2026-09-01, commits `887c3e0`, `17adbab`, `2fbcbb3`)
+
+- **Riser diameter into export**: `ExportRiser = Riser & { diameterMm?: number }`; per-stack resolution (conflicts throw, absent → `DEFAULT_RISER_DIAMETER_MM = 110`); lands in `IfcCircleProfileDef` radius, type/occurrence psets, and quantities — mm converted explicitly to source units.
+- **Branch-route export**: `FloorRoutes[]` as a new trailing parameter; each `RouteSegment` becomes IfcFlowSegment (IFC2X3) / IfcPipeSegment (IFC4) in the same "BIMPipe Sanitary Stacks" IfcSystem, contained in its storey. Honest representation: straight Ø110 sweeps between sloped endpoints, no elbows/fittings (documented in code + element Description).
+- **Actionable drift error**: `assertBranchRoutesConsistentWithRisers` (tolerance 1 mm) throws before writing, naming the riser, stack, both positions, and drift distance — no silent stale exports.
+- **Round-trip proof**: extended tests reopen the bytes with a fresh engine — segment count = stacks + branches, branch system membership, Ø110 default + Ø160 explicit round-trip via profile radii and quantities, both drift-error paths. **Bonus real-bug fix**: IFC4 `IfcRelAssignsToGroup` without explicit `RelatedObjectsType` reopened with `RelatingGroup: null` (corrupt system membership) — fixed in the full exporter.
+- **Adjust log (pure)**: `src/domain/adjustLog.ts` — discriminated-union entries `{stackId, storey, from, to, action, ts}`, immutable append, deterministic pretty-JSON serialization; 7 unit tests. Reducer/download wiring deferred to the UI-lane wave (integration points documented in the worker report).
+- **Focused tests**: 39/39 across 5 export/log test files; ESLint + `tsc -b` clean on owned files.
+- **Known follow-up**: the same `RelatedObjectsType` IFC4 bug exists in `exportSanitaryRouteElements.ts` (unowned this wave) — fix dispatched as a W6 follow-up.
 
 ---
 
