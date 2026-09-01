@@ -123,6 +123,11 @@
   text-decoration-color: rgba(103, 221, 255, 0.4);
 }
 
+.ifc-upload__label-hint {
+  font-size: 11px;
+  color: var(--text-soft);
+}
+
 /* ── Loaded state ── */
 .ifc-upload__loaded {
   display: flex;
@@ -162,6 +167,10 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+}
+
+.ifc-upload__meta--single {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .ifc-upload__meta-card {
