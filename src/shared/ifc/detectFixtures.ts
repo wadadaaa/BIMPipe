@@ -133,7 +133,37 @@ function isKitchenText(text: string): boolean {
   return KITCHEN_PATTERN.test(text)
 }
 
-function normalizeFixtureKindForKitchen(
+/** How the element was reached; decides which classification rule applies. */
+export type FixtureClassificationSource = 'sanitary-terminal' | 'flow-terminal' | 'keyword'
+
+/**
+ * Pure per-element fixture-kind classifier shared by full detection (below)
+ * and the lightweight per-storey fixture scan (`scanStoreyFixtures`). This is
+ * THE single source of classification rules; both callers must stay on it.
+ *
+ * Returns null when the element is not a plumbing fixture (or is an excluded
+ * shower/floor drain under the current options).
+ */
+export function classifyFixtureLine(
+  source: FixtureClassificationSource,
+  { predefinedType, searchText }: { predefinedType: string; searchText: string },
+  options: Required<DetectFixturesOptions> = DETECT_FIXTURES_CONFIG,
+): FixtureKind | null {
+  const typedSearchText = `${predefinedType} ${searchText}`
+  if (!options.includeShowerFloorDrains && isExcludedFixtureText(typedSearchText)) return null
+
+  const fallbackKind = inferFixtureKindFromText(searchText)
+  const showerFloorDrainKind: FixtureKind | null =
+    options.includeShowerFloorDrains && isShowerFloorDrainText(typedSearchText) ? 'OTHER' : null
+
+  if (source === 'keyword') return fallbackKind ?? showerFloorDrainKind
+
+  const predefinedKind = toFixtureKind(predefinedType)
+  if (predefinedKind !== 'OTHER') return predefinedKind
+  return source === 'sanitary-terminal' ? (fallbackKind ?? 'OTHER') : (fallbackKind ?? showerFloorDrainKind)
+}
+
+export function normalizeFixtureKindForKitchen(
   kind: FixtureKind,
   searchText: string,
   inKitchenSpace: boolean,
@@ -226,8 +256,9 @@ function choosePreferredFixture(
   }
 }
 
+/** Concatenated human-readable metadata of one IFC line, for keyword matching. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function readLineText(line: any): string {
+export function readLineText(line: any): string {
   return [
     line.Name?.value,
     line.LongName?.value,
@@ -290,19 +321,11 @@ export async function detectFixtures(
       const line = api.GetLine(webIfcModelId, expressId, false) as any
       const name: string = line.Name?.value ?? line.LongName?.value ?? `Fixture ${expressId}`
       const searchText = readLineText(line)
-      const typedSearchText = `${line.PredefinedType?.value ?? ''} ${searchText}`
-      if (!includeShowerFloorDrains && isExcludedFixtureText(typedSearchText)) continue
-
-      const predefinedKind = toFixtureKind(line.PredefinedType?.value ?? '')
-      const fallbackKind = inferFixtureKindFromText(searchText)
-      const showerFloorDrainKind: FixtureKind | null =
-        includeShowerFloorDrains && isShowerFloorDrainText(typedSearchText) ? 'OTHER' : null
-      const inferredKind =
-        predefinedKind !== 'OTHER'
-          ? predefinedKind
-          : typeConstant === IFCSANITARYTERMINAL
-            ? (fallbackKind ?? 'OTHER')
-            : (fallbackKind ?? showerFloorDrainKind)
+      const inferredKind = classifyFixtureLine(
+        typeConstant === IFCSANITARYTERMINAL ? 'sanitary-terminal' : 'flow-terminal',
+        { predefinedType: line.PredefinedType?.value ?? '', searchText },
+        { includeShowerFloorDrains },
+      )
 
       if (inferredKind === null) continue
 
@@ -339,12 +362,11 @@ export async function detectFixtures(
       const line = api.GetLine(webIfcModelId, expressId, false) as any
       const name: string = line.Name?.value ?? line.LongName?.value ?? ''
       const searchText = readLineText(line)
-      const typedSearchText = `${line.PredefinedType?.value ?? ''} ${searchText}`
-      if (!includeShowerFloorDrains && isExcludedFixtureText(typedSearchText)) continue
-
-      const inferredKind =
-        inferFixtureKindFromText(searchText) ??
-        (includeShowerFloorDrains && isShowerFloorDrainText(typedSearchText) ? 'OTHER' : null)
+      const inferredKind = classifyFixtureLine(
+        'keyword',
+        { predefinedType: line.PredefinedType?.value ?? '', searchText },
+        { includeShowerFloorDrains },
+      )
       if (inferredKind === null) continue // not a plumbing fixture
 
       seen.add(expressId)
@@ -378,12 +400,11 @@ export async function detectFixtures(
       if (!line) continue
 
       const searchText = readLineText(line)
-      const typedSearchText = `${line.PredefinedType?.value ?? ''} ${searchText}`
-      if (!includeShowerFloorDrains && isExcludedFixtureText(typedSearchText)) continue
-
-      const inferredKind =
-        inferFixtureKindFromText(searchText) ??
-        (includeShowerFloorDrains && isShowerFloorDrainText(typedSearchText) ? 'OTHER' : null)
+      const inferredKind = classifyFixtureLine(
+        'keyword',
+        { predefinedType: line.PredefinedType?.value ?? '', searchText },
+        { includeShowerFloorDrains },
+      )
       if (inferredKind === null) continue
 
       const name: string = line.Name?.value ?? line.LongName?.value ?? `Fixture ${expressId}`
