@@ -3,6 +3,7 @@ import type { IfcAPI } from 'web-ifc'
 import { exportFullIfcWithRisers, type ExportRiser } from './exportFullIfcWithRisers'
 import type { FloorRoutes } from '@/domain/branchRouting'
 import type { Riser } from '@/domain/types'
+import type { SanitaryFixtureRoute } from '@/shared/routes/buildSanitaryRoutes'
 
 type ImportedIfc = Awaited<typeof import('web-ifc')>
 
@@ -146,7 +147,11 @@ function attachedDefinitionNames(
 
 async function exportAndReopen(
   schema: 'IFC2X3' | 'IFC4',
-  options: { risers?: ExportRiser[]; branchRoutes?: FloorRoutes[] } = {},
+  options: {
+    risers?: ExportRiser[]
+    branchRoutes?: FloorRoutes[]
+    sanitaryRoutes?: SanitaryFixtureRoute[]
+  } = {},
 ): Promise<{
   ifc: ImportedIfc
   api: IfcAPI
@@ -162,7 +167,7 @@ async function exportAndReopen(
     70,
     options.risers ?? risers,
     null,
-    [],
+    options.sanitaryRoutes ?? [],
     options.branchRoutes ?? [],
   )
   expect(exportedBytes).toBeInstanceOf(Uint8Array)
@@ -418,4 +423,62 @@ describe('exportFullIfcWithRisers round-trip (reopen exported bytes with web-ifc
       ),
     ).rejects.toThrow(/riser ghost, which no longer exists.*Recompute branch routes/s)
   })
+
+  // One sanitary fixture route draining to stack-1 on storey #70 -> exactly one route element.
+  const sanitaryRoutes: SanitaryFixtureRoute[] = [
+    {
+      fixtureExpressId: 501,
+      fixtureName: 'WC-5',
+      fixtureKind: 'TOILETPAN',
+      riserId: 's1-f2',
+      pipeDiameterMm: 110,
+      startHeightAboveFloorM: 0.2,
+      slope: 0.02,
+      segments: [{ from: { x: 0, y: 0, z: 0 }, to: { x: 1, y: 0, z: 1 }, kind: 'main', pipeDiameterMm: 110 }],
+    },
+  ]
+
+  for (const schema of ['IFC2X3', 'IFC4'] as const) {
+    it(`${schema}: sanitary-route system membership survives reopen (RelatingGroup non-null, correct members)`, async () => {
+      const { ifc, api, modelId } = await exportAndReopen(schema, { sanitaryRoutes })
+
+      try {
+        const elementType = schema === 'IFC2X3' ? ifc.IFCFLOWSEGMENT : ifc.IFCPIPESEGMENT
+        const elementIds = idsOfType(api, modelId, elementType)
+        expect(elementIds).toHaveLength(STACK_COUNT + 1)
+
+        // The route assignment's RelatingGroup must reopen non-null and resolve to
+        // the routes system (guards the IFC4 `*`-serialization misparse regression).
+        const routeAssignment = idsOfType(api, modelId, ifc.IFCRELASSIGNSTOGROUP)
+          .map((relId) => api.GetLine(modelId, relId, false) as {
+            Name?: { value?: string } | string | null
+            RelatingGroup?: { value?: number } | null
+          } | null)
+          .find((relation) => {
+            const name = relation?.Name
+            const nameValue = typeof name === 'string' ? name : name?.value
+            return nameValue === 'BIMPipe Sanitary Route Assignment'
+          })
+        expect(routeAssignment).toBeDefined()
+        expect(routeAssignment?.RelatingGroup?.value).toEqual(expect.any(Number))
+        expect(readNameValue(api, modelId, routeAssignment!.RelatingGroup!.value!)).toBe(
+          'BIMPipe Sanitary Routes',
+        )
+
+        // Membership: exactly the one route element in the routes system, exactly the
+        // two stacks in the stacks system, together covering every exported element.
+        const routeMembers = systemMemberIds(api, modelId, ifc, 'BIMPipe Sanitary Routes')
+        const stackMembers = systemMemberIds(api, modelId, ifc, 'BIMPipe Sanitary Stacks')
+        expect(routeMembers).toHaveLength(1)
+        expect(stackMembers).toHaveLength(STACK_COUNT)
+        expect(stackMembers).not.toContain(routeMembers[0])
+        expect([...routeMembers, ...stackMembers].sort((a, b) => a - b)).toEqual(
+          [...elementIds].sort((a, b) => a - b),
+        )
+        expect(readNameValue(api, modelId, routeMembers[0])).toContain('BIMPipe Main 110mm')
+      } finally {
+        api.CloseModel(modelId)
+      }
+    })
+  }
 })
