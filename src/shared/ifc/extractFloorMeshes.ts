@@ -43,13 +43,7 @@ export async function extractFloorMeshes(
   storeyId: StoreyId,
   frame: ModelFrame = IDENTITY_MODEL_FRAME,
 ): Promise<FloorMeshes> {
-  const { IFCRELCONTAINEDINSPATIALSTRUCTURE, IFCSPACE, IFCSLAB } = await import('web-ifc')
-
-  // --- 1. Resolve which element IDs belong to this storey ---
-  const relIds = api.GetLineIDsWithType(
-    webIfcModelId,
-    IFCRELCONTAINEDINSPATIALSTRUCTURE,
-  )
+  const { IFCSPACE, IFCSLAB } = await import('web-ifc')
 
   // Exclude types that produce large horizontal fills when viewed from above:
   //   IFCSPACE — logical room volumes (not physical construction)
@@ -60,6 +54,59 @@ export async function extractFloorMeshes(
     for (let i = 0; i < ids.size(); i++) excludedIds.add(ids.get(i))
   }
 
+  const elementIds = (await collectStoreyContainedElementIds(api, webIfcModelId, storeyId)).filter(
+    (elementId) => !excludedIds.has(elementId),
+  )
+
+  return streamElementMeshes(api, webIfcModelId, elementIds, frame)
+}
+
+/**
+ * Element types rendered as the 2D architecture underlay. Walls and columns
+ * give the plan its outline; spaces and slabs are excluded for the same
+ * viewed-from-above reasons as in {@link extractFloorMeshes}.
+ */
+const UNDERLAY_TYPE_NAMES = ['IFCWALL', 'IFCWALLSTANDARDCASE', 'IFCCOLUMN'] as const
+
+/**
+ * Extracts wall/column geometry of one storey of a LINKED model for the 2D
+ * underlay. Only the elements contained in that single storey are tessellated
+ * (full-model tessellation of a large architecture file is minutes-level).
+ *
+ * `frame` must be the HOST model's frame so the underlay shares the host's
+ * local rendering origin — both buildings sit at the same shared coordinates,
+ * so subtracting the same origin lines the plans up.
+ */
+export async function extractStoreyUnderlayMeshes(
+  api: IfcAPI,
+  webIfcModelId: number,
+  storeyId: StoreyId,
+  frame: ModelFrame = IDENTITY_MODEL_FRAME,
+): Promise<FloorMeshes> {
+  const ifc = await import('web-ifc')
+
+  const includedIds = new Set<number>()
+  for (const typeName of UNDERLAY_TYPE_NAMES) {
+    const ids = api.GetLineIDsWithType(webIfcModelId, ifc[typeName])
+    for (let i = 0; i < ids.size(); i++) includedIds.add(ids.get(i))
+  }
+
+  const elementIds = (await collectStoreyContainedElementIds(api, webIfcModelId, storeyId)).filter(
+    (elementId) => includedIds.has(elementId),
+  )
+
+  return streamElementMeshes(api, webIfcModelId, elementIds, frame)
+}
+
+/** Express IDs of elements directly contained in the storey (IfcRelContainedInSpatialStructure). */
+async function collectStoreyContainedElementIds(
+  api: IfcAPI,
+  webIfcModelId: number,
+  storeyId: StoreyId,
+): Promise<number[]> {
+  const { IFCRELCONTAINEDINSPATIALSTRUCTURE } = await import('web-ifc')
+
+  const relIds = api.GetLineIDsWithType(webIfcModelId, IFCRELCONTAINEDINSPATIALSTRUCTURE)
   const elementIds: number[] = []
   for (let i = 0; i < relIds.size(); i++) {
     // flatten=false: entity references come back as { type: 5, value: expressID }
@@ -74,11 +121,19 @@ export async function extractFloorMeshes(
     for (const el of related) {
       // Each element is also an entity ref: { type: 5, value: expressID }
       const elId: number | undefined = el?.value ?? el?.expressID
-      if (typeof elId === 'number' && !excludedIds.has(elId)) elementIds.push(elId)
+      if (typeof elId === 'number') elementIds.push(elId)
     }
   }
+  return elementIds
+}
 
-  // --- 2. Stream geometry for those elements ---
+/** Streams the given elements' geometry into a local-frame Three.js group. */
+function streamElementMeshes(
+  api: IfcAPI,
+  webIfcModelId: number,
+  elementIds: number[],
+  frame: ModelFrame,
+): FloorMeshes {
   const group = new THREE.Group()
   // Source-frame bounds accumulated in double precision across all meshes.
   // Origin-artifact strays ((0,0,0)-adjacent vertices in otherwise
