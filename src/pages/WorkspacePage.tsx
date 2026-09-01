@@ -711,6 +711,7 @@ export function WorkspacePage({
           onObjectSelect={handleObjectSelect}
           modelFileName={modelFileName}
           selectedStoreyElevation={selectedStorey?.elevation ?? null}
+          modelLengthUnit={modelLengthUnit}
           storeyCount={storeys.length}
           hoveredExpressId={hoveredExpressId}
           selectedExpressId={selectedExpressId}

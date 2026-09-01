@@ -6,6 +6,7 @@ import type { SanitaryFixtureRoute } from '@/shared/routes/buildSanitaryRoutes'
 import type { FloorMeshes } from '@/shared/ifc/extractFloorMeshes'
 import type { RouteSegment } from '@/domain/branchRouting'
 import type { Fixture, FixtureKind, KitchenArea, Riser, RiserId } from '@/domain/types'
+import { formatLengthM, type LengthUnit } from '@/shared/lengthUnits'
 import { ViewTransition } from '@/shared/reactViewTransition'
 import {
   buildSanitaryRouteFactCards,
@@ -28,6 +29,12 @@ interface FloorViewerProps {
   onObjectSelect: (expressId: number | null) => void
   modelFileName?: string | null
   selectedStoreyElevation?: number | null
+  /**
+   * Declared IFC length unit of raw attribute values such as the storey
+   * elevation. null = the model does not declare a supported unit; the
+   * elevation chip then shows the raw number with no unit suffix.
+   */
+  modelLengthUnit?: LengthUnit | null
   storeyCount?: number
   hoveredExpressId?: number | null
   selectedExpressId?: number | null
@@ -67,6 +74,7 @@ export function FloorViewer({
   onObjectSelect,
   modelFileName = null,
   selectedStoreyElevation = null,
+  modelLengthUnit = null,
   storeyCount = 0,
   hoveredExpressId = null,
   selectedExpressId = null,
@@ -582,7 +590,7 @@ export function FloorViewer({
 
           {selectedStoreyElevation !== null && (
             <span className="floor-viewer__chip">
-              {Math.round(selectedStoreyElevation).toLocaleString()} mm
+              {formatStoreyElevationChip(selectedStoreyElevation, modelLengthUnit)}
             </span>
           )}
 
@@ -1117,6 +1125,16 @@ export function FloorViewer({
     el.style.opacity = '1'
     el.style.transform = `translate(${sx}px, ${sy}px) translate(-50%, -50%)`
   }
+}
+
+/**
+ * Status-bar elevation chip text. With a declared model unit the raw IFC
+ * elevation is formatted as metres; without one the raw number is shown with
+ * no unit suffix (we never assume a unit).
+ */
+export function formatStoreyElevationChip(elevation: number, unit: LengthUnit | null): string {
+  if (unit === null) return Math.round(elevation).toLocaleString()
+  return formatLengthM(elevation, unit)
 }
 
 function routeLineClassName(routeRole: SanitaryFixtureRoute['segments'][number]['routeRole']): string {
