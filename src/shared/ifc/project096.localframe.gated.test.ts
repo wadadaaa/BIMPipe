@@ -83,6 +83,26 @@ describe.skipIf(!existsSync(IFC_096_PATH))('096-P local frame (gated: requires l
         expect(footprintZM).toBeLessThan(26)
         expect(Math.hypot(centreX, centreZ)).toBeLessThan(50)
 
+        // Outlier-robust viewer bounds: storey 01 carries two full-height
+        // IfcFlowTerminal stacks (~125 m tall), six IfcCovering meshes
+        // reaching ~34 m up and one IfcFlowController (3 meshes) floating
+        // ~30 m above the slice. Their vertical extent must not inflate the
+        // FIT box — the vertical span must stay a storey slice, strictly
+        // smaller than both plan spans, or the viewer's smallest-axis-is-up
+        // camera flips into a section view (the "sliver").
+        const verticalSpanM = localBox.max.y - localBox.min.y
+        expect(verticalSpanM).toBeGreaterThan(0)
+        expect(verticalSpanM).toBeLessThan(10)
+        expect(verticalSpanM).toBeLessThan(footprintXM)
+        expect(verticalSpanM).toBeLessThan(footprintZM)
+        expect(localMeshes.boundsDiagnostics?.verticalOutlierMeshCount).toBe(11)
+        expect(localMeshes.boundsDiagnostics?.planOutlierMeshCount).toBe(0)
+
+        // The domain-facing source box is NOT outlier-filtered: it still spans
+        // the full ~125 m vertical reach of the stacks.
+        const sourceSpanYM = localMeshes.sourceBoundingBox.max.y - localMeshes.sourceBoundingBox.min.y
+        expect(sourceSpanYM).toBeGreaterThan(100)
+
         // Fixture detection position path: 11 WCs on this storey.
         const fixtures = await detectFixtures(api, modelId, storey!.expressId)
         const toilets = fixtures.filter((fixture) => fixture.kind === 'TOILETPAN')
@@ -112,8 +132,10 @@ describe.skipIf(!existsSync(IFC_096_PATH))('096-P local frame (gated: requires l
           `[096 gated] origin=(${decision!.origin.x}, ${decision!.origin.z}) m ` +
             `detectedBy=${decision!.detectedBy} distance=${originPlanDistanceM.toFixed(0)} m; ` +
             `storey footprint=${footprintXM.toFixed(2)}x${footprintZM.toFixed(2)} m ` +
+            `verticalSpan=${verticalSpanM.toFixed(2)} m (source ${sourceSpanYM.toFixed(2)} m) ` +
             `centre=(${centreX.toFixed(2)}, ${centreZ.toFixed(2)}); ` +
-            `WC spread=${wcSpreadXM.toFixed(2)}x${wcSpreadZM.toFixed(2)} m`,
+            `WC spread=${wcSpreadXM.toFixed(2)}x${wcSpreadZM.toFixed(2)} m; ` +
+            `diagnostics=${JSON.stringify(localMeshes.boundsDiagnostics)}`,
         )
 
         // The WCs span most of the footprint in both axes.

@@ -79,6 +79,8 @@ export interface ArtifactAwareBoundsAccumulator {
   add(x: number, y: number, z: number): void
   /** null when no vertices were added. */
   result(): Bounds3D | null
+  /** Vertices skipped because a component was NaN/Infinity (broken exporter geometry). */
+  nonFiniteVertexCount(): number
 }
 
 export function createArtifactAwareBoundsAccumulator(): ArtifactAwareBoundsAccumulator {
@@ -87,9 +89,17 @@ export function createArtifactAwareBoundsAccumulator(): ArtifactAwareBoundsAccum
   let keptMinX = Infinity, keptMinY = Infinity, keptMinZ = Infinity
   let keptMaxX = -Infinity, keptMaxY = -Infinity, keptMaxZ = -Infinity
   let maxPlanDistance = 0
+  let nonFinite = 0
 
   return {
     add(x, y, z) {
+      // Real 096 storeys contain meshes with NaN vertices; a single NaN must
+      // never poison the bounds, so the whole vertex is skipped and counted.
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+        nonFinite += 1
+        return
+      }
+
       if (x < allMinX) allMinX = x
       if (x > allMaxX) allMaxX = x
       if (y < allMinY) allMinY = y
@@ -117,6 +127,9 @@ export function createArtifactAwareBoundsAccumulator(): ArtifactAwareBoundsAccum
       return useFiltered
         ? { minX: keptMinX, minY: keptMinY, minZ: keptMinZ, maxX: keptMaxX, maxY: keptMaxY, maxZ: keptMaxZ }
         : { minX: allMinX, minY: allMinY, minZ: allMinZ, maxX: allMaxX, maxY: allMaxY, maxZ: allMaxZ }
+    },
+    nonFiniteVertexCount() {
+      return nonFinite
     },
   }
 }

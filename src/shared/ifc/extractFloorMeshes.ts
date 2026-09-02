@@ -5,22 +5,40 @@ import {
   createArtifactAwareBoundsAccumulator,
   IDENTITY_MODEL_FRAME,
   type ArtifactAwareBoundsAccumulator,
+  type Bounds3D,
   type ModelFrame,
 } from '@/shared/frame/modelFrame'
+import { computeOutlierRobustFloorBounds } from '@/shared/frame/robustFloorBounds'
+
+/** Counts of geometry that was excluded from the viewer-facing bounds. */
+export interface FloorBoundsDiagnostics {
+  /** Vertices skipped because a component was NaN/Infinity. */
+  nonFiniteVertexCount: number
+  /** Meshes excluded from viewer bounds entirely (plan centre >1 km from median). */
+  planOutlierMeshCount: number
+  /** Meshes whose vertical extent was excluded from viewer bounds. */
+  verticalOutlierMeshCount: number
+}
 
 export interface FloorMeshes {
   group: THREE.Group
   /**
    * Local-frame bounds (source coordinates minus the model-frame origin).
    * This is what the viewer consumes for camera fitting and the plan plane.
+   * Outlier-robust: far-away and full-height outlier meshes are excluded
+   * (see robustFloorBounds), so FIT frames the actual floor. The excluded
+   * meshes still RENDER — they may simply reach beyond the fitted view.
    */
   boundingBox: THREE.Box3
   /**
    * Source-frame bounds (viewer metres, Y-up, no origin subtraction). Domain
    * logic (riser suggestion plan bounds, export debug bounds) reads this one so
-   * it never mixes frames with fixture/riser positions.
+   * it never mixes frames with fixture/riser positions. NOT outlier-filtered —
+   * this stays the true full bounds of the storey geometry.
    */
   sourceBoundingBox: THREE.Box3
+  /** Present on real extractions; optional so existing test stubs stay valid. */
+  boundsDiagnostics?: FloorBoundsDiagnostics
 }
 
 /**
@@ -140,6 +158,9 @@ function streamElementMeshes(
   // far-from-origin geometry) are excluded from the bounds so they cannot
   // poison camera fitting or the origin centroid.
   const sourceBounds = createArtifactAwareBoundsAccumulator()
+  // Per-mesh bounds feed the outlier-robust viewer box (see robustFloorBounds).
+  const perMeshSourceBounds: Bounds3D[] = []
+  let nonFiniteVertexCount = 0
 
   if (elementIds.length > 0) {
     api.StreamMeshes(webIfcModelId, elementIds, (mesh) => {
@@ -163,14 +184,20 @@ function streamElementMeshes(
 
         if (rawVerts.length === 0) continue
 
+        const meshBounds = createArtifactAwareBoundsAccumulator()
         const localized = buildLocalFrameGeometry(
           rawVerts,
           rawIndices,
           placed.flatTransformation,
           frame,
           sourceBounds,
+          meshBounds,
         )
         if (localized === null) continue
+
+        const meshBoundsResult = meshBounds.result()
+        if (meshBoundsResult !== null) perMeshSourceBounds.push(meshBoundsResult)
+        nonFiniteVertexCount += meshBounds.nonFiniteVertexCount()
 
         const bufGeo = new THREE.BufferGeometry()
         bufGeo.setAttribute(
@@ -198,22 +225,37 @@ function streamElementMeshes(
   }
 
   const sourceBoundingBox = boundsToBox3(sourceBounds.result())
-  const boundingBox = sourceBoundingBox.isEmpty()
-    ? new THREE.Box3()
-    : new THREE.Box3(
-        new THREE.Vector3(
-          sourceBoundingBox.min.x - frame.origin.x,
-          sourceBoundingBox.min.y - frame.origin.y,
-          sourceBoundingBox.min.z - frame.origin.z,
-        ),
-        new THREE.Vector3(
-          sourceBoundingBox.max.x - frame.origin.x,
-          sourceBoundingBox.max.y - frame.origin.y,
-          sourceBoundingBox.max.z - frame.origin.z,
-        ),
-      )
 
-  return { group, boundingBox, sourceBoundingBox }
+  // Viewer box: outlier-robust bounds in the local frame. When no mesh is an
+  // outlier this equals sourceBoundingBox minus the origin bit-for-bit, so
+  // clean near-origin models (Duplex/ADAM) behave exactly as before.
+  const robust = computeOutlierRobustFloorBounds(perMeshSourceBounds)
+  const boundingBox =
+    robust.bounds === null
+      ? new THREE.Box3()
+      : new THREE.Box3(
+          new THREE.Vector3(
+            robust.bounds.minX - frame.origin.x,
+            robust.bounds.minY - frame.origin.y,
+            robust.bounds.minZ - frame.origin.z,
+          ),
+          new THREE.Vector3(
+            robust.bounds.maxX - frame.origin.x,
+            robust.bounds.maxY - frame.origin.y,
+            robust.bounds.maxZ - frame.origin.z,
+          ),
+        )
+
+  return {
+    group,
+    boundingBox,
+    sourceBoundingBox,
+    boundsDiagnostics: {
+      nonFiniteVertexCount,
+      planOutlierMeshCount: robust.planOutlierMeshCount,
+      verticalOutlierMeshCount: robust.verticalOutlierMeshCount,
+    },
+  }
 }
 
 interface LocalFrameGeometry {
@@ -224,7 +266,8 @@ interface LocalFrameGeometry {
 /**
  * Transforms raw web-ifc vertices (stride 6: x, y, z, nx, ny, nz) through the
  * column-major placement matrix in double precision, subtracts the model-frame
- * origin, and accumulates the source-frame bounds.
+ * origin, and accumulates the source-frame bounds — into the storey-wide
+ * accumulator and the per-mesh one (which feeds outlier-robust viewer bounds).
  */
 function buildLocalFrameGeometry(
   rawVerts: Float32Array,
@@ -232,6 +275,7 @@ function buildLocalFrameGeometry(
   t: number[] | Float32Array | Float64Array,
   frame: ModelFrame,
   sourceBounds: ArtifactAwareBoundsAccumulator,
+  meshBounds: ArtifactAwareBoundsAccumulator,
 ): LocalFrameGeometry | null {
   const vertexCount = rawVerts.length / 6
   if (vertexCount === 0) return null
@@ -248,6 +292,7 @@ function buildLocalFrameGeometry(
     const wz = t[2] * lx + t[6] * ly + t[10] * lz + t[14]
 
     sourceBounds.add(wx, wy, wz)
+    meshBounds.add(wx, wy, wz)
 
     positions[j * 3] = wx - frame.origin.x
     positions[j * 3 + 1] = wy - frame.origin.y

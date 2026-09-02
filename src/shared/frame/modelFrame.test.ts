@@ -98,6 +98,24 @@ describe('createArtifactAwareBoundsAccumulator', () => {
   it('returns null when no vertices were added', () => {
     expect(createArtifactAwareBoundsAccumulator().result()).toBeNull()
   })
+
+  it('skips and counts non-finite vertices so NaN never poisons the bounds', () => {
+    const acc = createArtifactAwareBoundsAccumulator()
+    acc.add(NaN, 5, 3) // a NaN component must not leak its finite components either
+    acc.add(2, Infinity, 4)
+    acc.add(8.4, 3, -17.4)
+
+    expect(acc.result()).toEqual({ minX: 8.4, minY: 3, minZ: -17.4, maxX: 8.4, maxY: 3, maxZ: -17.4 })
+    expect(acc.nonFiniteVertexCount()).toBe(2)
+  })
+
+  it('returns null (not a poisoned box) when every vertex is non-finite', () => {
+    const acc = createArtifactAwareBoundsAccumulator()
+    acc.add(NaN, NaN, NaN)
+
+    expect(acc.result()).toBeNull()
+    expect(acc.nonFiniteVertexCount()).toBe(1)
+  })
 })
 
 describe('createModelFrame / identity', () => {
