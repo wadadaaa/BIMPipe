@@ -5,6 +5,7 @@ import type { ModelOriginDecision } from '@/shared/frame/modelFrame'
 import type { LengthUnit } from '@/shared/lengthUnits'
 import type { StoreyAlignment } from '@/domain/alignStoreys'
 import type { MergedStoreyDetection } from '@/domain/mergeFixturesAcrossFiles'
+import type { EngineerPipeNetwork, EngineerRiserStack } from '@/domain/engineerPipes'
 import { appendAdjustment, createAdjustLog, type AdjustLog } from '@/domain/adjustLog'
 import { getDemoRuntimeConfig, type DemoRuntimeConfig } from '@/shared/demoConfig'
 import { removeRiserStack } from '@/shared/routes/buildRiserStacks'
@@ -23,6 +24,19 @@ export interface LinkedModelState {
 export interface StoreyUnderlayState {
   meshes: FloorMeshes
   sourceFileName: string
+}
+
+/**
+ * Engineer plumbing baseline extracted on demand (W7): the prefix-filtered
+ * pipe network of one loaded model plus its grouped vertical riser stacks.
+ * Endpoints stay in IFC SOURCE coordinates; the viewer boundary converts them
+ * through `src/shared/frame/ifcSourceFrame.ts`.
+ */
+export interface EngineerBaselineState {
+  sourceFileName: string
+  systemPrefixes: readonly string[]
+  network: EngineerPipeNetwork
+  stacks: EngineerRiserStack[]
 }
 
 // All WorkspacePage state in one place. Pure module: no React imports, no side
@@ -116,6 +130,15 @@ export interface WorkspacePageState {
   // Per-storey visibility of the T3 branch route overlay. Absent storeys default
   // to visible so routes show right after suggestion.
   branchRoutesVisibleByStorey: Map<StoreyId, boolean>
+
+  // --- engineer baseline (W7) ---
+  // Loaded on demand via the Decisions tab; null until then and after reset.
+  engineerBaseline: EngineerBaselineState | null
+  isExtractingEngineerBaseline: boolean
+  engineerBaselineError: string | null
+  // Per-storey visibility of the engineer overlay; absent = visible so the
+  // layer shows right after loading (same convention as branch routes).
+  engineerOverlayVisibleByStorey: Map<StoreyId, boolean>
 }
 
 export const initialWorkspacePageState: WorkspacePageState = {
@@ -153,6 +176,10 @@ export const initialWorkspacePageState: WorkspacePageState = {
   activeTab: 'fixtures',
   viewMode: '2d',
   branchRoutesVisibleByStorey: new Map(),
+  engineerBaseline: null,
+  isExtractingEngineerBaseline: false,
+  engineerBaselineError: null,
+  engineerOverlayVisibleByStorey: new Map(),
 }
 
 // Lazy initializer for useReducer: resolves the demo runtime config exactly once
@@ -239,6 +266,13 @@ export type WorkspacePageAction =
   | { type: 'risers-suggested'; risers: Riser[] }
   | { type: 'add-riser-toggled' }
   | { type: 'branch-routes-toggled'; storeyId: StoreyId }
+  // Engineer baseline extraction lifecycle (W7). Extraction is async in the
+  // page; the reducer only tracks the in-flight flag, the result, and the
+  // explicit failure message (never a silent no-op).
+  | { type: 'engineer-extraction-started' }
+  | { type: 'engineer-baseline-loaded'; baseline: EngineerBaselineState }
+  | { type: 'engineer-extraction-failed'; message: string }
+  | { type: 'engineer-overlay-toggled'; storeyId: StoreyId }
   | { type: 'demo-asset-error-set'; message: string | null }
   | { type: 'download-started' }
   | { type: 'download-failed'; message: string }
@@ -304,6 +338,10 @@ function reduce(state: WorkspacePageState, action: WorkspacePageAction): Workspa
         underlay: null,
         underlayError: null,
         crossFileMerge: null,
+        engineerBaseline: null,
+        isExtractingEngineerBaseline: false,
+        engineerBaselineError: null,
+        engineerOverlayVisibleByStorey: new Map(),
       }
 
     case 'model-opened':
@@ -476,6 +514,31 @@ function reduce(state: WorkspacePageState, action: WorkspacePageAction): Workspa
       const next = new Map(state.branchRoutesVisibleByStorey)
       next.set(action.storeyId, !(state.branchRoutesVisibleByStorey.get(action.storeyId) ?? true))
       return { ...state, branchRoutesVisibleByStorey: next }
+    }
+
+    case 'engineer-extraction-started':
+      return { ...state, isExtractingEngineerBaseline: true, engineerBaselineError: null }
+
+    case 'engineer-baseline-loaded':
+      return {
+        ...state,
+        engineerBaseline: action.baseline,
+        isExtractingEngineerBaseline: false,
+        engineerBaselineError: null,
+      }
+
+    case 'engineer-extraction-failed':
+      return {
+        ...state,
+        engineerBaseline: null,
+        isExtractingEngineerBaseline: false,
+        engineerBaselineError: action.message,
+      }
+
+    case 'engineer-overlay-toggled': {
+      const next = new Map(state.engineerOverlayVisibleByStorey)
+      next.set(action.storeyId, !(state.engineerOverlayVisibleByStorey.get(action.storeyId) ?? true))
+      return { ...state, engineerOverlayVisibleByStorey: next }
     }
 
     case 'demo-asset-error-set':

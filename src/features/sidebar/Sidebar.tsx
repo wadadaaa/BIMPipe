@@ -10,7 +10,10 @@ import type { LengthUnit } from '@/shared/lengthUnits'
 import { ViewTransition } from '@/shared/reactViewTransition'
 import { FixturesPanel } from './FixturesPanel'
 import { RisersPanel } from './RisersPanel'
-import { PlacementValidationPanel } from './PlacementValidationPanel'
+import {
+  PlacementValidationPanel,
+  type EngineerBaselineSummary,
+} from './PlacementValidationPanel'
 import './Sidebar.css'
 
 interface SidebarProps {
@@ -46,6 +49,11 @@ interface SidebarProps {
   sanitaryRouteCount?: number
   /** Model length unit resolved from IfcUnitAssignment; null when unknown. */
   modelLengthUnit?: LengthUnit | null
+  /** Engineer baseline (W7) summary for the Decisions tab; null until loaded. */
+  engineerBaseline?: EngineerBaselineSummary | null
+  isExtractingEngineerBaseline?: boolean
+  engineerBaselineError?: string | null
+  onLoadEngineerBaseline?: () => void
 }
 
 const TABS: { id: SidebarTab; label: string; focus: string; hint: string }[] = [
@@ -98,6 +106,10 @@ export function Sidebar({
   demoFloorOpened = false,
   sanitaryRouteCount = 0,
   modelLengthUnit = null,
+  engineerBaseline = null,
+  isExtractingEngineerBaseline = false,
+  engineerBaselineError = null,
+  onLoadEngineerBaseline,
 }: SidebarProps) {
   const activeTabMeta = TABS.find((tab) => tab.id === activeTab)!
   const riserPanelKey = risers.map((riser) => riser.id).join(':') || 'empty'
@@ -228,6 +240,10 @@ export function Sidebar({
                 initialStoreyDecision={initialStoreyDecision}
                 storeyAlignments={storeyAlignments}
                 crossFileMerge={crossFileMerge}
+                engineerBaseline={engineerBaseline}
+                isExtractingEngineerBaseline={isExtractingEngineerBaseline}
+                engineerBaselineError={engineerBaselineError}
+                onLoadEngineerBaseline={onLoadEngineerBaseline}
               />
             )}
           </section>

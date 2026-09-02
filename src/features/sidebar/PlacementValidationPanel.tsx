@@ -6,6 +6,14 @@ import type { MergedStoreyDetection } from '@/domain/mergeFixturesAcrossFiles'
 
 type ValidationReport = ReturnType<typeof buildRiserValidationReport>
 
+/** Summary of the loaded engineer plumbing baseline (W7) for display. */
+export interface EngineerBaselineSummary {
+  sourceFileName: string
+  systemPrefixes: readonly string[]
+  segmentCount: number
+  stackCount: number
+}
+
 interface PlacementValidationPanelProps {
   report: ValidationReport | null
   detectionAggregation: StoreyDetectionAggregation | null
@@ -16,6 +24,12 @@ interface PlacementValidationPanelProps {
   storeyAlignments?: StoreyAlignment[]
   /** Cross-file fixture merge accounting for the open floor; null for single-file. */
   crossFileMerge?: MergedStoreyDetection | null
+  /** Engineer baseline (W7): loaded network summary; null until extracted. */
+  engineerBaseline?: EngineerBaselineSummary | null
+  isExtractingEngineerBaseline?: boolean
+  engineerBaselineError?: string | null
+  /** Undefined hides the affordance (no model loaded yet). */
+  onLoadEngineerBaseline?: () => void
 }
 
 function getUserFacingIssue(
@@ -155,6 +169,51 @@ function CrossFileMergeSection({ merge }: { merge: MergedStoreyDetection }) {
   )
 }
 
+function EngineerBaselineSection({
+  baseline,
+  isExtracting,
+  error,
+  onLoad,
+}: {
+  baseline: EngineerBaselineSummary | null
+  isExtracting: boolean
+  error: string | null
+  onLoad: () => void
+}) {
+  return (
+    <section className="sidebar__panel" data-testid="engineer-baseline">
+      <p className="sidebar__panel-title">Engineer network (comparison baseline)</p>
+      {baseline === null ? (
+        <>
+          <p className="sidebar__panel-copy">
+            Load the engineer plumbing systems (prefixes SW-GRV / VNT) from a loaded IFC to overlay
+            them on the plan and compare against the suggestion.
+          </p>
+          <button
+            type="button"
+            className="risers-panel__btn risers-panel__btn--ghost"
+            onClick={onLoad}
+            disabled={isExtracting}
+          >
+            {isExtracting ? 'Extracting engineer network…' : 'Load engineer network'}
+          </button>
+        </>
+      ) : (
+        <p className="sidebar__panel-copy" dir="auto">
+          <strong>{baseline.sourceFileName}:</strong> {baseline.segmentCount} pipe{' '}
+          {baseline.segmentCount === 1 ? 'segment' : 'segments'} ({baseline.systemPrefixes.join(' / ')}),{' '}
+          {baseline.stackCount} engineer riser {baseline.stackCount === 1 ? 'stack' : 'stacks'}.
+        </p>
+      )}
+      {error !== null && (
+        <p className="sidebar__panel-copy" role="alert" dir="auto">
+          <strong>Engineer network:</strong> {error}
+        </p>
+      )}
+    </section>
+  )
+}
+
 export function PlacementValidationPanel({
   report,
   detectionAggregation,
@@ -162,6 +221,10 @@ export function PlacementValidationPanel({
   initialStoreyDecision = null,
   storeyAlignments = [],
   crossFileMerge = null,
+  engineerBaseline = null,
+  isExtractingEngineerBaseline = false,
+  engineerBaselineError = null,
+  onLoadEngineerBaseline,
 }: PlacementValidationPanelProps) {
   const autoOpenDecision = initialStoreyDecision && (
     <p className="sidebar__panel-copy">
@@ -188,11 +251,21 @@ export function PlacementValidationPanel({
     </>
   )
 
+  const engineerSection = onLoadEngineerBaseline !== undefined && (
+    <EngineerBaselineSection
+      baseline={engineerBaseline}
+      isExtracting={isExtractingEngineerBaseline}
+      error={engineerBaselineError}
+      onLoad={onLoadEngineerBaseline}
+    />
+  )
+
   if (!report) {
     return (
       <>
         {autoOpenDecision}
         {multiModelSections}
+        {engineerSection}
         <p className="sidebar__panel-copy">Suggest risers to populate export validation details.</p>
       </>
     )
@@ -210,6 +283,7 @@ export function PlacementValidationPanel({
     <section className="sidebar__panel">
       {autoOpenDecision}
       {multiModelSections}
+      {engineerSection}
       <p className="sidebar__panel-title">Placement and export readiness</p>
       <ul className="risers-panel__legend-list">
         <li><strong>Processed floors:</strong> {report.summary.processedFloorCount}</li>

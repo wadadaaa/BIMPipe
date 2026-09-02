@@ -16,6 +16,10 @@ import {
   type SanitaryPresentationMode,
 } from './sanitaryPresentation'
 import { getBranchRoutePresentation } from './branchRoutePresentation'
+import type {
+  EngineerOverlaySegment,
+  EngineerOverlayStackMarker,
+} from './engineerNetworkPresentation'
 import './FloorViewer.css'
 
 const HOVER_ACCENT = new THREE.Color(0xffb45f)
@@ -72,6 +76,18 @@ interface FloorViewerProps {
   branchRouteSegments?: RouteSegment[]
   branchRoutesVisible?: boolean
   onToggleBranchRoutes?: () => void
+  /**
+   * Engineer network overlay (W7), already storey-filtered and converted to
+   * the local viewer frame by `engineerNetworkPresentation`. Empty when the
+   * layer is toggled off; `engineerOverlayAvailable` keeps the toggle shown.
+   */
+  engineerSegments?: EngineerOverlaySegment[]
+  engineerStackMarkers?: EngineerOverlayStackMarker[]
+  engineerOverlayAvailable?: boolean
+  engineerOverlayVisible?: boolean
+  onToggleEngineerOverlay?: () => void
+  /** Floor segments without a verifiable frame, excluded from drawing. */
+  engineerExcludedSegmentCount?: number
 }
 
 export function FloorViewer({
@@ -105,6 +121,12 @@ export function FloorViewer({
   branchRouteSegments = [],
   branchRoutesVisible = true,
   onToggleBranchRoutes,
+  engineerSegments = [],
+  engineerStackMarkers = [],
+  engineerOverlayAvailable = false,
+  engineerOverlayVisible = true,
+  onToggleEngineerOverlay,
+  engineerExcludedSegmentCount = 0,
 }: FloorViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
@@ -123,6 +145,8 @@ export function FloorViewer({
   const routeLineRefsRef = useRef<Map<string, SVGLineElement>>(new Map())
   const routeLabelRefsRef = useRef<Map<string, SVGTextElement>>(new Map())
   const branchRouteLineRefsRef = useRef<Map<string, SVGLineElement>>(new Map())
+  const engineerLineRefsRef = useRef<Map<string, SVGLineElement>>(new Map())
+  const engineerRingRefsRef = useRef<Map<string, HTMLDivElement>>(new Map())
   const [routeProjectionStatus, setRouteProjectionStatus] = useState<{ failed: number; total: number }>({ failed: 0, total: 0 })
   const [sanitaryViewMode, setSanitaryViewMode] = useState<SanitaryPresentationMode>('after')
 
@@ -199,6 +223,7 @@ export function FloorViewer({
       animateRiserMarkers()
       animateRouteLines()
       animateBranchRouteLines()
+      animateEngineerOverlay()
     }
 
     const queueRender = () => {
@@ -405,7 +430,7 @@ export function FloorViewer({
 
   useEffect(() => {
     scheduleRender()
-  }, [floorMeshes, plottedFixtures, plottedKitchens, risers, sanitaryRoutes, sanitaryViewMode, branchRoutePresentation])
+  }, [floorMeshes, plottedFixtures, plottedKitchens, risers, sanitaryRoutes, sanitaryViewMode, branchRoutePresentation, engineerSegments, engineerStackMarkers])
 
   useEffect(() => {
     const frameId = requestAnimationFrame(() => {
@@ -672,6 +697,15 @@ export function FloorViewer({
             </span>
           )}
 
+          {engineerSegments.length > 0 && (
+            <span className="floor-viewer__chip floor-viewer__chip--engineer">
+              {engineerSegments.length} engineer {engineerSegments.length === 1 ? 'pipe' : 'pipes'}
+              {engineerExcludedSegmentCount > 0
+                ? ` (+${engineerExcludedSegmentCount} without plottable geometry)`
+                : ''}
+            </span>
+          )}
+
           {storeyCount > 0 && (
             <span className="floor-viewer__chip">{storeyCount} storeys</span>
           )}
@@ -687,6 +721,22 @@ export function FloorViewer({
       {!showOverlay && (
         <>
           <svg className="floor-viewer__route-overlay" aria-hidden="true">
+            {engineerSegments.map((segment) => (
+              <line
+                key={segment.key}
+                ref={(el) => {
+                  if (el) engineerLineRefsRef.current.set(segment.key, el)
+                  else engineerLineRefsRef.current.delete(segment.key)
+                }}
+                className="floor-viewer__engineer-line"
+                data-engineer-from-x={String(segment.from.x)}
+                data-engineer-from-y={String(segment.from.y)}
+                data-engineer-from-z={String(segment.from.z)}
+                data-engineer-to-x={String(segment.to.x)}
+                data-engineer-to-y={String(segment.to.y)}
+                data-engineer-to-z={String(segment.to.z)}
+              />
+            ))}
             {visibleBranchRouteSegments.map((segment) => (
               <line
                 key={segment.key}
@@ -902,6 +952,25 @@ export function FloorViewer({
             ))}
           </div>
 
+          {/* Engineer riser stacks (W7) — ring markers, plan positions valid model-wide */}
+          {engineerStackMarkers.length > 0 && (
+            <div className="floor-viewer__engineer-overlay" aria-hidden="true">
+              {engineerStackMarkers.map((marker) => (
+                <div
+                  key={marker.key}
+                  className="floor-viewer__engineer-ring"
+                  ref={(el) => {
+                    if (el) engineerRingRefsRef.current.set(marker.key, el)
+                    else engineerRingRefsRef.current.delete(marker.key)
+                  }}
+                  data-engineer-x={String(marker.x)}
+                  data-engineer-z={String(marker.z)}
+                  title={`Engineer riser — Ø${Math.round(marker.diameterMm)} mm, ${marker.storeyCount} ${marker.storeyCount === 1 ? 'storey' : 'storeys'}`}
+                />
+              ))}
+            </div>
+          )}
+
           {/* Riser markers — positioned imperatively in the rAF loop via data-* attributes */}
           <div className="floor-viewer__riser-overlay" aria-hidden="true">
             {visibleRisers.map((riser, index) => (
@@ -971,6 +1040,11 @@ export function FloorViewer({
               Violet = fixture branch runs
             </span>
           )}
+          {engineerOverlayAvailable && engineerOverlayVisible && (
+            <span className="floor-viewer__legend-item floor-viewer__legend-item--engineer">
+              Magenta = engineer network (rings = engineer risers)
+            </span>
+          )}
           {isAddingFixture && (
             <span className="floor-viewer__legend-item floor-viewer__legend-item--fixture">
               Click to place {getFixtureKindLabel(pendingFixtureKind).toLowerCase()}
@@ -1015,6 +1089,20 @@ export function FloorViewer({
               onClick={onToggleBranchRoutes}
             >
               Runs
+            </button>
+          )}
+          {onToggleEngineerOverlay && engineerOverlayAvailable && (
+            <button
+              className="floor-viewer__btn"
+              title={
+                engineerOverlayVisible
+                  ? 'Hide the engineer network on this floor'
+                  : 'Show the engineer network on this floor'
+              }
+              aria-pressed={engineerOverlayVisible}
+              onClick={onToggleEngineerOverlay}
+            >
+              Engineer
             </button>
           )}
         </div>
@@ -1143,6 +1231,44 @@ export function FloorViewer({
       line.setAttribute('y1', `${fromPt.y}`)
       line.setAttribute('x2', `${toPt.x}`)
       line.setAttribute('y2', `${toPt.y}`)
+    }
+  }
+
+  function animateEngineerOverlay() {
+    const canvas = canvasRef.current
+    const camera = cameraRef.current
+    if (!canvas || !camera) return
+
+    for (const [, line] of engineerLineRefsRef.current) {
+      const from = new THREE.Vector3(
+        parseFloat(line.dataset['engineerFromX'] ?? '0'),
+        parseFloat(line.dataset['engineerFromY'] ?? '0'),
+        parseFloat(line.dataset['engineerFromZ'] ?? '0'),
+      )
+      const to = new THREE.Vector3(
+        parseFloat(line.dataset['engineerToX'] ?? '0'),
+        parseFloat(line.dataset['engineerToY'] ?? '0'),
+        parseFloat(line.dataset['engineerToZ'] ?? '0'),
+      )
+
+      const fromPt = projectOverlayPointOnPlan(from, canvas, camera, planPlaneRef.current)
+      const toPt = projectOverlayPointOnPlan(to, canvas, camera, planPlaneRef.current)
+      if (!fromPt || !toPt) {
+        line.style.opacity = '0'
+        continue
+      }
+      line.style.opacity = ''
+      line.setAttribute('x1', `${fromPt.x}`)
+      line.setAttribute('y1', `${fromPt.y}`)
+      line.setAttribute('x2', `${toPt.x}`)
+      line.setAttribute('y2', `${toPt.y}`)
+    }
+
+    for (const [, ring] of engineerRingRefsRef.current) {
+      const x = parseFloat(ring.dataset['engineerX'] ?? '0')
+      const z = parseFloat(ring.dataset['engineerZ'] ?? '0')
+      // Stacks carry no elevation; y=0 is flattened onto the plan plane anyway.
+      positionOverlayMarker(ring, x, 0, z)
     }
   }
 

@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   exportFullIfcWithRisersWithDebug: vi.fn(),
   getDemoRuntimeConfig: vi.fn(),
   chooseInitialStoreyByFixtures: vi.fn(),
+  extractEngineerPipeNetwork: vi.fn(),
 }))
 
 vi.mock('@/shared/ifc/ifcApi', () => ({
@@ -49,6 +50,10 @@ vi.mock('@/shared/ifc/exportFullIfcWithRisers', () => ({
   exportFullIfcWithRisersWithDebug: mocks.exportFullIfcWithRisersWithDebug,
 }))
 
+vi.mock('@/shared/ifc/extractEngineerPipeNetwork', () => ({
+  extractEngineerPipeNetwork: mocks.extractEngineerPipeNetwork,
+}))
+
 vi.mock('@/shared/demoConfig', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/shared/demoConfig')>()
   return {
@@ -76,6 +81,9 @@ vi.mock('@/viewer/FloorViewer', () => ({
     branchRouteSegments,
     branchRoutesVisible,
     onToggleBranchRoutes,
+    engineerSegments,
+    engineerStackMarkers,
+    onToggleEngineerOverlay,
   }: {
     fixtures?: Array<unknown>
     kitchens?: Array<unknown>
@@ -84,6 +92,9 @@ vi.mock('@/viewer/FloorViewer', () => ({
     branchRouteSegments?: Array<unknown>
     branchRoutesVisible?: boolean
     onToggleBranchRoutes?: () => void
+    engineerSegments?: Array<unknown>
+    engineerStackMarkers?: Array<unknown>
+    onToggleEngineerOverlay?: () => void
   }) => (
     <div data-testid="floor-viewer">
       <span>fixtures:{fixtures?.length ?? 0}</span>
@@ -92,8 +103,14 @@ vi.mock('@/viewer/FloorViewer', () => ({
       <span>routes:{sanitaryRoutes?.length ?? 0}</span>
       {/* Mirrors the real viewer: hidden floors draw zero branch segments. */}
       <span>branchSegments:{branchRoutesVisible === false ? 0 : (branchRouteSegments?.length ?? 0)}</span>
+      {/* The page passes empty arrays when the engineer layer is toggled off. */}
+      <span>engineerSegments:{engineerSegments?.length ?? 0}</span>
+      <span>engineerStacks:{engineerStackMarkers?.length ?? 0}</span>
       <button type="button" onClick={onToggleBranchRoutes}>
         toggle-branch-routes
+      </button>
+      <button type="button" onClick={onToggleEngineerOverlay}>
+        toggle-engineer-overlay
       </button>
     </div>
   ),
@@ -201,6 +218,7 @@ describe('WorkspacePage', () => {
     mocks.exportFullIfcWithRisersWithDebug.mockReset()
     mocks.getDemoRuntimeConfig.mockReset()
     mocks.chooseInitialStoreyByFixtures.mockReset()
+    mocks.extractEngineerPipeNetwork.mockReset()
   })
 
   it('auto-opens קומה 2 instead of מרתף 2 and excludes penthouse floor from auto-generated risers by default', async () => {
@@ -518,6 +536,71 @@ describe('WorkspacePage', () => {
     await user.click(screen.getByRole('button', { name: 'toggle-branch-routes' }))
     await waitFor(() => {
       expect(screen.getByTestId('floor-viewer')).toHaveTextContent('branchSegments:2')
+    })
+  })
+
+  it('loads the engineer network on demand and the per-floor toggle hides and re-shows the layer', async () => {
+    mocks.getDemoRuntimeConfig.mockReturnValue({ enabled: false as const })
+    // One vertical SW-GRV segment on the auto-opened storey (id 2): drawable as
+    // a floor segment and eligible as a riser stack (Ø110, vertical).
+    mocks.extractEngineerPipeNetwork.mockResolvedValue({
+      metersPerSourceUnit: 1,
+      storeys: [{ id: 2, name: 'קומה 2', elevationSource: 612 }],
+      segments: [
+        {
+          expressId: 501,
+          name: 'Pipe 501',
+          systemName: 'SW-GRV 1',
+          storeyId: 2,
+          storeyName: 'קומה 2',
+          start: { x: 100, y: -50, z: 0 },
+          end: { x: 100, y: -50, z: 3 },
+          endpointSource: 'extrusion-axis',
+          outerDiameterMm: 110,
+          lengthM: 3,
+          invertElevationM: null,
+        },
+      ],
+    })
+
+    const user = userEvent.setup()
+    render(<WorkspacePage />)
+
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]')
+    expect(input).not.toBeNull()
+    await user.upload(input!, new File([new ArrayBuffer(128)], 'anytower.ifc'))
+
+    const levelTwoButton = await screen.findByRole('button', { name: /קומה 2/i })
+    await waitFor(() => {
+      expect(levelTwoButton).toHaveClass('storey-list__item--selected')
+    })
+
+    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('engineerSegments:0')
+
+    await user.click(screen.getByRole('tab', { name: 'Decisions' }))
+    await user.click(await screen.findByRole('button', { name: /load engineer network/i }))
+
+    // Baseline summary lands in the Decisions tab; extraction ran on the host.
+    await screen.findByText(/1 pipe segment \(SW-GRV \/ VNT\), 1 engineer riser stack/)
+    expect(mocks.extractEngineerPipeNetwork).toHaveBeenCalledWith(expect.anything(), 101, {
+      systemPrefixes: ['SW-GRV', 'VNT'],
+    })
+
+    // Layer is visible by default right after loading.
+    await waitFor(() => {
+      expect(screen.getByTestId('floor-viewer')).toHaveTextContent('engineerSegments:1')
+    })
+    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('engineerStacks:1')
+
+    await user.click(screen.getByRole('button', { name: 'toggle-engineer-overlay' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('floor-viewer')).toHaveTextContent('engineerSegments:0')
+    })
+    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('engineerStacks:0')
+
+    await user.click(screen.getByRole('button', { name: 'toggle-engineer-overlay' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('floor-viewer')).toHaveTextContent('engineerSegments:1')
     })
   })
 })

@@ -333,6 +333,60 @@ describe('workspacePageReducer riser actions', () => {
   })
 })
 
+describe('workspacePageReducer engineer baseline (W7)', () => {
+  const baseline = {
+    sourceFileName: 'plumbing.ifc',
+    systemPrefixes: ['SW-GRV', 'VNT'],
+    network: { metersPerSourceUnit: 0.01, storeys: [], segments: [] },
+    stacks: [],
+  }
+
+  it('extraction lifecycle: started sets the flag, loaded stores the baseline, failed keeps the reason', () => {
+    const base = makeLoadedState()
+
+    const started = workspacePageReducer(base, { type: 'engineer-extraction-started' })
+    expect(started.isExtractingEngineerBaseline).toBe(true)
+    expect(started.engineerBaselineError).toBeNull()
+
+    const loaded = workspacePageReducer(started, { type: 'engineer-baseline-loaded', baseline })
+    expect(loaded.engineerBaseline).toBe(baseline)
+    expect(loaded.isExtractingEngineerBaseline).toBe(false)
+
+    const failed = workspacePageReducer(started, {
+      type: 'engineer-extraction-failed',
+      message: 'No systems matching SW-GRV / VNT found in any loaded file.',
+    })
+    expect(failed.engineerBaseline).toBeNull()
+    expect(failed.isExtractingEngineerBaseline).toBe(false)
+    expect(failed.engineerBaselineError).toMatch(/SW-GRV/)
+  })
+
+  it('engineer-overlay-toggled defaults absent storeys to visible and flips per storey', () => {
+    const base = makeLoadedState()
+
+    const hidden = workspacePageReducer(base, { type: 'engineer-overlay-toggled', storeyId: 2 })
+    expect(hidden.engineerOverlayVisibleByStorey.get(2)).toBe(false)
+
+    const shown = workspacePageReducer(hidden, { type: 'engineer-overlay-toggled', storeyId: 2 })
+    expect(shown.engineerOverlayVisibleByStorey.get(2)).toBe(true)
+    expect(shown.engineerOverlayVisibleByStorey.has(3)).toBe(false)
+  })
+
+  it('upload-reset clears the engineer baseline and its per-floor visibility', () => {
+    const loaded = workspacePageReducer(makeLoadedState(), {
+      type: 'engineer-baseline-loaded',
+      baseline,
+    })
+    const toggled = workspacePageReducer(loaded, { type: 'engineer-overlay-toggled', storeyId: 2 })
+
+    const reset = workspacePageReducer(toggled, { type: 'upload-reset' })
+    expect(reset.engineerBaseline).toBeNull()
+    expect(reset.isExtractingEngineerBaseline).toBe(false)
+    expect(reset.engineerBaselineError).toBeNull()
+    expect(reset.engineerOverlayVisibleByStorey.size).toBe(0)
+  })
+})
+
 describe('workspacePageReducer branch routes and misc', () => {
   it('branch-routes-toggled defaults absent storeys to visible and flips per storey', () => {
     const base = { ...makeLoadedState(), branchRoutesVisibleByStorey: new Map<number, boolean>() }

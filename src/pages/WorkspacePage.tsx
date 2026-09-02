@@ -32,6 +32,10 @@ import {
 } from '@/shared/frame/modelFrame'
 import { serializeAdjustLog } from '@/domain/adjustLog'
 import {
+  getEngineerOverlayPresentation,
+  resolveEngineerStoreyId,
+} from '@/viewer/engineerNetworkPresentation'
+import {
   createInitialWorkspacePageState,
   workspacePageReducer,
   type LinkedModelState,
@@ -148,6 +152,10 @@ export function WorkspacePage({
     activeTab,
     viewMode,
     branchRoutesVisibleByStorey,
+    engineerBaseline,
+    isExtractingEngineerBaseline,
+    engineerBaselineError,
+    engineerOverlayVisibleByStorey,
   } = state
 
   // Imperative viewer/export plumbing that intentionally stays outside the
@@ -538,6 +546,61 @@ export function WorkspacePage({
     dispatch({ type: 'branch-routes-toggled', storeyId: selectedStoreyId })
   }
 
+  function handleToggleEngineerOverlay() {
+    if (selectedStoreyId === null) return
+    dispatch({ type: 'engineer-overlay-toggled', storeyId: selectedStoreyId })
+  }
+
+  /**
+   * Loads the engineer plumbing baseline (W7) on demand: extracts the
+   * prefix-filtered pipe network from the host file, falling back to each
+   * linked file in upload order — the first file with matching systems wins.
+   */
+  async function handleLoadEngineerBaseline() {
+    if (webIfcModelId === null || modelFileName === null || isExtractingEngineerBaseline) return
+    dispatch({ type: 'engineer-extraction-started' })
+    try {
+      const [api, { extractEngineerPipeNetwork }, engineerPipes] = await Promise.all([
+        getIfcApi(),
+        import('@/shared/ifc/extractEngineerPipeNetwork'),
+        import('@/domain/engineerPipes'),
+      ])
+      const systemPrefixes = engineerPipes.ENGINEER_RISER_SYSTEM_PREFIXES
+      const candidates = [
+        { fileName: modelFileName, webIfcModelId },
+        ...linkedModels.map((model) => ({
+          fileName: model.fileName,
+          webIfcModelId: model.webIfcModelId,
+        })),
+      ]
+      for (const candidate of candidates) {
+        const network = await extractEngineerPipeNetwork(api, candidate.webIfcModelId, {
+          systemPrefixes,
+        })
+        if (network.segments.length === 0) continue
+        dispatch({
+          type: 'engineer-baseline-loaded',
+          baseline: {
+            sourceFileName: candidate.fileName,
+            systemPrefixes,
+            network,
+            stacks: engineerPipes.groupEngineerRiserStacks(network),
+          },
+        })
+        return
+      }
+      dispatch({
+        type: 'engineer-extraction-failed',
+        message: `No systems matching ${systemPrefixes.join(' / ')} found in any loaded file.`,
+      })
+    } catch (err) {
+      dispatch({
+        type: 'engineer-extraction-failed',
+        message: err instanceof Error ? err.message : 'Engineer network extraction failed.',
+      })
+    }
+  }
+
   function handleSuggestRisers() {
     if (!selectedStoreyId || (fixtures.length === 0 && kitchens.length === 0)) return
 
@@ -773,6 +836,35 @@ export function WorkspacePage({
   const branchRoutesVisibleOnSelectedFloor =
     selectedStoreyId === null || (branchRoutesVisibleByStorey.get(selectedStoreyId) ?? true)
 
+  // --- engineer baseline overlay (W7) ---
+  const engineerOverlayVisibleOnSelectedFloor =
+    selectedStoreyId === null || (engineerOverlayVisibleByStorey.get(selectedStoreyId) ?? true)
+  const engineerStoreyId = useMemo(() => {
+    if (engineerBaseline === null) return null
+    return resolveEngineerStoreyId({
+      engineerSourceFileName: engineerBaseline.sourceFileName,
+      hostFileName: modelFileName,
+      selectedStoreyId,
+      alignments: storeyAlignments,
+    })
+  }, [engineerBaseline, modelFileName, selectedStoreyId, storeyAlignments])
+  const engineerOverlay = useMemo(() => {
+    if (engineerBaseline === null || engineerStoreyId === null || isExtractingGeometry) return null
+    return getEngineerOverlayPresentation({
+      network: engineerBaseline.network,
+      stacks: engineerBaseline.stacks,
+      engineerStoreyId,
+      frameOrigin: modelFrame.origin,
+      visible: engineerOverlayVisibleOnSelectedFloor,
+    })
+  }, [
+    engineerBaseline,
+    engineerStoreyId,
+    isExtractingGeometry,
+    modelFrame,
+    engineerOverlayVisibleOnSelectedFloor,
+  ])
+
 
   const validationReport =
     modelFileName === null
@@ -893,6 +985,12 @@ export function WorkspacePage({
           branchRouteSegments={localViewerBranchRouteSegments}
           branchRoutesVisible={branchRoutesVisibleOnSelectedFloor}
           onToggleBranchRoutes={handleToggleBranchRoutes}
+          engineerSegments={engineerOverlay?.visibleSegments ?? []}
+          engineerStackMarkers={engineerOverlay?.visibleStackMarkers ?? []}
+          engineerOverlayAvailable={engineerOverlay?.hasNetwork ?? false}
+          engineerOverlayVisible={engineerOverlayVisibleOnSelectedFloor}
+          onToggleEngineerOverlay={handleToggleEngineerOverlay}
+          engineerExcludedSegmentCount={engineerOverlay?.excludedSegmentCount ?? 0}
         />
       </ViewTransition>
     </Suspense>
@@ -930,6 +1028,21 @@ export function WorkspacePage({
       demoFloorOpened={demoFloorOpened}
       sanitaryRouteCount={sanitaryRoutesForExport.length}
       modelLengthUnit={modelLengthUnit}
+      engineerBaseline={
+        engineerBaseline === null
+          ? null
+          : {
+              sourceFileName: engineerBaseline.sourceFileName,
+              systemPrefixes: engineerBaseline.systemPrefixes,
+              segmentCount: engineerBaseline.network.segments.length,
+              stackCount: engineerBaseline.stacks.length,
+            }
+      }
+      isExtractingEngineerBaseline={isExtractingEngineerBaseline}
+      engineerBaselineError={engineerBaselineError}
+      onLoadEngineerBaseline={
+        webIfcModelId !== null ? () => void handleLoadEngineerBaseline() : undefined
+      }
     />
   )
 
