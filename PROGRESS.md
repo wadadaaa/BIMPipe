@@ -12,9 +12,9 @@ Privacy rule for this goal: `external/` and `refs/` hold private client data and
 | W2 — Units single source of truth | ✅ | commits `508e2bb`, `ccb4a61`, `9dffed2`, `7cfe9a5` + wiring `8f538ed`; fully wired, live-verified on 096-P (details below) |
 | W3 — Floor auto-select by geometry | ✅ | commits `9b26b77`, `39de514`, `01eca39`, `bad90de`; opens "08" on 096-P (deviation explained below), never R2 |
 | W4 — Multi-IFC ingest + storey mapping | ✅ | commits `4fca5d2`, `d4998d5`, `3604831`, `d3449fe`, `8cecf7d`; live-verified on full 096-A+096-P (details below) |
-| W5 — Vertical continuity map | ✅ core | commits `a5dddcf`, `308c880`, `1dd1786`; debug overlay wiring deferred to post-W4 (details below) |
+| W5 — Vertical continuity map | ✅ | core `a5dddcf`, `308c880`, `1dd1786` + overlay/snap wiring `14c861f`, `c5f5c55`, `5e40d77` (details below) |
 | W6 — T4 export + adjust log | ✅ core | commits `887c3e0`, `17adbab`, `2fbcbb3`; log UI wiring deferred (details below) |
-| W7 — Engineer baseline extraction + metrics | ✅ core | commits `0b0e096`, `d177c28`, `1668b7a`, `ad71263`; overlay + metrics display deferred to post-W4 (details below) |
+| W7 — Engineer baseline extraction + metrics | ✅ | core `0b0e096`, `d177c28`, `1668b7a`, `ad71263` + overlay/metrics wiring `37ae959`, `b0a4e67`, `35ff8a6` (details below) |
 | Push | ⏳ | |
 
 ## Goal 2 milestones
@@ -116,6 +116,16 @@ Pure refactor, no behavior change intended. Parity baseline (pre-change HEAD): `
 - **No trimmed copy needed** (full 096-A opens ~0.3 s; gated test 1.3 s) — `tools/trim-ifc-storeys.mjs` not written.
 - **Full gate**: lint 0 errors · **537/537** (59 files, gated test on real files) · build green · react-doctor only known pre-existing error. **Live (Playwright)**: 096-P+096-A → mapping table + underlay on GF with 11 fixtures verified; Duplex single-file unchanged; caches cleaned.
 - **Known limits**: host order is user-controlled (plumbing-host heuristic is a possible later improvement); kitchens never deduped (no IfcSpace kitchens in 096); origin check ignores site-rotation differences (096 shares one rotation).
+
+### W5/W7 overlay + metrics wiring ✅ (2026-09-02, commits `37ae959`, `b0a4e67`, `35ff8a6` W7; `14c861f`, `c5f5c55`, `5e40d77` W5)
+
+- **Frame conversion, proven twice**: `src/shared/frame/ifcSourceFrame.ts` — viewer x = IFC X·scale, y = IFC Z·scale, **z = −IFC Y·scale**. Gated test: engineer stacks land next to storey-01 toilets (flipped sign puts them ~1,300 km away); live: all 11 toilets had their nearest engineer ring within 0.41–2.75 m.
+- **W7 overlay + metrics**: on-demand SW-GRV/VNT extraction from whichever loaded file has the systems; magenta toggleable layer (storey-scoped segments via W4 alignment + model-wide ring markers for the 50 engineer stacks); `computeEngineerComparison` in Decisions + export debug JSON. 096-P storey 01 metrics: ours 11 stacks vs engineer 50, **mean nearest-engineer-riser distance 1.16 m**, branch ratio honestly 0.00 (no routes feedable without a riser selection), 13 fixtures assigned / 0 unassigned, engineer-connected = not derivable (stated).
+- **W5 overlay + snap flag**: "Build continuity map" picks the walls-bearing file (096-A via multi-upload; explicit "No walls found" block on wall-less hosts like Duplex MEP), converts units at the adapter boundary, remaps linked storeys through W4 alignment, per-storey progress. Blocked cells render as one merged Three.js mesh (~70k DOM nodes avoided); teal shaft candidates with hover. Snap checkbox off by default; snap-on Suggest surfaces per-riser outcomes incl. honest misses. Timings on real 096-A: full 13-storey extraction 694 ms node / 1.16 s in-app — far under budget, no scoping needed.
+- **Live**: Duplex_A host — map built, overlay wall-aligned, snaps to free cells (0.63/0.83 m); 096 P+A — 126/413 engineer segments on storey 01, GF grid 71,326 blocked cells + 36 aligned-void candidates, re-suggest snapped 2 (0.87 m) with 3 explicit misses. Client artifacts cleaned from caches.
+- **Live-found bug fixed** (`5e40d77`): real 096 storeys contain meshes with NaN vertices; overlay plan anchor now guards and falls back to y=0.
+- **Full gate**: lint 0 errors · **574/574** (65 files, gated tests ran) · build green · react-doctor 0 errors on touched files.
+- **New pre-existing finding → being fixed before push**: some 096-P storeys (01, GF) contain geometry at surveyor coordinates ~181 km out, so FIT collapses the building to a sliver (reproduced with overlays hidden). This violates the W1 "FIT bounds == floor bounds" intent — outlier-robust bounds dispatched as a W1 follow-up.
 
 ---
 
