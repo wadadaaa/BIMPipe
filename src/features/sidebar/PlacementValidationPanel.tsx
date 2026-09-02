@@ -3,6 +3,8 @@ import type { InitialStoreyDecision } from '@/shared/ifc/scanStoreyFixtures'
 import type { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
 import type { StoreyAlignment } from '@/domain/alignStoreys'
 import type { MergedStoreyDetection } from '@/domain/mergeFixturesAcrossFiles'
+import type { EngineerComparisonReport } from '@/domain/engineerComparisonMetrics'
+import { formatLengthM } from '@/shared/lengthUnits'
 
 type ValidationReport = ReturnType<typeof buildRiserValidationReport>
 
@@ -30,6 +32,8 @@ interface PlacementValidationPanelProps {
   engineerBaselineError?: string | null
   /** Undefined hides the affordance (no model loaded yet). */
   onLoadEngineerBaseline?: () => void
+  /** W7 metrics vs our proposal; null until baseline AND risers both exist. */
+  engineerComparison?: EngineerComparisonReport | null
 }
 
 function getUserFacingIssue(
@@ -169,16 +173,55 @@ function CrossFileMergeSection({ merge }: { merge: MergedStoreyDetection }) {
   )
 }
 
+function EngineerComparisonList({ comparison }: { comparison: EngineerComparisonReport }) {
+  const { riserCounts, meanNearestEngineerRiserDistanceM, branchLengths, fixtures } = comparison
+  return (
+    <>
+      <p className="sidebar__panel-copy">
+        <strong>Comparison vs suggestion</strong>
+      </p>
+      <ul className="risers-panel__legend-list" data-testid="engineer-comparison">
+        <li>
+          <strong>Riser stacks:</strong> ours {riserCounts.oursStacks} ({riserCounts.oursPerFloorEntries}{' '}
+          per-floor entries) vs engineer {riserCounts.engineerStacks}
+        </li>
+        <li>
+          <strong>Mean distance to nearest engineer riser:</strong>{' '}
+          {meanNearestEngineerRiserDistanceM === null
+            ? 'n/a (one side has no stacks)'
+            : formatLengthM(meanNearestEngineerRiserDistanceM, 'm')}
+        </li>
+        <li>
+          <strong>Branch runs:</strong> ours {formatLengthM(branchLengths.oursTotalM, 'm')} vs engineer{' '}
+          {branchLengths.engineerTotalM === null
+            ? 'n/a (no Pset lengths)'
+            : formatLengthM(branchLengths.engineerTotalM, 'm')}
+          {branchLengths.ratioOursToEngineer !== null &&
+            ` (ratio ${branchLengths.ratioOursToEngineer.toFixed(2)})`}
+          {branchLengths.engineerSegmentsWithNullLength > 0 &&
+            `; ${branchLengths.engineerSegmentsWithNullLength} engineer segment(s) without a Pset length`}
+        </li>
+        <li>
+          <strong>Fixtures:</strong> {fixtures.oursAssignedCount} assigned, {fixtures.oursUnassignedCount}{' '}
+          unassigned; engineer-connected count not derivable from pipe geometry
+        </li>
+      </ul>
+    </>
+  )
+}
+
 function EngineerBaselineSection({
   baseline,
   isExtracting,
   error,
   onLoad,
+  comparison,
 }: {
   baseline: EngineerBaselineSummary | null
   isExtracting: boolean
   error: string | null
   onLoad: () => void
+  comparison: EngineerComparisonReport | null
 }) {
   return (
     <section className="sidebar__panel" data-testid="engineer-baseline">
@@ -205,6 +248,10 @@ function EngineerBaselineSection({
           {baseline.stackCount} engineer riser {baseline.stackCount === 1 ? 'stack' : 'stacks'}.
         </p>
       )}
+      {baseline !== null && comparison === null && (
+        <p className="sidebar__panel-copy">Suggest risers to compare the proposal against this baseline.</p>
+      )}
+      {comparison !== null && <EngineerComparisonList comparison={comparison} />}
       {error !== null && (
         <p className="sidebar__panel-copy" role="alert" dir="auto">
           <strong>Engineer network:</strong> {error}
@@ -225,6 +272,7 @@ export function PlacementValidationPanel({
   isExtractingEngineerBaseline = false,
   engineerBaselineError = null,
   onLoadEngineerBaseline,
+  engineerComparison = null,
 }: PlacementValidationPanelProps) {
   const autoOpenDecision = initialStoreyDecision && (
     <p className="sidebar__panel-copy">
@@ -257,6 +305,7 @@ export function PlacementValidationPanel({
       isExtracting={isExtractingEngineerBaseline}
       error={engineerBaselineError}
       onLoad={onLoadEngineerBaseline}
+      comparison={engineerComparison}
     />
   )
 

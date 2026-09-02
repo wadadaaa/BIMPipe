@@ -5,6 +5,7 @@ import type { StoreyDetectionAggregation } from '@/shared/ifc/aggregateStoreyDet
 import type { InitialStoreyDecision } from '@/shared/ifc/scanStoreyFixtures'
 import type { StoreyAlignment } from '@/domain/alignStoreys'
 import type { MergedStoreyDetection } from '@/domain/mergeFixturesAcrossFiles'
+import type { EngineerComparisonReport } from '@/domain/engineerComparisonMetrics'
 import type { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
 import type { LengthUnit } from '@/shared/lengthUnits'
 import { ViewTransition } from '@/shared/reactViewTransition'
@@ -54,6 +55,8 @@ interface SidebarProps {
   isExtractingEngineerBaseline?: boolean
   engineerBaselineError?: string | null
   onLoadEngineerBaseline?: () => void
+  /** W7 metrics: our proposal vs the engineer baseline; null until both exist. */
+  engineerComparison?: EngineerComparisonReport | null
 }
 
 const TABS: { id: SidebarTab; label: string; focus: string; hint: string }[] = [
@@ -110,6 +113,7 @@ export function Sidebar({
   isExtractingEngineerBaseline = false,
   engineerBaselineError = null,
   onLoadEngineerBaseline,
+  engineerComparison = null,
 }: SidebarProps) {
   const activeTabMeta = TABS.find((tab) => tab.id === activeTab)!
   const riserPanelKey = risers.map((riser) => riser.id).join(':') || 'empty'
@@ -244,6 +248,7 @@ export function Sidebar({
                 isExtractingEngineerBaseline={isExtractingEngineerBaseline}
                 engineerBaselineError={engineerBaselineError}
                 onLoadEngineerBaseline={onLoadEngineerBaseline}
+                engineerComparison={engineerComparison}
               />
             )}
           </section>

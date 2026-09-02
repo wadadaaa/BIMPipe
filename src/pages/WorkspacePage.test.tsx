@@ -577,6 +577,10 @@ describe('WorkspacePage', () => {
 
     expect(screen.getByTestId('floor-viewer')).toHaveTextContent('engineerSegments:0')
 
+    const placeRisersButton = await screen.findByRole('button', { name: /place risers/i })
+    await user.click(placeRisersButton)
+    await screen.findByLabelText('Remove riser R1')
+
     await user.click(screen.getByRole('tab', { name: 'Decisions' }))
     await user.click(await screen.findByRole('button', { name: /load engineer network/i }))
 
@@ -585,6 +589,12 @@ describe('WorkspacePage', () => {
     expect(mocks.extractEngineerPipeNetwork).toHaveBeenCalledWith(expect.anything(), 101, {
       systemPrefixes: ['SW-GRV', 'VNT'],
     })
+
+    // Comparison metrics render once both the baseline and our risers exist.
+    const comparisonList = await screen.findByTestId('engineer-comparison')
+    expect(comparisonList).toHaveTextContent(/vs engineer 1/)
+    expect(comparisonList).toHaveTextContent(/Mean distance to nearest engineer riser:/)
+    expect(comparisonList).toHaveTextContent(/ m/)
 
     // Layer is visible by default right after loading.
     await waitFor(() => {

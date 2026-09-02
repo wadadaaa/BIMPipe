@@ -31,6 +31,9 @@ import {
   type ModelFrame,
 } from '@/shared/frame/modelFrame'
 import { serializeAdjustLog } from '@/domain/adjustLog'
+import { computeEngineerComparison } from '@/domain/engineerComparisonMetrics'
+import { isVerticalEngineerSegment } from '@/domain/engineerPipes'
+import { alignEngineerStacksToViewerPlan } from '@/shared/frame/ifcSourceFrame'
 import {
   getEngineerOverlayPresentation,
   resolveEngineerStoreyId,
@@ -711,6 +714,18 @@ export function WorkspacePage({
           })),
           storeyAlignments,
           crossFileMerge,
+          // Engineer baseline comparison (W7); null until the engineer network
+          // is loaded from the Decisions tab.
+          engineerBaseline:
+            engineerBaseline === null
+              ? null
+              : {
+                  sourceFileName: engineerBaseline.sourceFileName,
+                  systemPrefixes: engineerBaseline.systemPrefixes,
+                  segmentCount: engineerBaseline.network.segments.length,
+                  stackCount: engineerBaseline.stacks.length,
+                },
+          engineerComparison,
           floorClassification,
           validationReport: buildRiserValidationReport({
             exportRunId,
@@ -864,6 +879,24 @@ export function WorkspacePage({
     modelFrame,
     engineerOverlayVisibleOnSelectedFloor,
   ])
+  // W7 metrics: our proposal vs the engineer baseline, in a shared plan frame.
+  // Both sides are source metres: state risers are source plan metres (viewer
+  // x/z), engineer stacks are aligned into that frame via z = -IFC Y. Branch
+  // totals compare our plan-projected runs on the open floor against the
+  // engineer's non-vertical segments' Pset lengths (model-wide).
+  const engineerComparison = useMemo(() => {
+    if (engineerBaseline === null || risers.length === 0) return null
+    return computeEngineerComparison({
+      ourRisers: risers,
+      ourRiserUnits: 'm',
+      ourBranchRoutes: branchRouteFloors,
+      ourAssignments: fixtureAssignments,
+      engineerRisers: alignEngineerStacksToViewerPlan(engineerBaseline.stacks),
+      engineerSegments: engineerBaseline.network.segments.filter(
+        (segment) => !isVerticalEngineerSegment(segment),
+      ),
+    })
+  }, [engineerBaseline, risers, branchRouteFloors, fixtureAssignments])
 
 
   const validationReport =
@@ -1043,6 +1076,7 @@ export function WorkspacePage({
       onLoadEngineerBaseline={
         webIfcModelId !== null ? () => void handleLoadEngineerBaseline() : undefined
       }
+      engineerComparison={engineerComparison}
     />
   )
 
