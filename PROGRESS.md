@@ -15,7 +15,7 @@ Privacy rule for this goal: `external/` and `refs/` hold private client data and
 | W5 — Vertical continuity map | ✅ | core `a5dddcf`, `308c880`, `1dd1786` + overlay/snap wiring `14c861f`, `c5f5c55`, `5e40d77` (details below) |
 | W6 — T4 export + adjust log | ✅ core | commits `887c3e0`, `17adbab`, `2fbcbb3`; log UI wiring deferred (details below) |
 | W7 — Engineer baseline extraction + metrics | ✅ | core `0b0e096`, `d177c28`, `1668b7a`, `ad71263` + overlay/metrics wiring `37ae959`, `b0a4e67`, `35ff8a6` (details below) |
-| Push | ⏳ | |
+| Push | ✅ | final audit + push 2026-09-02 (details below) |
 
 ## Goal 2 milestones
 
@@ -125,7 +125,15 @@ Pure refactor, no behavior change intended. Parity baseline (pre-change HEAD): `
 - **Live**: Duplex_A host — map built, overlay wall-aligned, snaps to free cells (0.63/0.83 m); 096 P+A — 126/413 engineer segments on storey 01, GF grid 71,326 blocked cells + 36 aligned-void candidates, re-suggest snapped 2 (0.87 m) with 3 explicit misses. Client artifacts cleaned from caches.
 - **Live-found bug fixed** (`5e40d77`): real 096 storeys contain meshes with NaN vertices; overlay plan anchor now guards and falls back to y=0.
 - **Full gate**: lint 0 errors · **574/574** (65 files, gated tests ran) · build green · react-doctor 0 errors on touched files.
-- **New pre-existing finding → being fixed before push**: some 096-P storeys (01, GF) contain geometry at surveyor coordinates ~181 km out, so FIT collapses the building to a sliver (reproduced with overlays hidden). This violates the W1 "FIT bounds == floor bounds" intent — outlier-robust bounds dispatched as a W1 follow-up.
+- **New pre-existing finding → fixed before push**: FIT collapsed to a sliver on 096-P storey 01 — see the W1 follow-up entry below.
+
+### W1 follow-up — outlier-robust viewer FIT bounds ✅ (2026-09-02, commit `751f310`)
+
+- **Real root cause (not the suspected 181 km plan strays)**: full-height vertical elements assigned to storey 01 — two ~125 m IfcFlowTerminal stacks (elevation 30 → 155 m), six IfcCovering meshes reaching ~34 m, one floating IfcFlowController — inflated the floor box's Y extent, flipping `fitCamera`'s smallest-axis-is-up inference into a section view (the "sliver").
+- **`src/shared/frame/robustFloorBounds.ts` (new, pure)**: per-mesh bbox centres vs per-axis median — plan outliers >1 km from the median plan centre excluded entirely (covers the surveyor-stray scenario too); plan-kept meshes reaching >20 m above/below the median vertical centre keep plan extent but not Y extent; degenerate cases fall back to the unfiltered union; identity path when nothing is excluded. NaN vertices skipped and counted (`boundsDiagnostics` on `FloorMeshes`).
+- **Only the viewer `boundingBox` is robust**; rendered geometry and the domain/export `sourceBoundingBox` untouched (gated test asserts the source box still spans the full 125.49 m).
+- **Gated 096 test**: storey 01 viewer box **25.68 × 22.71 m**, vertical span 2.42 m; diagnostics `{nonFinite: 0, planOutliers: 0, verticalOutliers: 11}`. **Full gate**: lint 0 errors · **587/587** (66 files) · build green. **Live**: FIT now fills the viewport top-down with all 11 WCs + 2 WBs visible; Duplex proven numerically bit-identical (zero exclusions on all 3 storeys).
+- Follow-up candidate: surface `boundsDiagnostics` (excluded-mesh counts) in the Decisions UI.
 
 ---
 
