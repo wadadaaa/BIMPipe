@@ -15,7 +15,7 @@ Privacy rule for this goal: `external/` and `refs/` hold private client data and
 | W5 — Vertical continuity map | ✅ | core `a5dddcf`, `308c880`, `1dd1786` + overlay/snap wiring `14c861f`, `c5f5c55`, `5e40d77` (details below) |
 | W6 — T4 export + adjust log | ✅ core | commits `887c3e0`, `17adbab`, `2fbcbb3`; log UI wiring deferred (details below) |
 | W7 — Engineer baseline extraction + metrics | ✅ | core `0b0e096`, `d177c28`, `1668b7a`, `ad71263` + overlay/metrics wiring `37ae959`, `b0a4e67`, `35ff8a6` (details below) |
-| Push | ✅ | final audit + push 2026-09-02 (details below) |
+| Push | ⛔ | blocked: authenticated account has read-only access to the origin repo; all work committed locally, final audit passed (details below) |
 
 ## Goal 2 milestones
 
@@ -134,6 +134,12 @@ Pure refactor, no behavior change intended. Parity baseline (pre-change HEAD): `
 - **Only the viewer `boundingBox` is robust**; rendered geometry and the domain/export `sourceBoundingBox` untouched (gated test asserts the source box still spans the full 125.49 m).
 - **Gated 096 test**: storey 01 viewer box **25.68 × 22.71 m**, vertical span 2.42 m; diagnostics `{nonFinite: 0, planOutliers: 0, verticalOutliers: 11}`. **Full gate**: lint 0 errors · **587/587** (66 files) · build green. **Live**: FIT now fills the viewport top-down with all 11 WCs + 2 WBs visible; Duplex proven numerically bit-identical (zero exclusions on all 3 storeys).
 - Follow-up candidate: surface `boundsDiagnostics` (excluded-mesh counts) in the Decisions UI.
+
+### Final acceptance audit ✅ / push ⛔ (2026-09-02)
+
+- **Adversarial audit (independent re-verification, trusting only fresh command runs)**: all W0–W7 acceptance requirements PROVEN against the current tree — `pnpm lint` 0 errors (1 known pre-existing warning) · `pnpm test` **587/587**, 0 skipped (all 8 gated 096 test files executed against the real client files) · `pnpm build` green · `git ls-files -- external refs` empty · no client identifiers in tracked content (only substring false positives inside public-sample IFC entity names) · gated-test skip path proven hermetically in a sandbox without touching client files · bim11 matchers exact and untouched since the pre-goal baseline · all per-task assertions verified at file:line (11 toilets/26×23 m frame, 30.15 m unit display, never-R2 chooser, GF↔00 mapping, flag-off byte-identity, Ø110/Ø160 + drift-error round-trips, 129 SW-GRV segments).
+- **Known cosmetic gap**: 1 of 53 commits (`9ce4a10`, cross-task wave-1 bookkeeping) lacks a `W*:` prefix; left as-is (history rewrite not warranted).
+- **Push blocked**: the only authenticated GitHub account on this machine has pull-only permission on the origin repo (verified via API: `push: false`). All work is committed locally on `goal/real-project-096`; push will be executed as soon as write access is granted or the owning account is authenticated.
 
 ---
 
