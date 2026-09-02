@@ -7,8 +7,9 @@ import type {
   ContinuityVoidInput,
   PlanFootprint,
 } from '@/domain/continuityMap'
+import type { StoreyId } from '@/domain/types'
 import { footprintFromWorldVertices, type WorldVertex } from '@/domain/continuityFootprints'
-import { collectSpatialTreeElements } from './collectSpatialTreeElements'
+import { collectSpatialTreeElementsForStoreys } from './collectSpatialTreeElements'
 import { parseStoreys } from './parseStoreys'
 
 /**
@@ -124,6 +125,21 @@ export interface ContinuityExtractionResult {
   diagnostics: string[]
 }
 
+export interface ExtractContinuityOptions {
+  /**
+   * When set, only these storeys (by their express IDs in THIS model) are
+   * processed, preserving bottom-to-top order. Scoping to a contiguous window
+   * keeps the ≥3-aligned-void rule meaningful locally while avoiding
+   * whole-model tessellation on large files.
+   */
+  storeyIds?: ReadonlySet<StoreyId>
+  /**
+   * Awaited after each processed storey so a UI can repaint a progress state
+   * between the synchronous per-storey tessellation batches.
+   */
+  onStoreyProgress?: (processed: number, total: number) => void | Promise<void>
+}
+
 interface OpeningRelation {
   hostId: number
   openingId: number
@@ -165,6 +181,7 @@ function collectTypeIds(api: IfcAPI, webIfcModelId: number, typeConstant: number
 export async function extractContinuityStoreyInputs(
   api: IfcAPI,
   webIfcModelId: number,
+  options: ExtractContinuityOptions = {},
 ): Promise<ContinuityExtractionResult> {
   const {
     IFCWALL,
@@ -195,16 +212,26 @@ export async function extractContinuityStoreyInputs(
 
   // parseStoreys returns bottom-to-top ordering, which the continuity map's
   // "consecutive storeys" rule relies on. The domain model id is irrelevant here.
-  const storeys = await parseStoreys(api, webIfcModelId, 'continuity-extraction')
+  const allStoreys = await parseStoreys(api, webIfcModelId, 'continuity-extraction')
+  const storeys =
+    options.storeyIds === undefined
+      ? allStoreys
+      : allStoreys.filter((storey) => options.storeyIds!.has(storey.id))
+
+  // Spatial relation tables are read once for every storey in scope.
+  const spatialByStorey = await collectSpatialTreeElementsForStoreys(
+    api,
+    webIfcModelId,
+    storeys.map((storey) => storey.id),
+  )
 
   const result: ContinuityStoreyInput[] = []
 
   for (const storey of storeys) {
-    const { elementIds, spatialNodeIds } = await collectSpatialTreeElements(
-      api,
-      webIfcModelId,
-      storey.id,
-    )
+    const { elementIds, spatialNodeIds } = spatialByStorey.get(storey.id) ?? {
+      elementIds: new Set<number>(),
+      spatialNodeIds: new Set<number>(),
+    }
 
     const obstructions: ContinuityObstructionInput[] = []
     for (const expressId of [...elementIds].sort((a, b) => a - b)) {
@@ -261,6 +288,8 @@ export async function extractContinuityStoreyInputs(
       voids,
       spaces,
     })
+
+    await options.onStoreyProgress?.(result.length, storeys.length)
   }
 
   return { storeys: result, diagnostics }
