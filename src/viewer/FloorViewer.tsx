@@ -408,7 +408,11 @@ export function FloorViewer({
       return
     }
 
-    const planY = boundsRef.current ? (boundsRef.current.min.y + boundsRef.current.max.y) / 2 : 0
+    // Guard against non-finite floor bounds (real 096 storeys contain broken
+    // meshes with NaN vertices); with depth testing off, y only anchors the
+    // quads, so 0 is a safe fallback.
+    const rawPlanY = boundsRef.current ? (boundsRef.current.min.y + boundsRef.current.max.y) / 2 : 0
+    const planY = Number.isFinite(rawPlanY) ? rawPlanY : 0
     const group = buildContinuityOverlayGroup(continuityBlockedRects, continuityShaftMarkers, planY)
     scene.add(group)
     continuityGroupRef.current = group
