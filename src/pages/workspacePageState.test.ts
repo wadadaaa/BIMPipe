@@ -387,6 +387,110 @@ describe('workspacePageReducer engineer baseline (W7)', () => {
   })
 })
 
+describe('workspacePageReducer continuity map (W5)', () => {
+  const continuityMap = {
+    sourceFileName: 'architecture.ifc',
+    map: { units: 'm' as const, cellSize: 0.25, grids: [], shaftCandidates: [], diagnostics: [] },
+    diagnostics: ['note'],
+    extractMs: 640,
+    buildMs: 30,
+    processedStoreyCount: 13,
+  }
+
+  it('build lifecycle: started sets the flag, progress updates, loaded stores the map, failed keeps the reason', () => {
+    const base = makeLoadedState()
+
+    const started = workspacePageReducer(base, { type: 'continuity-build-started' })
+    expect(started.isBuildingContinuityMap).toBe(true)
+    expect(started.continuityBuildError).toBeNull()
+    expect(started.continuityBuildProgress).toBeNull()
+
+    const progressed = workspacePageReducer(started, {
+      type: 'continuity-build-progress',
+      processed: 4,
+      total: 13,
+    })
+    expect(progressed.continuityBuildProgress).toEqual({ processed: 4, total: 13 })
+
+    const loaded = workspacePageReducer(progressed, { type: 'continuity-map-loaded', continuityMap })
+    expect(loaded.continuityMap).toBe(continuityMap)
+    expect(loaded.isBuildingContinuityMap).toBe(false)
+    expect(loaded.continuityBuildProgress).toBeNull()
+
+    const failed = workspacePageReducer(progressed, {
+      type: 'continuity-build-failed',
+      message: 'No walls found in any loaded file.',
+    })
+    expect(failed.continuityMap).toBeNull()
+    expect(failed.isBuildingContinuityMap).toBe(false)
+    expect(failed.continuityBuildProgress).toBeNull()
+    expect(failed.continuityBuildError).toMatch(/No walls/)
+  })
+
+  it('continuity-overlay-toggled defaults absent storeys to visible and flips per storey', () => {
+    const base = makeLoadedState()
+
+    const hidden = workspacePageReducer(base, { type: 'continuity-overlay-toggled', storeyId: 2 })
+    expect(hidden.continuityOverlayVisibleByStorey.get(2)).toBe(false)
+
+    const shown = workspacePageReducer(hidden, { type: 'continuity-overlay-toggled', storeyId: 2 })
+    expect(shown.continuityOverlayVisibleByStorey.get(2)).toBe(true)
+    expect(shown.continuityOverlayVisibleByStorey.has(3)).toBe(false)
+  })
+
+  it('continuity-snap-toggled flips the flag, which starts OFF', () => {
+    const base = makeLoadedState()
+    expect(base.continuitySnapEnabled).toBe(false)
+
+    const on = workspacePageReducer(base, { type: 'continuity-snap-toggled' })
+    expect(on.continuitySnapEnabled).toBe(true)
+    const off = workspacePageReducer(on, { type: 'continuity-snap-toggled' })
+    expect(off.continuitySnapEnabled).toBe(false)
+  })
+
+  it('risers-suggested records snap outcomes when present and clears them when omitted', () => {
+    const base = makeLoadedState()
+    const suggested = [makeRiser({ id: 'sug-1', stackId: 'stack-s', stackLabel: 'R1', source: 'detected' })]
+    const outcomes = [
+      { stackLabel: 'R1', snap: { status: 'snapMiss' as const, reason: 'no free cell within 1.5 m' } },
+    ]
+
+    const withOutcomes = workspacePageReducer(base, {
+      type: 'risers-suggested',
+      risers: suggested,
+      snapOutcomes: outcomes,
+    })
+    expect(withOutcomes.riserSnapOutcomes).toBe(outcomes)
+
+    const withoutOutcomes = workspacePageReducer(withOutcomes, {
+      type: 'risers-suggested',
+      risers: suggested,
+    })
+    expect(withoutOutcomes.riserSnapOutcomes).toBeNull()
+  })
+
+  it('upload-reset clears the continuity map, snap flag, and snap outcomes', () => {
+    const base = makeLoadedState()
+    const loaded = workspacePageReducer(base, { type: 'continuity-map-loaded', continuityMap })
+    const toggled = workspacePageReducer(loaded, { type: 'continuity-overlay-toggled', storeyId: 2 })
+    const snapOn = workspacePageReducer(toggled, { type: 'continuity-snap-toggled' })
+    const suggested = workspacePageReducer(snapOn, {
+      type: 'risers-suggested',
+      risers: [],
+      snapOutcomes: [],
+    })
+
+    const reset = workspacePageReducer(suggested, { type: 'upload-reset' })
+    expect(reset.continuityMap).toBeNull()
+    expect(reset.isBuildingContinuityMap).toBe(false)
+    expect(reset.continuityBuildProgress).toBeNull()
+    expect(reset.continuityBuildError).toBeNull()
+    expect(reset.continuityOverlayVisibleByStorey.size).toBe(0)
+    expect(reset.continuitySnapEnabled).toBe(false)
+    expect(reset.riserSnapOutcomes).toBeNull()
+  })
+})
+
 describe('workspacePageReducer branch routes and misc', () => {
   it('branch-routes-toggled defaults absent storeys to visible and flips per storey', () => {
     const base = { ...makeLoadedState(), branchRoutesVisibleByStorey: new Map<number, boolean>() }

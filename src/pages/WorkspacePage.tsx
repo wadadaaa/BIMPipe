@@ -38,6 +38,7 @@ import {
   getEngineerOverlayPresentation,
   resolveEngineerStoreyId,
 } from '@/viewer/engineerNetworkPresentation'
+import { getContinuityOverlayPresentation } from '@/viewer/continuityOverlayPresentation'
 import {
   createInitialWorkspacePageState,
   workspacePageReducer,
@@ -46,7 +47,7 @@ import {
 import { buildRiserStack } from '@/shared/routes/buildRiserStacks'
 import { classifyFloors } from '@/shared/routes/floorClassification'
 import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE } from '@/shared/routes/riserPlacementProfile'
-import { buildSuggestedRisers } from '@/shared/routes/buildSuggestedRisers'
+import { buildSuggestedRisersWithSnap } from '@/shared/routes/buildSuggestedRisers'
 import { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
 import { buildDemoModeUploadError, isStoreyIncludedInDemoScope } from '@/shared/demoConfig'
 import { buildSanitaryRoutingDemoPlan, buildSanitaryRoutingPlan } from '@/shared/routes/buildSanitaryRoutes'
@@ -159,6 +160,13 @@ export function WorkspacePage({
     isExtractingEngineerBaseline,
     engineerBaselineError,
     engineerOverlayVisibleByStorey,
+    continuityMap,
+    isBuildingContinuityMap,
+    continuityBuildProgress,
+    continuityBuildError,
+    continuityOverlayVisibleByStorey,
+    continuitySnapEnabled,
+    riserSnapOutcomes,
   } = state
 
   // Imperative viewer/export plumbing that intentionally stays outside the
@@ -604,6 +612,108 @@ export function WorkspacePage({
     }
   }
 
+  function handleToggleContinuityOverlay() {
+    if (selectedStoreyId === null) return
+    dispatch({ type: 'continuity-overlay-toggled', storeyId: selectedStoreyId })
+  }
+
+  const handleToggleContinuitySnap = useCallback(() => {
+    dispatch({ type: 'continuity-snap-toggled' })
+  }, [])
+
+  /**
+   * Builds the continuity map (W5) on demand from the loaded file with the
+   * most walls (host wins ties) — the host's own walls on single-file uploads,
+   * the linked architecture file on e.g. the 096 podium. Full-model build: on
+   * the largest real model (096-A, 13 storeys) extraction measures ~0.65 s, so
+   * no storey scoping is needed; progress still repaints between storeys.
+   */
+  async function handleBuildContinuityMap() {
+    if (webIfcModelId === null || modelFileName === null || isBuildingContinuityMap) return
+    dispatch({ type: 'continuity-build-started' })
+    try {
+      const [api, { buildContinuityMapForModel }, { IFCWALL, IFCWALLSTANDARDCASE }] =
+        await Promise.all([
+          getIfcApi(),
+          import('@/shared/ifc/buildContinuityMapForModel'),
+          import('web-ifc'),
+        ])
+
+      const candidates = [
+        { fileName: modelFileName, webIfcModelId, lengthUnit: modelLengthUnit, isHost: true },
+        ...linkedModels.map((model) => ({
+          fileName: model.fileName,
+          webIfcModelId: model.webIfcModelId,
+          lengthUnit: model.lengthUnit,
+          isHost: false,
+        })),
+      ]
+      let source: (typeof candidates)[number] | null = null
+      let sourceWallCount = 0
+      for (const candidate of candidates) {
+        const wallCount =
+          api.GetLineIDsWithType(candidate.webIfcModelId, IFCWALL).size() +
+          api.GetLineIDsWithType(candidate.webIfcModelId, IFCWALLSTANDARDCASE).size()
+        if (wallCount > sourceWallCount) {
+          source = candidate
+          sourceWallCount = wallCount
+        }
+      }
+      if (source === null) {
+        dispatch({
+          type: 'continuity-build-failed',
+          message: 'No walls found in any loaded file — the continuity map needs architecture geometry.',
+        })
+        return
+      }
+      if (source.lengthUnit === null) {
+        dispatch({
+          type: 'continuity-build-failed',
+          message: `${source.fileName} declares no supported length unit; storey elevations cannot be converted, so the continuity map was not built.`,
+        })
+        return
+      }
+
+      const sourceToHostStoreyId = source.isHost
+        ? null
+        : buildLinkedToHostStoreyIdMap(storeyAlignments, source.fileName)
+      if (sourceToHostStoreyId !== null && sourceToHostStoreyId.size === 0) {
+        dispatch({
+          type: 'continuity-build-failed',
+          message: `${source.fileName} has the walls but none of its storeys align to the host — the continuity map cannot be mapped onto host floors.`,
+        })
+        return
+      }
+
+      const result = await buildContinuityMapForModel({
+        api,
+        webIfcModelId: source.webIfcModelId,
+        lengthUnit: source.lengthUnit,
+        sourceToHostStoreyId,
+        onStoreyProgress: async (processed, total) => {
+          dispatch({ type: 'continuity-build-progress', processed, total })
+          await waitForNextPaint()
+        },
+      })
+      dispatch({
+        type: 'continuity-map-loaded',
+        continuityMap: {
+          sourceFileName: source.fileName,
+          map: result.map,
+          diagnostics: [...result.diagnostics, ...result.map.diagnostics],
+          extractMs: Math.round(result.extractMs),
+          buildMs: Math.round(result.buildMs),
+          processedStoreyCount: result.processedStoreyCount,
+        },
+      })
+    } catch (err) {
+      dispatch({
+        type: 'continuity-build-failed',
+        message: err instanceof Error ? err.message : 'Continuity map build failed.',
+      })
+    }
+  }
+
   function handleSuggestRisers() {
     if (!selectedStoreyId || (fixtures.length === 0 && kitchens.length === 0)) return
 
@@ -639,21 +749,29 @@ export function WorkspacePage({
           // Keep suggest flow non-fatal even when full-building detection aggregation fails.
         })
     }
+    // W5 advanced flag: only when it is ON and a map exists does the suggest
+    // flow snap to shafts/free cells. Off (the default) keeps suggestions
+    // byte-identical to the flag-free path.
+    const continuitySnap =
+      continuitySnapEnabled && continuityMap !== null ? { map: continuityMap.map } : undefined
     startTransition(() => {
       nextRiserLabelRef.current = 1
+      const suggestion = buildSuggestedRisersWithSnap(
+        storeys,
+        selectedStoreyId,
+        fixtures,
+        kitchens,
+        // Suggestion mixes plan bounds with source-frame fixture positions,
+        // so it must see the source-frame bounding box, not the local one.
+        floorMeshes ? { ...floorMeshes, boundingBox: pickSourceBoundingBox(floorMeshes) } : null,
+        () => takeNextRiserLabel(nextRiserLabelRef),
+        demoRuntime,
+        continuitySnap,
+      )
       dispatch({
         type: 'risers-suggested',
-        risers: buildSuggestedRisers(
-          storeys,
-          selectedStoreyId,
-          fixtures,
-          kitchens,
-          // Suggestion mixes plan bounds with source-frame fixture positions,
-          // so it must see the source-frame bounding box, not the local one.
-          floorMeshes ? { ...floorMeshes, boundingBox: pickSourceBoundingBox(floorMeshes) } : null,
-          () => takeNextRiserLabel(nextRiserLabelRef),
-          demoRuntime,
-        ),
+        risers: suggestion.risers,
+        snapOutcomes: continuitySnap === undefined ? null : suggestion.snapOutcomes,
       })
     })
   }
@@ -726,6 +844,20 @@ export function WorkspacePage({
                   stackCount: engineerBaseline.stacks.length,
                 },
           engineerComparison,
+          // Continuity map (W5); null until built from the Decisions tab.
+          continuityMap:
+            continuityMap === null
+              ? null
+              : {
+                  sourceFileName: continuityMap.sourceFileName,
+                  processedStoreyCount: continuityMap.processedStoreyCount,
+                  shaftCandidateCount: continuityMap.map.shaftCandidates.length,
+                  extractMs: continuityMap.extractMs,
+                  buildMs: continuityMap.buildMs,
+                  diagnostics: continuityMap.diagnostics,
+                },
+          continuitySnapEnabled,
+          riserSnapOutcomes,
           floorClassification,
           validationReport: buildRiserValidationReport({
             exportRunId,
@@ -898,6 +1030,27 @@ export function WorkspacePage({
     })
   }, [engineerBaseline, risers, branchRouteFloors, fixtureAssignments])
 
+  // --- continuity map overlay (W5) ---
+  // Map storeys are HOST storey IDs (linked models remapped at build time), so
+  // the open floor's grid is looked up directly by selectedStoreyId.
+  const continuityOverlayVisibleOnSelectedFloor =
+    selectedStoreyId === null || (continuityOverlayVisibleByStorey.get(selectedStoreyId) ?? true)
+  const continuityOverlay = useMemo(() => {
+    if (continuityMap === null || selectedStoreyId === null || isExtractingGeometry) return null
+    return getContinuityOverlayPresentation({
+      map: continuityMap.map,
+      storeyId: selectedStoreyId,
+      frameOrigin: modelFrame.origin,
+      visible: continuityOverlayVisibleOnSelectedFloor,
+    })
+  }, [
+    continuityMap,
+    selectedStoreyId,
+    isExtractingGeometry,
+    modelFrame,
+    continuityOverlayVisibleOnSelectedFloor,
+  ])
+
 
   const validationReport =
     modelFileName === null
@@ -1024,6 +1177,12 @@ export function WorkspacePage({
           engineerOverlayVisible={engineerOverlayVisibleOnSelectedFloor}
           onToggleEngineerOverlay={handleToggleEngineerOverlay}
           engineerExcludedSegmentCount={engineerOverlay?.excludedSegmentCount ?? 0}
+          continuityBlockedRects={continuityOverlay?.blockedRects ?? []}
+          continuityShaftMarkers={continuityOverlay?.shaftMarkers ?? []}
+          continuityBlockedCellCount={continuityOverlay?.blockedCellCount ?? 0}
+          continuityOverlayAvailable={continuityOverlay?.gridAvailable ?? false}
+          continuityOverlayVisible={continuityOverlayVisibleOnSelectedFloor}
+          onToggleContinuityOverlay={handleToggleContinuityOverlay}
         />
       </ViewTransition>
     </Suspense>
@@ -1077,6 +1236,27 @@ export function WorkspacePage({
         webIfcModelId !== null ? () => void handleLoadEngineerBaseline() : undefined
       }
       engineerComparison={engineerComparison}
+      continuityMap={
+        continuityMap === null
+          ? null
+          : {
+              sourceFileName: continuityMap.sourceFileName,
+              storeyCount: continuityMap.map.grids.length,
+              shaftCandidateCount: continuityMap.map.shaftCandidates.length,
+              extractMs: continuityMap.extractMs,
+              buildMs: continuityMap.buildMs,
+              diagnosticsCount: continuityMap.diagnostics.length,
+            }
+      }
+      isBuildingContinuityMap={isBuildingContinuityMap}
+      continuityBuildProgress={continuityBuildProgress}
+      continuityBuildError={continuityBuildError}
+      onBuildContinuityMap={
+        webIfcModelId !== null ? () => void handleBuildContinuityMap() : undefined
+      }
+      continuitySnapEnabled={continuitySnapEnabled}
+      onToggleContinuitySnap={handleToggleContinuitySnap}
+      riserSnapOutcomes={riserSnapOutcomes}
     />
   )
 
@@ -1217,6 +1397,25 @@ function collectLinkedDetectionTargets(
     })
   }
   return targets
+}
+
+/**
+ * Linked-model storey ID → host storey ID from the W4 alignment, for remapping
+ * a linked architecture model's continuity storeys onto host floors. Empty
+ * when the linked file has no aligned storeys.
+ */
+function buildLinkedToHostStoreyIdMap(
+  alignments: StoreyAlignment[],
+  linkedFileName: string,
+): Map<StoreyId, StoreyId> {
+  const map = new Map<StoreyId, StoreyId>()
+  for (const alignment of alignments) {
+    if (alignment.linkedFileName !== linkedFileName || alignment.status !== 'aligned') continue
+    for (const pair of alignment.pairs) {
+      map.set(pair.linked.storeyId, pair.host.storeyId)
+    }
+  }
+  return map
 }
 
 function takeNextRiserLabel(nextRiserLabelRef: MutableRefObject<number>): string {

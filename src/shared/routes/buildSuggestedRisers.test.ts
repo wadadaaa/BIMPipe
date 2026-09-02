@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { DemoConfig } from '@/shared/demoConfig'
+import type { ContinuityMap } from '@/domain/continuityMap'
 import type { Fixture, Storey } from '@/domain/types'
-import { buildSuggestedRisers } from './buildSuggestedRisers'
+import { buildSuggestedRisers, buildSuggestedRisersWithSnap } from './buildSuggestedRisers'
 
 const storeys: Storey[] = [
   { id: 1, name: 'קומה 1', elevation: 300, modelId: 'model-1' },
@@ -90,5 +91,86 @@ describe('buildSuggestedRisers', () => {
 
     expect(new Set(risers.map((riser) => riser.storeyId))).toEqual(new Set([1, 2, 3]))
     expect(new Set(risers.map((riser) => riser.stackId)).size).toBe(1)
+  })
+})
+
+describe('buildSuggestedRisersWithSnap (W5 continuity flag)', () => {
+  // One shaft candidate 0.5 m from the toilet on its own storey; empty grid.
+  const map: ContinuityMap = {
+    units: 'm',
+    cellSize: 0.25,
+    grids: [],
+    shaftCandidates: [
+      {
+        id: 'shaft-space:2:space:7',
+        source: 'shaft-named-space',
+        center: { x: 100.5, z: 100 },
+        bounds: { minX: 100.25, maxX: 100.75, minZ: 99.75, maxZ: 100.25 },
+        polygon: null,
+        storeyIds: [2],
+        name: 'פיר',
+      },
+    ],
+    diagnostics: [],
+  }
+
+  it('without the snap option, risers match buildSuggestedRisers exactly and no outcomes are recorded', () => {
+    const plain = buildSuggestedRisers(storeys, 2, [toilet], [], null, makeLabeler(), { enabled: false })
+    const withSnap = buildSuggestedRisersWithSnap(storeys, 2, [toilet], [], null, makeLabeler(), {
+      enabled: false,
+    })
+
+    expect(withSnap.risers.map((riser) => riser.position)).toEqual(plain.map((riser) => riser.position))
+    expect(withSnap.snapOutcomes).toHaveLength(0)
+  })
+
+  it('with the snap option, the stack moves to the shaft and the outcome carries its stack label', () => {
+    const { risers, snapOutcomes } = buildSuggestedRisersWithSnap(
+      storeys,
+      2,
+      [toilet],
+      [],
+      null,
+      makeLabeler(),
+      { enabled: false },
+      { map },
+    )
+
+    // Every floor of the stack lands on the shaft centre.
+    expect(new Set(risers.map((riser) => `${riser.position.x},${riser.position.z}`))).toEqual(
+      new Set(['100.5,100']),
+    )
+    expect(snapOutcomes).toEqual([
+      {
+        stackLabel: 'R1',
+        snap: {
+          status: 'snapped',
+          target: 'shaft',
+          shaftId: 'shaft-space:2:space:7',
+          distance: 0.5,
+          original: { x: 100, y: 600, z: 100 },
+        },
+      },
+    ])
+    // The snap metadata never leaks into the riser objects themselves.
+    expect(risers.every((riser) => !('snap' in riser.position) && !('snap' in riser))).toBe(true)
+  })
+
+  it('a miss keeps the anchor position and records the reason', () => {
+    const emptyMap: ContinuityMap = { ...map, shaftCandidates: [] }
+    const { risers, snapOutcomes } = buildSuggestedRisersWithSnap(
+      storeys,
+      2,
+      [toilet],
+      [],
+      null,
+      makeLabeler(),
+      { enabled: false },
+      { map: emptyMap },
+    )
+
+    expect(risers.every((riser) => riser.position.x === 100 && riser.position.z === 100)).toBe(true)
+    expect(snapOutcomes).toHaveLength(1)
+    expect(snapOutcomes[0].snap.status).toBe('snapMiss')
   })
 })

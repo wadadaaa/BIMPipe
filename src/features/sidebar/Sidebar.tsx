@@ -7,12 +7,14 @@ import type { StoreyAlignment } from '@/domain/alignStoreys'
 import type { MergedStoreyDetection } from '@/domain/mergeFixturesAcrossFiles'
 import type { EngineerComparisonReport } from '@/domain/engineerComparisonMetrics'
 import type { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
+import type { SuggestedRiserSnapOutcome } from '@/shared/routes/buildSuggestedRisers'
 import type { LengthUnit } from '@/shared/lengthUnits'
 import { ViewTransition } from '@/shared/reactViewTransition'
 import { FixturesPanel } from './FixturesPanel'
 import { RisersPanel } from './RisersPanel'
 import {
   PlacementValidationPanel,
+  type ContinuityMapSummary,
   type EngineerBaselineSummary,
 } from './PlacementValidationPanel'
 import './Sidebar.css'
@@ -57,6 +59,18 @@ interface SidebarProps {
   onLoadEngineerBaseline?: () => void
   /** W7 metrics: our proposal vs the engineer baseline; null until both exist. */
   engineerComparison?: EngineerComparisonReport | null
+  /** Continuity map (W5) summary for the Decisions tab; null until built. */
+  continuityMap?: ContinuityMapSummary | null
+  isBuildingContinuityMap?: boolean
+  continuityBuildProgress?: { processed: number; total: number } | null
+  continuityBuildError?: string | null
+  /** Undefined hides the affordance (no model loaded yet). */
+  onBuildContinuityMap?: () => void
+  /** W5 advanced flag: snap suggested risers to shafts/free cells. */
+  continuitySnapEnabled?: boolean
+  onToggleContinuitySnap?: () => void
+  /** Snap outcomes of the last suggest run; null when snapping was off. */
+  riserSnapOutcomes?: SuggestedRiserSnapOutcome[] | null
 }
 
 const TABS: { id: SidebarTab; label: string; focus: string; hint: string }[] = [
@@ -114,6 +128,14 @@ export function Sidebar({
   engineerBaselineError = null,
   onLoadEngineerBaseline,
   engineerComparison = null,
+  continuityMap = null,
+  isBuildingContinuityMap = false,
+  continuityBuildProgress = null,
+  continuityBuildError = null,
+  onBuildContinuityMap,
+  continuitySnapEnabled = false,
+  onToggleContinuitySnap = () => {},
+  riserSnapOutcomes = null,
 }: SidebarProps) {
   const activeTabMeta = TABS.find((tab) => tab.id === activeTab)!
   const riserPanelKey = risers.map((riser) => riser.id).join(':') || 'empty'
@@ -249,6 +271,14 @@ export function Sidebar({
                 engineerBaselineError={engineerBaselineError}
                 onLoadEngineerBaseline={onLoadEngineerBaseline}
                 engineerComparison={engineerComparison}
+                continuityMap={continuityMap}
+                isBuildingContinuityMap={isBuildingContinuityMap}
+                continuityBuildProgress={continuityBuildProgress}
+                continuityBuildError={continuityBuildError}
+                onBuildContinuityMap={onBuildContinuityMap}
+                continuitySnapEnabled={continuitySnapEnabled}
+                onToggleContinuitySnap={onToggleContinuitySnap}
+                riserSnapOutcomes={riserSnapOutcomes}
               />
             )}
           </section>

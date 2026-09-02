@@ -4,6 +4,7 @@ import type { buildRiserValidationReport } from '@/shared/routes/buildRiserValid
 import type { StoreyAlignment } from '@/domain/alignStoreys'
 import type { MergedStoreyDetection } from '@/domain/mergeFixturesAcrossFiles'
 import type { EngineerComparisonReport } from '@/domain/engineerComparisonMetrics'
+import type { SuggestedRiserSnapOutcome } from '@/shared/routes/buildSuggestedRisers'
 import { formatLengthM } from '@/shared/lengthUnits'
 
 type ValidationReport = ReturnType<typeof buildRiserValidationReport>
@@ -14,6 +15,16 @@ export interface EngineerBaselineSummary {
   systemPrefixes: readonly string[]
   segmentCount: number
   stackCount: number
+}
+
+/** Summary of the built continuity map (W5) for display. */
+export interface ContinuityMapSummary {
+  sourceFileName: string
+  storeyCount: number
+  shaftCandidateCount: number
+  extractMs: number
+  buildMs: number
+  diagnosticsCount: number
 }
 
 interface PlacementValidationPanelProps {
@@ -34,6 +45,18 @@ interface PlacementValidationPanelProps {
   onLoadEngineerBaseline?: () => void
   /** W7 metrics vs our proposal; null until baseline AND risers both exist. */
   engineerComparison?: EngineerComparisonReport | null
+  /** Continuity map (W5): built-map summary; null until built. */
+  continuityMap?: ContinuityMapSummary | null
+  isBuildingContinuityMap?: boolean
+  continuityBuildProgress?: { processed: number; total: number } | null
+  continuityBuildError?: string | null
+  /** Undefined hides the affordance (no model loaded yet). */
+  onBuildContinuityMap?: () => void
+  /** W5 advanced flag: snap suggested risers to shafts/free cells. */
+  continuitySnapEnabled?: boolean
+  onToggleContinuitySnap?: () => void
+  /** Snap outcomes of the last suggest run; null when snapping was off. */
+  riserSnapOutcomes?: SuggestedRiserSnapOutcome[] | null
 }
 
 function getUserFacingIssue(
@@ -261,6 +284,100 @@ function EngineerBaselineSection({
   )
 }
 
+function formatSnapOutcome(outcome: SuggestedRiserSnapOutcome): string {
+  const { snap } = outcome
+  if (snap.status === 'snapMiss') return `not snapped — ${snap.reason}`
+  const target = snap.target === 'shaft' ? 'shaft candidate' : 'free grid cell'
+  return `snapped to ${target} (${formatLengthM(snap.distance, 'm')} from anchor)`
+}
+
+function ContinuityMapSection({
+  summary,
+  isBuilding,
+  progress,
+  error,
+  onBuild,
+  snapEnabled,
+  onToggleSnap,
+  snapOutcomes,
+}: {
+  summary: ContinuityMapSummary | null
+  isBuilding: boolean
+  progress: { processed: number; total: number } | null
+  error: string | null
+  onBuild: () => void
+  snapEnabled: boolean
+  onToggleSnap: () => void
+  snapOutcomes: SuggestedRiserSnapOutcome[] | null
+}) {
+  return (
+    <section className="sidebar__panel" data-testid="continuity-map">
+      <p className="sidebar__panel-title">Continuity map (vertical shafts)</p>
+      {summary === null ? (
+        <>
+          <p className="sidebar__panel-copy">
+            Build the obstruction grid and shaft candidates from the loaded file with walls to
+            overlay them on the plan and optionally snap suggested risers.
+          </p>
+          <button
+            type="button"
+            className="risers-panel__btn risers-panel__btn--ghost"
+            onClick={onBuild}
+            disabled={isBuilding}
+          >
+            {isBuilding
+              ? progress === null
+                ? 'Building continuity map…'
+                : `Analyzing storey ${progress.processed} of ${progress.total}…`
+              : 'Build continuity map'}
+          </button>
+        </>
+      ) : (
+        <p className="sidebar__panel-copy" dir="auto">
+          <strong>{summary.sourceFileName}:</strong> {summary.storeyCount}{' '}
+          {summary.storeyCount === 1 ? 'storey' : 'storeys'}, {summary.shaftCandidateCount} shaft{' '}
+          {summary.shaftCandidateCount === 1 ? 'candidate' : 'candidates'}. Extracted in{' '}
+          {summary.extractMs} ms, built in {summary.buildMs} ms.
+          {summary.diagnosticsCount > 0 &&
+            ` ${summary.diagnosticsCount} note${summary.diagnosticsCount === 1 ? '' : 's'} in export notes.`}
+        </p>
+      )}
+      <label className="sidebar__panel-copy" style={{ display: 'block' }}>
+        <input
+          type="checkbox"
+          checked={snapEnabled}
+          onChange={onToggleSnap}
+          disabled={summary === null}
+        />{' '}
+        Snap risers to shafts/free cells (advanced; applies on the next Suggest)
+      </label>
+      {snapOutcomes !== null && (
+        <>
+          <p className="sidebar__panel-copy">
+            <strong>Snap outcomes (last suggestion)</strong>
+          </p>
+          {snapOutcomes.length === 0 ? (
+            <p className="sidebar__panel-copy">No risers were suggested.</p>
+          ) : (
+            <ul className="risers-panel__legend-list" data-testid="snap-outcomes">
+              {snapOutcomes.map((outcome) => (
+                <li key={outcome.stackLabel}>
+                  <strong>{outcome.stackLabel}:</strong> {formatSnapOutcome(outcome)}
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+      {error !== null && (
+        <p className="sidebar__panel-copy" role="alert" dir="auto">
+          <strong>Continuity map:</strong> {error}
+        </p>
+      )}
+    </section>
+  )
+}
+
 export function PlacementValidationPanel({
   report,
   detectionAggregation,
@@ -273,6 +390,14 @@ export function PlacementValidationPanel({
   engineerBaselineError = null,
   onLoadEngineerBaseline,
   engineerComparison = null,
+  continuityMap = null,
+  isBuildingContinuityMap = false,
+  continuityBuildProgress = null,
+  continuityBuildError = null,
+  onBuildContinuityMap,
+  continuitySnapEnabled = false,
+  onToggleContinuitySnap = () => {},
+  riserSnapOutcomes = null,
 }: PlacementValidationPanelProps) {
   const autoOpenDecision = initialStoreyDecision && (
     <p className="sidebar__panel-copy">
@@ -309,12 +434,26 @@ export function PlacementValidationPanel({
     />
   )
 
+  const continuitySection = onBuildContinuityMap !== undefined && (
+    <ContinuityMapSection
+      summary={continuityMap}
+      isBuilding={isBuildingContinuityMap}
+      progress={continuityBuildProgress}
+      error={continuityBuildError}
+      onBuild={onBuildContinuityMap}
+      snapEnabled={continuitySnapEnabled}
+      onToggleSnap={onToggleContinuitySnap}
+      snapOutcomes={riserSnapOutcomes}
+    />
+  )
+
   if (!report) {
     return (
       <>
         {autoOpenDecision}
         {multiModelSections}
         {engineerSection}
+        {continuitySection}
         <p className="sidebar__panel-copy">Suggest risers to populate export validation details.</p>
       </>
     )
@@ -333,6 +472,7 @@ export function PlacementValidationPanel({
       {autoOpenDecision}
       {multiModelSections}
       {engineerSection}
+      {continuitySection}
       <p className="sidebar__panel-title">Placement and export readiness</p>
       <ul className="risers-panel__legend-list">
         <li><strong>Processed floors:</strong> {report.summary.processedFloorCount}</li>

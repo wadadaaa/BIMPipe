@@ -20,6 +20,10 @@ import type {
   EngineerOverlaySegment,
   EngineerOverlayStackMarker,
 } from './engineerNetworkPresentation'
+import type {
+  ContinuityOverlayRect,
+  ContinuityShaftMarker,
+} from './continuityOverlayPresentation'
 import './FloorViewer.css'
 
 const HOVER_ACCENT = new THREE.Color(0xffb45f)
@@ -88,6 +92,18 @@ interface FloorViewerProps {
   onToggleEngineerOverlay?: () => void
   /** Floor segments without a verifiable frame, excluded from drawing. */
   engineerExcludedSegmentCount?: number
+  /**
+   * Continuity-map debug overlay (W5), already storey-filtered and converted
+   * to the local viewer frame by `continuityOverlayPresentation`. Blocked
+   * cells render as merged translucent rects, shaft candidates as outlined
+   * fills plus positioned markers. Empty when the layer is toggled off.
+   */
+  continuityBlockedRects?: ContinuityOverlayRect[]
+  continuityShaftMarkers?: ContinuityShaftMarker[]
+  continuityBlockedCellCount?: number
+  continuityOverlayAvailable?: boolean
+  continuityOverlayVisible?: boolean
+  onToggleContinuityOverlay?: () => void
 }
 
 export function FloorViewer({
@@ -127,6 +143,12 @@ export function FloorViewer({
   engineerOverlayVisible = true,
   onToggleEngineerOverlay,
   engineerExcludedSegmentCount = 0,
+  continuityBlockedRects = [],
+  continuityShaftMarkers = [],
+  continuityBlockedCellCount = 0,
+  continuityOverlayAvailable = false,
+  continuityOverlayVisible = true,
+  onToggleContinuityOverlay,
 }: FloorViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
@@ -141,12 +163,14 @@ export function FloorViewer({
   const boundsRef = useRef<THREE.Box3 | null>(null)
   const floorGroupRef = useRef<THREE.Group | null>(null)
   const underlayGroupRef = useRef<THREE.Group | null>(null)
+  const continuityGroupRef = useRef<THREE.Group | null>(null)
   const projectionVecRef = useRef(new THREE.Vector3())
   const routeLineRefsRef = useRef<Map<string, SVGLineElement>>(new Map())
   const routeLabelRefsRef = useRef<Map<string, SVGTextElement>>(new Map())
   const branchRouteLineRefsRef = useRef<Map<string, SVGLineElement>>(new Map())
   const engineerLineRefsRef = useRef<Map<string, SVGLineElement>>(new Map())
   const engineerRingRefsRef = useRef<Map<string, HTMLDivElement>>(new Map())
+  const shaftMarkerRefsRef = useRef<Map<string, HTMLDivElement>>(new Map())
   const [routeProjectionStatus, setRouteProjectionStatus] = useState<{ failed: number; total: number }>({ failed: 0, total: 0 })
   const [sanitaryViewMode, setSanitaryViewMode] = useState<SanitaryPresentationMode>('after')
 
@@ -224,6 +248,7 @@ export function FloorViewer({
       animateRouteLines()
       animateBranchRouteLines()
       animateEngineerOverlay()
+      animateShaftMarkers()
     }
 
     const queueRender = () => {
@@ -269,6 +294,12 @@ export function FloorViewer({
         scene.remove(underlayGroupRef.current)
         disposeSceneObject(underlayGroupRef.current)
         underlayGroupRef.current = null
+      }
+
+      if (continuityGroupRef.current) {
+        scene.remove(continuityGroupRef.current)
+        disposeSceneObject(continuityGroupRef.current)
+        continuityGroupRef.current = null
       }
 
       scheduleRenderRef.current = () => {}
@@ -358,6 +389,33 @@ export function FloorViewer({
     scheduleRender()
   }, [underlayMeshes, theme])
 
+  // Continuity-map debug overlay (W5): merged blocked-cell rects + shaft fills
+  // as ONE non-interactive Three group (a per-cell DOM overlay would be ~70k
+  // nodes on a 096 storey). Depends on floorMeshes so the quads re-anchor to
+  // the current floor's plan elevation.
+  useEffect(() => {
+    const scene = sceneRef.current
+    if (!scene) return
+
+    if (continuityGroupRef.current) {
+      scene.remove(continuityGroupRef.current)
+      disposeSceneObject(continuityGroupRef.current)
+      continuityGroupRef.current = null
+    }
+
+    if (continuityBlockedRects.length === 0 && continuityShaftMarkers.length === 0) {
+      scheduleRender()
+      return
+    }
+
+    const planY = boundsRef.current ? (boundsRef.current.min.y + boundsRef.current.max.y) / 2 : 0
+    const group = buildContinuityOverlayGroup(continuityBlockedRects, continuityShaftMarkers, planY)
+    scene.add(group)
+    continuityGroupRef.current = group
+    scheduleRender()
+    // floorMeshes re-anchors planY to the newly opened floor's elevation.
+  }, [continuityBlockedRects, continuityShaftMarkers, floorMeshes])
+
   useEffect(() => {
     const floorGroup = floorGroupRef.current
     if (!floorGroup) return
@@ -430,7 +488,7 @@ export function FloorViewer({
 
   useEffect(() => {
     scheduleRender()
-  }, [floorMeshes, plottedFixtures, plottedKitchens, risers, sanitaryRoutes, sanitaryViewMode, branchRoutePresentation, engineerSegments, engineerStackMarkers])
+  }, [floorMeshes, plottedFixtures, plottedKitchens, risers, sanitaryRoutes, sanitaryViewMode, branchRoutePresentation, engineerSegments, engineerStackMarkers, continuityShaftMarkers])
 
   useEffect(() => {
     const frameId = requestAnimationFrame(() => {
@@ -706,6 +764,13 @@ export function FloorViewer({
             </span>
           )}
 
+          {continuityBlockedCellCount > 0 && (
+            <span className="floor-viewer__chip floor-viewer__chip--continuity">
+              Continuity: {continuityBlockedCellCount.toLocaleString('en-US')} blocked cells,{' '}
+              {continuityShaftMarkers.length} shaft {continuityShaftMarkers.length === 1 ? 'candidate' : 'candidates'}
+            </span>
+          )}
+
           {storeyCount > 0 && (
             <span className="floor-viewer__chip">{storeyCount} storeys</span>
           )}
@@ -971,6 +1036,27 @@ export function FloorViewer({
             </div>
           )}
 
+          {/* Continuity shaft candidates (W5) — positioned markers over the teal fills */}
+          {continuityShaftMarkers.length > 0 && (
+            <div className="floor-viewer__continuity-overlay" aria-hidden="true">
+              {continuityShaftMarkers.map((marker) => (
+                <div
+                  key={marker.key}
+                  className="floor-viewer__shaft-marker"
+                  ref={(el) => {
+                    if (el) shaftMarkerRefsRef.current.set(marker.key, el)
+                    else shaftMarkerRefsRef.current.delete(marker.key)
+                  }}
+                  data-shaft-x={String(marker.x)}
+                  data-shaft-z={String(marker.z)}
+                  title={`${marker.label}${marker.name ? ` "${marker.name}"` : ''} — ${marker.storeyCount} ${marker.storeyCount === 1 ? 'storey' : 'storeys'}`}
+                >
+                  S
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Riser markers — positioned imperatively in the rAF loop via data-* attributes */}
           <div className="floor-viewer__riser-overlay" aria-hidden="true">
             {visibleRisers.map((riser, index) => (
@@ -1045,6 +1131,11 @@ export function FloorViewer({
               Magenta = engineer network (rings = engineer risers)
             </span>
           )}
+          {continuityOverlayAvailable && continuityOverlayVisible && (
+            <span className="floor-viewer__legend-item floor-viewer__legend-item--continuity">
+              Orange = blocked cells, teal = shaft candidates
+            </span>
+          )}
           {isAddingFixture && (
             <span className="floor-viewer__legend-item floor-viewer__legend-item--fixture">
               Click to place {getFixtureKindLabel(pendingFixtureKind).toLowerCase()}
@@ -1103,6 +1194,20 @@ export function FloorViewer({
               onClick={onToggleEngineerOverlay}
             >
               Engineer
+            </button>
+          )}
+          {onToggleContinuityOverlay && continuityOverlayAvailable && (
+            <button
+              className="floor-viewer__btn"
+              title={
+                continuityOverlayVisible
+                  ? 'Hide the continuity map (blocked cells + shafts) on this floor'
+                  : 'Show the continuity map (blocked cells + shafts) on this floor'
+              }
+              aria-pressed={continuityOverlayVisible}
+              onClick={onToggleContinuityOverlay}
+            >
+              Continuity
             </button>
           )}
         </div>
@@ -1269,6 +1374,15 @@ export function FloorViewer({
       const z = parseFloat(ring.dataset['engineerZ'] ?? '0')
       // Stacks carry no elevation; y=0 is flattened onto the plan plane anyway.
       positionOverlayMarker(ring, x, 0, z)
+    }
+  }
+
+  function animateShaftMarkers() {
+    for (const [, el] of shaftMarkerRefsRef.current) {
+      const x = parseFloat(el.dataset['shaftX'] ?? '0')
+      const z = parseFloat(el.dataset['shaftZ'] ?? '0')
+      // Shaft centres carry no elevation; markers flatten onto the plan plane.
+      positionOverlayMarker(el, x, 0, z)
     }
   }
 
@@ -1541,6 +1655,94 @@ function styleFloorGroup(group: THREE.Group, theme: ThemeMode) {
 
     object.add(outline)
   })
+}
+
+/**
+ * Builds the continuity-overlay Three group (W5): one merged mesh for all
+ * blocked-cell rects, one for shaft-candidate fills, plus shaft outlines.
+ * Quads sit on the plan plane at `planY`; depth testing is off so the overlay
+ * always draws above the plan, and nothing here participates in raycasts.
+ */
+function buildContinuityOverlayGroup(
+  blockedRects: ContinuityOverlayRect[],
+  shaftMarkers: ContinuityShaftMarker[],
+  planY: number,
+): THREE.Group {
+  const group = new THREE.Group()
+  const noRaycast = () => {}
+
+  const addRectFillMesh = (rects: ContinuityOverlayRect[], color: number, opacity: number) => {
+    if (rects.length === 0) return
+    const positions = new Float32Array(rects.length * 4 * 3)
+    const indices = new Uint32Array(rects.length * 6)
+    rects.forEach((rect, i) => {
+      const p = i * 12
+      positions.set(
+        [
+          rect.minX, planY, rect.minZ,
+          rect.maxX, planY, rect.minZ,
+          rect.maxX, planY, rect.maxZ,
+          rect.minX, planY, rect.maxZ,
+        ],
+        p,
+      )
+      const v = i * 4
+      indices.set([v, v + 1, v + 2, v, v + 2, v + 3], i * 6)
+    })
+    const geometry = new THREE.BufferGeometry()
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    geometry.setIndex(new THREE.BufferAttribute(indices, 1))
+    const mesh = new THREE.Mesh(
+      geometry,
+      new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        depthTest: false,
+      }),
+    )
+    mesh.renderOrder = 3
+    mesh.raycast = noRaycast
+    group.add(mesh)
+  }
+
+  addRectFillMesh(blockedRects, 0xf97316, 0.2)
+  addRectFillMesh(shaftMarkers.map((marker) => marker.bounds), 0x2dd4bf, 0.32)
+
+  if (shaftMarkers.length > 0) {
+    const outlinePositions = new Float32Array(shaftMarkers.length * 8 * 3)
+    shaftMarkers.forEach((marker, i) => {
+      const { minX, maxX, minZ, maxZ } = marker.bounds
+      outlinePositions.set(
+        [
+          minX, planY, minZ, maxX, planY, minZ,
+          maxX, planY, minZ, maxX, planY, maxZ,
+          maxX, planY, maxZ, minX, planY, maxZ,
+          minX, planY, maxZ, minX, planY, minZ,
+        ],
+        i * 24,
+      )
+    })
+    const outlineGeometry = new THREE.BufferGeometry()
+    outlineGeometry.setAttribute('position', new THREE.BufferAttribute(outlinePositions, 3))
+    const outline = new THREE.LineSegments(
+      outlineGeometry,
+      new THREE.LineBasicMaterial({
+        color: 0x2dd4bf,
+        transparent: true,
+        opacity: 0.9,
+        depthWrite: false,
+        depthTest: false,
+      }),
+    )
+    outline.renderOrder = 3
+    outline.raycast = noRaycast
+    group.add(outline)
+  }
+
+  return group
 }
 
 /**

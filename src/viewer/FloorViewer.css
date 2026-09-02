@@ -284,6 +284,36 @@
   will-change: transform;
 }
 
+/* ── Continuity-map overlay (W5 blocked cells + shaft candidates) ── */
+.floor-viewer__continuity-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.floor-viewer__shaft-marker {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  border: 2px solid #2dd4bf;
+  border-radius: 4px;
+  background: rgba(45, 212, 191, 0.16);
+  box-shadow: 0 0 7px rgba(45, 212, 191, 0.45);
+  color: #8df5e6;
+  font-size: 9px;
+  font-weight: 800;
+  opacity: 0;
+  will-change: transform;
+}
+
 .floor-viewer__route-label {
   paint-order: stroke;
   stroke: rgba(4, 8, 14, 0.92);
@@ -987,4 +1017,15 @@
 .floor-viewer__legend-item--engineer {
   border-color: rgba(244, 95, 211, 0.35);
   color: #ff9fe6;
+}
+
+.floor-viewer__chip--continuity {
+  border-color: rgba(45, 212, 191, 0.42);
+  background: rgba(19, 78, 74, 0.3);
+  color: #99f6e4;
+}
+
+.floor-viewer__legend-item--continuity {
+  border-color: rgba(45, 212, 191, 0.35);
+  color: #5eead4;
 }

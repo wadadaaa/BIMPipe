@@ -6,6 +6,8 @@ import type { LengthUnit } from '@/shared/lengthUnits'
 import type { StoreyAlignment } from '@/domain/alignStoreys'
 import type { MergedStoreyDetection } from '@/domain/mergeFixturesAcrossFiles'
 import type { EngineerPipeNetwork, EngineerRiserStack } from '@/domain/engineerPipes'
+import type { ContinuityMap } from '@/domain/continuityMap'
+import type { SuggestedRiserSnapOutcome } from '@/shared/routes/buildSuggestedRisers'
 import { appendAdjustment, createAdjustLog, type AdjustLog } from '@/domain/adjustLog'
 import { getDemoRuntimeConfig, type DemoRuntimeConfig } from '@/shared/demoConfig'
 import { removeRiserStack } from '@/shared/routes/buildRiserStacks'
@@ -37,6 +39,22 @@ export interface EngineerBaselineState {
   systemPrefixes: readonly string[]
   network: EngineerPipeNetwork
   stacks: EngineerRiserStack[]
+}
+
+/**
+ * Continuity map built on demand (W5): obstruction grids + shaft candidates in
+ * metres, keyed by HOST storey IDs (linked-model storeys are remapped through
+ * the W4 alignment before they land here). Timings feed the Decisions tab.
+ */
+export interface ContinuityMapState {
+  /** File the walls/voids/spaces were extracted from (host or linked). */
+  sourceFileName: string
+  map: ContinuityMap
+  /** Adapter/remap diagnostics + map.diagnostics, already combined. */
+  diagnostics: string[]
+  extractMs: number
+  buildMs: number
+  processedStoreyCount: number
 }
 
 // All WorkspacePage state in one place. Pure module: no React imports, no side
@@ -139,6 +157,22 @@ export interface WorkspacePageState {
   // Per-storey visibility of the engineer overlay; absent = visible so the
   // layer shows right after loading (same convention as branch routes).
   engineerOverlayVisibleByStorey: Map<StoreyId, boolean>
+
+  // --- continuity map (W5) ---
+  // Built on demand via the Decisions tab; null until then and after reset.
+  continuityMap: ContinuityMapState | null
+  isBuildingContinuityMap: boolean
+  // Extraction progress (storeys processed / total) while building; null when idle.
+  continuityBuildProgress: { processed: number; total: number } | null
+  continuityBuildError: string | null
+  // Per-storey visibility of the continuity debug overlay; absent = visible.
+  continuityOverlayVisibleByStorey: Map<StoreyId, boolean>
+  // Advanced flag: pass `continuitySnap` into the suggest flow. OFF by default;
+  // with the flag off, suggestions are byte-identical to the pre-W5 behaviour.
+  continuitySnapEnabled: boolean
+  // Snap outcomes of the LAST suggest run (one per suggested stack); null when
+  // the last run had snapping off. Misses stay visible here, never dropped.
+  riserSnapOutcomes: SuggestedRiserSnapOutcome[] | null
 }
 
 export const initialWorkspacePageState: WorkspacePageState = {
@@ -180,6 +214,13 @@ export const initialWorkspacePageState: WorkspacePageState = {
   isExtractingEngineerBaseline: false,
   engineerBaselineError: null,
   engineerOverlayVisibleByStorey: new Map(),
+  continuityMap: null,
+  isBuildingContinuityMap: false,
+  continuityBuildProgress: null,
+  continuityBuildError: null,
+  continuityOverlayVisibleByStorey: new Map(),
+  continuitySnapEnabled: false,
+  riserSnapOutcomes: null,
 }
 
 // Lazy initializer for useReducer: resolves the demo runtime config exactly once
@@ -263,7 +304,9 @@ export type WorkspacePageAction =
     }
   // Label normalization computed by the page effect from the current risers.
   | { type: 'risers-normalized'; risers: Riser[] }
-  | { type: 'risers-suggested'; risers: Riser[] }
+  // `snapOutcomes` is present (possibly empty) when the suggest run used the
+  // continuity-snap flag, null/omitted when the flag was off.
+  | { type: 'risers-suggested'; risers: Riser[]; snapOutcomes?: SuggestedRiserSnapOutcome[] | null }
   | { type: 'add-riser-toggled' }
   | { type: 'branch-routes-toggled'; storeyId: StoreyId }
   // Engineer baseline extraction lifecycle (W7). Extraction is async in the
@@ -273,6 +316,15 @@ export type WorkspacePageAction =
   | { type: 'engineer-baseline-loaded'; baseline: EngineerBaselineState }
   | { type: 'engineer-extraction-failed'; message: string }
   | { type: 'engineer-overlay-toggled'; storeyId: StoreyId }
+  // Continuity map lifecycle (W5). Building is async in the page; the reducer
+  // tracks the in-flight flag, per-storey progress, the result, and explicit
+  // failures (never a silent no-op).
+  | { type: 'continuity-build-started' }
+  | { type: 'continuity-build-progress'; processed: number; total: number }
+  | { type: 'continuity-map-loaded'; continuityMap: ContinuityMapState }
+  | { type: 'continuity-build-failed'; message: string }
+  | { type: 'continuity-overlay-toggled'; storeyId: StoreyId }
+  | { type: 'continuity-snap-toggled' }
   | { type: 'demo-asset-error-set'; message: string | null }
   | { type: 'download-started' }
   | { type: 'download-failed'; message: string }
@@ -342,6 +394,13 @@ function reduce(state: WorkspacePageState, action: WorkspacePageAction): Workspa
         isExtractingEngineerBaseline: false,
         engineerBaselineError: null,
         engineerOverlayVisibleByStorey: new Map(),
+        continuityMap: null,
+        isBuildingContinuityMap: false,
+        continuityBuildProgress: null,
+        continuityBuildError: null,
+        continuityOverlayVisibleByStorey: new Map(),
+        continuitySnapEnabled: false,
+        riserSnapOutcomes: null,
       }
 
     case 'model-opened':
@@ -505,7 +564,13 @@ function reduce(state: WorkspacePageState, action: WorkspacePageAction): Workspa
       return { ...state, risers: action.risers }
 
     case 'risers-suggested':
-      return { ...state, risers: action.risers, isAddingRiser: false, activeTab: 'risers' }
+      return {
+        ...state,
+        risers: action.risers,
+        isAddingRiser: false,
+        activeTab: 'risers',
+        riserSnapOutcomes: action.snapOutcomes ?? null,
+      }
 
     case 'add-riser-toggled':
       return { ...state, isAddingRiser: !state.isAddingRiser }
@@ -540,6 +605,47 @@ function reduce(state: WorkspacePageState, action: WorkspacePageAction): Workspa
       next.set(action.storeyId, !(state.engineerOverlayVisibleByStorey.get(action.storeyId) ?? true))
       return { ...state, engineerOverlayVisibleByStorey: next }
     }
+
+    case 'continuity-build-started':
+      return {
+        ...state,
+        isBuildingContinuityMap: true,
+        continuityBuildProgress: null,
+        continuityBuildError: null,
+      }
+
+    case 'continuity-build-progress':
+      return {
+        ...state,
+        continuityBuildProgress: { processed: action.processed, total: action.total },
+      }
+
+    case 'continuity-map-loaded':
+      return {
+        ...state,
+        continuityMap: action.continuityMap,
+        isBuildingContinuityMap: false,
+        continuityBuildProgress: null,
+        continuityBuildError: null,
+      }
+
+    case 'continuity-build-failed':
+      return {
+        ...state,
+        continuityMap: null,
+        isBuildingContinuityMap: false,
+        continuityBuildProgress: null,
+        continuityBuildError: action.message,
+      }
+
+    case 'continuity-overlay-toggled': {
+      const next = new Map(state.continuityOverlayVisibleByStorey)
+      next.set(action.storeyId, !(state.continuityOverlayVisibleByStorey.get(action.storeyId) ?? true))
+      return { ...state, continuityOverlayVisibleByStorey: next }
+    }
+
+    case 'continuity-snap-toggled':
+      return { ...state, continuitySnapEnabled: !state.continuitySnapEnabled }
 
     case 'demo-asset-error-set':
       return { ...state, demoAssetError: action.message }
