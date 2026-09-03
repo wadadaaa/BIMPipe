@@ -9,13 +9,28 @@
  * inputs to a shared plan frame; frame alignment belongs to the overlay wave,
  * not to this module.
  *
+ * Storey scope: riser counts "ours vs engineer" and the nearest-riser distance
+ * are computed per open floor — our stacks with an entry on that host storey
+ * against the engineer sanitary stacks whose Z-range intersects the matching
+ * engineer storey's slab band. Model-wide totals are reported alongside so the
+ * scoped numbers stay explainable. Vent stacks and stubs are counted
+ * separately and never enter the sanitary comparison.
+ *
  * All lengths in the report are metres, converted here at the boundary from
  * the explicit units carried by the inputs. Empty inputs produce explicit
  * zeros/nulls — never NaN or Infinity.
  */
 import type { FloorRoutes } from './branchRouting'
 import type { FixtureRiserAssignment } from './assignFixturesToRisers'
-import type { EngineerPipeSegment, EngineerRiserStack } from './engineerPipes'
+import {
+  ENGINEER_STACK_STOREY_OVERLAP_MIN_M,
+  stacksIntersectingBand,
+  type EngineerPipeSegment,
+  type EngineerRiserClassification,
+  type EngineerRiserStack,
+  type MinStackExtentSource,
+  type StoreySlabBandM,
+} from './engineerPipes'
 
 export type ComparisonPlanUnits = 'mm' | 'm'
 
@@ -28,6 +43,20 @@ export interface ComparableOurRiser {
   position: { x: number; y: number; z: number }
 }
 
+/**
+ * Storey scope of the comparison: our side is the host storey's per-floor
+ * riser entries, the engineer side is the engineer-model storey's slab band.
+ */
+export interface EngineerComparisonStoreyScope {
+  /** Host storey whose riser entries define "our stacks on this storey". */
+  ourStoreyId: number
+  /**
+   * Slab band of the matching engineer-model storey (`storeySlabBandM`), in
+   * metres; null when the open floor has no counterpart in the engineer model.
+   */
+  engineerBandM: StoreySlabBandM | null
+}
+
 export interface EngineerComparisonInput {
   ourRisers: ComparableOurRiser[]
   /** Units of `ourRisers` positions. Explicit — no magnitude heuristics here. */
@@ -36,8 +65,16 @@ export interface EngineerComparisonInput {
   ourBranchRoutes: FloorRoutes[]
   /** Our fixture-to-riser assignment results. */
   ourAssignments: FixtureRiserAssignment[]
-  /** Engineer riser stacks from `groupEngineerRiserStacks` (already metres). */
-  engineerRisers: EngineerRiserStack[]
+  /**
+   * Engineer riser classification from `classifyEngineerRiserStacks`, with
+   * stack plan positions already aligned to our plan frame (metres).
+   */
+  engineerRisers: Pick<
+    EngineerRiserClassification,
+    'sanitaryStacks' | 'ventStacks' | 'stubs' | 'minStackExtentM' | 'minStackExtentSource'
+  >
+  /** Null when no floor is open: storey-scoped fields become null. */
+  storeyScope: EngineerComparisonStoreyScope | null
   /**
    * Engineer segments whose Pset `Length` values make up the engineer branch
    * total. The caller chooses the population (e.g. non-vertical segments of
@@ -48,15 +85,45 @@ export interface EngineerComparisonInput {
 
 export interface EngineerComparisonReport {
   riserCounts: {
-    /** Distinct vertical stacks on our side (unique stackId). */
-    oursStacks: number
-    /** Our per-floor riser entries (one Riser per storey per stack). */
+    /** Distinct vertical stacks on our side, model-wide (unique stackId). */
+    oursStacksTotal: number
+    /** Our stacks with a per-floor entry on the scoped storey; null without scope. */
+    oursStacksOnStorey: number | null
+    /** Our per-floor riser entries (one Riser per storey per stack), model-wide. */
     oursPerFloorEntries: number
-    engineerStacks: number
+    /** Engineer sanitary stacks model-wide (extent ≥ threshold). */
+    engineerStacksTotal: number
+    /** Engineer sanitary stacks whose Z-range intersects the scoped storey band. */
+    engineerStacksIntersectingStorey: number | null
+    /** Engineer vent stacks model-wide; never mixed into the sanitary counts. */
+    engineerVentStacksTotal: number
+    engineerVentStacksIntersectingStorey: number | null
+    /** Vertical runs of either class below the stack extent threshold. */
+    engineerStubs: number
+  }
+  /** How the engineer stack set was defined — printed so the counts are explainable. */
+  engineerStackDefinition: {
+    minStackExtentM: number
+    minStackExtentSource: MinStackExtentSource
+    storeyOverlapMinM: number
   }
   /**
-   * Mean plan distance (metres) from each of our riser stacks to the nearest
-   * engineer stack. Null when either side has no stacks.
+   * Storey scope the intersecting counts and the distance refer to; null when
+   * no floor is open or the floor has no engineer-model counterpart. The
+   * `reason` explains a null scope.
+   */
+  storeyScope: {
+    ourStoreyId: number
+    engineerStoreyId: number
+    engineerBandBottomM: number
+    /** +Infinity (top storey) serialises as null. */
+    engineerBandTopM: number | null
+  } | null
+  storeyScopeReason: string | null
+  /**
+   * Mean plan distance (metres) from each of our stacks ON THE SCOPED STOREY
+   * to the nearest engineer sanitary stack INTERSECTING that storey. Null when
+   * there is no scope or either side has no stacks on the storey.
    */
   meanNearestEngineerRiserDistanceM: number | null
   branchLengths: {
@@ -103,7 +170,7 @@ interface PlanPointM {
  * Deterministic: stacks ordered by stackId.
  */
 function ourStackPlanPointsM(
-  risers: ComparableOurRiser[],
+  risers: readonly ComparableOurRiser[],
   units: ComparisonPlanUnits,
 ): PlanPointM[] {
   const byStack = new Map<string, ComparableOurRiser[]>()
@@ -121,7 +188,7 @@ function ourStackPlanPointsM(
   })
 }
 
-function meanNearestDistanceM(ours: PlanPointM[], engineer: PlanPointM[]): number | null {
+function meanNearestDistanceM(ours: PlanPointM[], engineer: readonly PlanPointM[]): number | null {
   if (ours.length === 0 || engineer.length === 0) return null
   let sum = 0
   for (const our of ours) {
@@ -155,11 +222,35 @@ function ourBranchTotalM(routes: FloorRoutes[]): number {
  * the Decisions/debug display (later wave).
  */
 export function computeEngineerComparison(input: EngineerComparisonInput): EngineerComparisonReport {
-  const ourStacks = ourStackPlanPointsM(input.ourRisers, input.ourRiserUnits)
-  const engineerPoints: PlanPointM[] = input.engineerRisers.map((stack) => ({
-    xM: stack.xM,
-    yM: stack.yM,
-  }))
+  const ourStacksTotal = ourStackPlanPointsM(input.ourRisers, input.ourRiserUnits)
+  const { sanitaryStacks, ventStacks, stubs } = input.engineerRisers
+
+  // Storey scope: both sides restricted to the open floor, or nothing scoped.
+  let oursStacksOnStorey: PlanPointM[] | null = null
+  let engineerOnStorey: EngineerRiserStack[] | null = null
+  let ventOnStorey: EngineerRiserStack[] | null = null
+  let storeyScope: EngineerComparisonReport['storeyScope'] = null
+  let storeyScopeReason: string | null = null
+  if (input.storeyScope === null) {
+    storeyScopeReason = 'No floor is open; storey-scoped counts and the riser distance are not computed.'
+  } else if (input.storeyScope.engineerBandM === null) {
+    storeyScopeReason =
+      'The open floor has no counterpart storey in the engineer model; storey-scoped counts and the riser distance are not computed.'
+  } else {
+    const band = input.storeyScope.engineerBandM
+    oursStacksOnStorey = ourStackPlanPointsM(
+      input.ourRisers.filter((riser) => riser.storeyId === input.storeyScope!.ourStoreyId),
+      input.ourRiserUnits,
+    )
+    engineerOnStorey = stacksIntersectingBand(sanitaryStacks, band, ENGINEER_STACK_STOREY_OVERLAP_MIN_M)
+    ventOnStorey = stacksIntersectingBand(ventStacks, band, ENGINEER_STACK_STOREY_OVERLAP_MIN_M)
+    storeyScope = {
+      ourStoreyId: input.storeyScope.ourStoreyId,
+      engineerStoreyId: band.storeyId,
+      engineerBandBottomM: band.bottomM,
+      engineerBandTopM: Number.isFinite(band.topM) ? band.topM : null,
+    }
+  }
 
   let engineerTotalM: number | null = null
   let engineerSegmentsWithNullLength = 0
@@ -184,11 +275,26 @@ export function computeEngineerComparison(input: EngineerComparisonInput): Engin
 
   return {
     riserCounts: {
-      oursStacks: ourStacks.length,
+      oursStacksTotal: ourStacksTotal.length,
+      oursStacksOnStorey: oursStacksOnStorey === null ? null : oursStacksOnStorey.length,
       oursPerFloorEntries: input.ourRisers.length,
-      engineerStacks: input.engineerRisers.length,
+      engineerStacksTotal: sanitaryStacks.length,
+      engineerStacksIntersectingStorey: engineerOnStorey === null ? null : engineerOnStorey.length,
+      engineerVentStacksTotal: ventStacks.length,
+      engineerVentStacksIntersectingStorey: ventOnStorey === null ? null : ventOnStorey.length,
+      engineerStubs: stubs.length,
     },
-    meanNearestEngineerRiserDistanceM: meanNearestDistanceM(ourStacks, engineerPoints),
+    engineerStackDefinition: {
+      minStackExtentM: input.engineerRisers.minStackExtentM,
+      minStackExtentSource: input.engineerRisers.minStackExtentSource,
+      storeyOverlapMinM: ENGINEER_STACK_STOREY_OVERLAP_MIN_M,
+    },
+    storeyScope,
+    storeyScopeReason,
+    meanNearestEngineerRiserDistanceM:
+      oursStacksOnStorey === null || engineerOnStorey === null
+        ? null
+        : meanNearestDistanceM(oursStacksOnStorey, engineerOnStorey),
     branchLengths: {
       oursTotalM,
       engineerTotalM,
