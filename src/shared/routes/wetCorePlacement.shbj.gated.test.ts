@@ -140,7 +140,7 @@ gated('shbj SA + AR + ST wet-core placement (gated: requires local client files)
             .join(' + ')
           console.info(
             `[shbj wet-core] ${stack.stackLabel}: core ${members} (bbox ${(stack.core.bbox.maxX - stack.core.bbox.minX).toFixed(1)} x ${(stack.core.bbox.maxZ - stack.core.bbox.minZ).toFixed(1)} m) → ${stack.placement.rule}` +
-              ('distance' in stack.placement ? ` ${stack.placement.distance.toFixed(2)} m from centroid` : '') +
+              ('distance' in stack.placement ? ` ${stack.placement.distance.toFixed(2)} m from the core footprint` : '') +
               `; ${stack.placement.reason}`,
           )
         }
