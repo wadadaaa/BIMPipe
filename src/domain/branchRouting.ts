@@ -142,8 +142,12 @@ export interface ComputeBranchRoutesOptions {
  * Approximations (V0):
  * - No obstacle avoidance: there is no wall/void data yet, so runs may cross
  *   walls, shafts, or room boundaries.
- * - Coordinates are compared exactly when merging; there is no snapping
- *   tolerance, so only legs on identical line coordinates merge.
+ * - Plan coordinates are snapped to 1 mm (`PLAN_SNAP_RESOLUTION`) before
+ *   routing and compared exactly after that: legs merge only when they lie on
+ *   the same millimetre line. The snap absorbs floating-point noise from
+ *   geometry extraction (fixtures in a row typically differ by ~1e-14 m),
+ *   which would otherwise split a shared corridor into parallel legs and emit
+ *   zero-length segments that the IFC export rejects.
  * - Junction invert refinement is not modelled: elevations are the ideal
  *   2%-of-remaining-run levels, not min-invert-at-junction hydraulics.
  *
@@ -175,13 +179,28 @@ export function computeBranchRoutes(
 
     const segments: RouteSegment[] = []
     for (const riserId of [...byRiser.keys()].sort((a, b) => a.localeCompare(b))) {
-      segments.push(...routeRiserGroup(storeyId, riserId, byRiser.get(riserId) ?? []))
+      segments.push(...routeRiserGroup(storeyId, riserId, byRiser.get(riserId) ?? [], planUnits))
     }
 
     floors.push({ storeyId, planUnits, segments })
   }
 
   return floors
+}
+
+/**
+ * Resolution the plan coordinates are snapped to before routing, per plan
+ * unit: 1 mm. Anything closer than this is the same line / the same point.
+ */
+export const PLAN_SNAP_RESOLUTION: Record<PlanUnits, number> = { m: 0.001, mm: 1 }
+
+function snapPlanPoint(point: PlanPoint, resolution: number): PlanPoint {
+  return { x: snapCoordinate(point.x, resolution), z: snapCoordinate(point.z, resolution) }
+}
+
+function snapCoordinate(value: number, resolution: number): number {
+  // `+ 0` folds -0 into 0 so snapped coordinates compare and stringify identically.
+  return Math.round(value / resolution) * resolution + 0
 }
 
 interface LegEntry {
@@ -207,10 +226,13 @@ function routeRiserGroup(
   storeyId: StoreyId,
   riserId: RiserId,
   assignments: AssignedFixture[],
+  planUnits: PlanUnits,
 ): RouteSegment[] {
-  const riserPlan = assignments[0].riserPlan
+  const resolution = PLAN_SNAP_RESOLUTION[planUnits]
+  const riserPlan = snapPlanPoint(assignments[0].riserPlan, resolution)
   for (const assignment of assignments) {
-    if (assignment.riserPlan.x !== riserPlan.x || assignment.riserPlan.z !== riserPlan.z) {
+    const candidate = snapPlanPoint(assignment.riserPlan, resolution)
+    if (candidate.x !== riserPlan.x || candidate.z !== riserPlan.z) {
       throw new Error(`Conflicting plan positions for riser ${riserId} on storey ${storeyId}`)
     }
   }
@@ -219,7 +241,8 @@ function routeRiserGroup(
 
   const buckets = new Map<string, LegBucket>()
   for (const assignment of assignments) {
-    const { fixturePlan, fixtureExpressId } = assignment
+    const { fixtureExpressId } = assignment
+    const fixturePlan = snapPlanPoint(assignment.fixturePlan, resolution)
     const dx = fixturePlan.x - riserPlan.x
     const dz = fixturePlan.z - riserPlan.z
 

@@ -301,20 +301,32 @@ gated('tower band (single AR file, L10–L12) wet-core placement + routing (gate
               (group.fixturesAtStackExpressIds.length > 0 ? ` (${group.fixturesAtStackExpressIds.length} at the stack)` : ''),
           )
         }
-        // Measured: 15/15 fixtures routed to their core's stack, 30 segments /
-        // 19.3 m in total, longest fixture→stack 2.35 m (no run over the 4 m
+        // Measured: 15/15 fixtures routed to their core's stack, 21 segments /
+        // 13.5 m in total, longest fixture→stack 2.35 m (no run over the 4 m
         // limit); the two WC rows produce Ø110 runs, the sink units Ø50, and
-        // the men's block's two urinals share one Ø63 collector segment.
+        // the shared collectors under the WC row / urinal pair are Ø63.
+        // (Before the 1 mm plan snap in `computeBranchRoutes` the same storey
+        // gave 30 segments / 19.3 m: the six WCs of a row differ by ~4e-14 m
+        // in Z, so each got its own parallel X leg and the Z approach split
+        // into five zero-length segments that aborted the IFC export.)
         expect(summary.unrouted).toEqual([])
         expect(summary.overlength).toEqual([])
         expect(summary.assignedBy.wetCore).toBe(sourceFixtures.length)
         expect(summary.assignedBy.nearest).toBe(0)
         expect(routing.floors).toHaveLength(1)
         expect(floor!.groups).toHaveLength(coreStacks.length)
-        expect(floor!.segmentCount).toBe(30)
-        expect(floor!.totalLengthM).toBeCloseTo(19.28, 1)
-        expect(diameters).toEqual({ 'Ø110': 22, 'Ø50': 7, 'Ø63': 1 })
+        expect(floor!.segmentCount).toBe(21)
+        expect(floor!.totalLengthM).toBeCloseTo(13.49, 1)
+        expect(diameters).toEqual({ 'Ø110': 14, 'Ø50': 5, 'Ø63': 2 })
         expect(longest).toBeLessThanOrEqual(MAX_BRANCH_LENGTH_M)
+        // No degenerate segment: every run is at least 1 mm long in plan, so
+        // the export's zero-length guard cannot trip on this storey.
+        const shortestSegmentM = Math.min(
+          ...routing.floors.flatMap((entry) =>
+            entry.segments.map((segment) => Math.hypot(segment.end.x - segment.start.x, segment.end.z - segment.start.z)),
+          ),
+        )
+        expect(shortestSegmentM).toBeGreaterThanOrEqual(0.001 - 1e-9)
 
         // --- 6. determinism ---
         // Core ids, labels, positions, order, extents and branch geometry are
