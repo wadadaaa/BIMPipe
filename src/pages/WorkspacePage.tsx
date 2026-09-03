@@ -41,13 +41,15 @@ import {
 import { getContinuityOverlayPresentation } from '@/viewer/continuityOverlayPresentation'
 import {
   createInitialWorkspacePageState,
+  selectPreservedRisersOnResuggest,
   workspacePageReducer,
   type LinkedModelState,
 } from './workspacePageState'
 import { buildRiserStack } from '@/shared/routes/buildRiserStacks'
 import { classifyFloors } from '@/shared/routes/floorClassification'
 import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE } from '@/shared/routes/riserPlacementProfile'
-import { buildSuggestedRisersWithSnap } from '@/shared/routes/buildSuggestedRisers'
+import { buildSuggestedRisersWithSnap, buildWetCoreSuggestedRisers } from '@/shared/routes/buildSuggestedRisers'
+import { toStackExtentFixtures } from '@/domain/riserStackExtent'
 import { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
 import { buildDemoModeUploadError, isStoreyIncludedInDemoScope } from '@/shared/demoConfig'
 import { buildSanitaryRoutingDemoPlan, buildSanitaryRoutingPlan } from '@/shared/routes/buildSanitaryRoutes'
@@ -167,6 +169,11 @@ export function WorkspacePage({
     continuityOverlayVisibleByStorey,
     continuitySnapEnabled,
     riserSnapOutcomes,
+    riserStackExtents,
+    wetCoreSuggestion,
+    isSuggestingRisers,
+    suggestProgress,
+    suggestError,
   } = state
 
   // Imperative viewer/export plumbing that intentionally stays outside the
@@ -176,6 +183,11 @@ export function WorkspacePage({
   const sourceIfcBytesRef = useRef<Uint8Array | null>(null)
   const nextRiserLabelRef = useRef(1)
   const detectionDebugRef = useRef<Awaited<ReturnType<typeof aggregateStoreyDetections>> | null>(null)
+  // Model + linked-file key the cached aggregation was computed for (V3); a
+  // mismatch forces a rescan, so a new upload never reuses stale fixtures.
+  const detectionCacheKeyRef = useRef<string | null>(null)
+  // In-flight wet-core suggest (V3); aborting cancels the whole-building scan.
+  const suggestAbortRef = useRef<AbortController | null>(null)
   // Local-frame origin for rendering, mirrored from state so the async openStorey
   // flow can read the resolved frame across awaits. null = not resolved yet for
   // the current model (resolution happens on the first storey with geometry).
@@ -240,6 +252,11 @@ export function WorkspacePage({
     }
     sourceIfcBytesRef.current = null
     nextRiserLabelRef.current = 1
+    // A new model invalidates the cached whole-building scan and cancels an
+    // in-flight suggest (web-ifc may reuse model ids, so the key alone is not enough).
+    suggestAbortRef.current?.abort()
+    detectionDebugRef.current = null
+    detectionCacheKeyRef.current = null
     // Sync the refs alongside the state update so openStorey sees the cleared
     // count and unresolved frame when it runs after this transition is queued.
     risersRef.current = []
@@ -622,83 +639,79 @@ export function WorkspacePage({
   }, [])
 
   /**
-   * Builds the continuity map (W5) on demand from the loaded file with the
-   * most walls (host wins ties) — the host's own walls on single-file uploads,
-   * the linked architecture file on e.g. the 096 podium. Full-model build: on
-   * the largest real model (096-A, 13 storeys) extraction measures ~0.65 s, so
-   * no storey scoping is needed; progress still repaints between storeys.
+   * Builds ONE continuity map (W5 → V3) from every loaded file: the host's own
+   * geometry plus each linked file's walls / columns / slabs / openings /
+   * spaces remapped onto host storeys, so slab openings modelled only in a
+   * linked structural file become shaft candidates for the host's fixtures.
+   * Linked files are scoped to the storeys that align to the host (a 100+ MB
+   * architecture file is never walked in full); the host is built in full
+   * (the largest real host, 13 storeys, measures ~0.65 s). Files with an
+   * unknown length unit or no aligned storey are skipped with a visible reason.
    */
   async function handleBuildContinuityMap() {
     if (webIfcModelId === null || modelFileName === null || isBuildingContinuityMap) return
     dispatch({ type: 'continuity-build-started' })
     try {
-      const [api, { buildContinuityMapForModel }, { IFCWALL, IFCWALLSTANDARDCASE }] =
+      const [api, { buildContinuityMapForModels }, { IFCWALL, IFCWALLSTANDARDCASE }] =
         await Promise.all([
           getIfcApi(),
           import('@/shared/ifc/buildContinuityMapForModel'),
           import('web-ifc'),
         ])
 
-      const candidates = [
-        { fileName: modelFileName, webIfcModelId, lengthUnit: modelLengthUnit, isHost: true },
-        ...linkedModels.map((model) => ({
-          fileName: model.fileName,
-          webIfcModelId: model.webIfcModelId,
-          lengthUnit: model.lengthUnit,
-          isHost: false,
-        })),
+      const sources = [
+        {
+          fileName: modelFileName,
+          webIfcModelId,
+          lengthUnit: modelLengthUnit,
+          sourceToHostStoreyId: null,
+          storeyIds: undefined,
+        },
+        ...linkedModels.map((model) => {
+          const sourceToHostStoreyId = buildLinkedToHostStoreyIdMap(storeyAlignments, model.fileName)
+          return {
+            fileName: model.fileName,
+            webIfcModelId: model.webIfcModelId,
+            lengthUnit: model.lengthUnit,
+            sourceToHostStoreyId,
+            storeyIds: new Set(sourceToHostStoreyId.keys()),
+          }
+        }),
       ]
-      let source: (typeof candidates)[number] | null = null
-      let sourceWallCount = 0
-      for (const candidate of candidates) {
-        const wallCount =
-          api.GetLineIDsWithType(candidate.webIfcModelId, IFCWALL).size() +
-          api.GetLineIDsWithType(candidate.webIfcModelId, IFCWALLSTANDARDCASE).size()
-        if (wallCount > sourceWallCount) {
-          source = candidate
-          sourceWallCount = wallCount
-        }
-      }
-      if (source === null) {
+      const wallCount = sources.reduce(
+        (sum, source) =>
+          sum +
+          api.GetLineIDsWithType(source.webIfcModelId, IFCWALL).size() +
+          api.GetLineIDsWithType(source.webIfcModelId, IFCWALLSTANDARDCASE).size(),
+        0,
+      )
+      if (wallCount === 0) {
         dispatch({
           type: 'continuity-build-failed',
           message: 'No walls found in any loaded file — the continuity map needs architecture geometry.',
         })
         return
       }
-      if (source.lengthUnit === null) {
-        dispatch({
-          type: 'continuity-build-failed',
-          message: `${source.fileName} declares no supported length unit; storey elevations cannot be converted, so the continuity map was not built.`,
-        })
-        return
-      }
 
-      const sourceToHostStoreyId = source.isHost
-        ? null
-        : buildLinkedToHostStoreyIdMap(storeyAlignments, source.fileName)
-      if (sourceToHostStoreyId !== null && sourceToHostStoreyId.size === 0) {
-        dispatch({
-          type: 'continuity-build-failed',
-          message: `${source.fileName} has the walls but none of its storeys align to the host — the continuity map cannot be mapped onto host floors.`,
-        })
-        return
-      }
-
-      const result = await buildContinuityMapForModel({
+      const result = await buildContinuityMapForModels({
         api,
-        webIfcModelId: source.webIfcModelId,
-        lengthUnit: source.lengthUnit,
-        sourceToHostStoreyId,
-        onStoreyProgress: async (processed, total) => {
+        sources,
+        onProgress: async ({ processed, total }) => {
           dispatch({ type: 'continuity-build-progress', processed, total })
           await waitForNextPaint()
         },
       })
+      if (result.sourceFileNames.length === 0) {
+        dispatch({
+          type: 'continuity-build-failed',
+          message: `No loaded file could contribute to the continuity map: ${result.diagnostics.join(' ')}`,
+        })
+        return
+      }
       dispatch({
         type: 'continuity-map-loaded',
         continuityMap: {
-          sourceFileName: source.fileName,
+          sourceFileName: result.sourceFileNames.join(' + '),
           map: result.map,
           diagnostics: [...result.diagnostics, ...result.map.diagnostics],
           extractMs: Math.round(result.extractMs),
@@ -716,21 +729,31 @@ export function WorkspacePage({
 
   function handleSuggestRisers() {
     if (!selectedStoreyId || (fixtures.length === 0 && kitchens.length === 0)) return
-
     if (demoRuntime.enabled) {
-      const scopedStoreyIds = new Set(
-        storeys.filter((storey) => isStoreyIncludedInDemoScope(storey.name, demoRuntime.config)).map((storey) => storey.id),
-      )
-      const excludedFixtureCount = fixtures.filter((fixture) => !scopedStoreyIds.has(fixture.storeyId)).length
-      const excludedKitchenCount = kitchens.filter((kitchen) => !scopedStoreyIds.has(kitchen.storeyId)).length
-      if (excludedFixtureCount > 0 || excludedKitchenCount > 0) {
-        dispatch({
-          type: 'demo-asset-error-set',
-          message: `Demo scope excluded ${excludedFixtureCount} fixture(s) and ${excludedKitchenCount} kitchen area(s) outside included floors.`,
-        })
-      } else {
-        dispatch({ type: 'demo-asset-error-set', message: null })
-      }
+      suggestRisersDemoPath(selectedStoreyId)
+      return
+    }
+    void suggestRisersWetCorePath(selectedStoreyId)
+  }
+
+  /**
+   * Demo mode keeps the toilet-anchored suggestion byte-identical to the
+   * pre-V3 behaviour (parity-checked): synchronous suggest, whole-building
+   * aggregation only in the background for the debug JSON, snapping only with
+   * the advanced flag.
+   */
+  function suggestRisersDemoPath(sourceStoreyId: StoreyId) {
+    if (!demoRuntime.enabled) return
+    const scopedStoreyIds = new Set(
+      storeys.filter((storey) => isStoreyIncludedInDemoScope(storey.name, demoRuntime.config)).map((storey) => storey.id),
+    )
+    const excludedFixtureCount = fixtures.filter((fixture) => !scopedStoreyIds.has(fixture.storeyId)).length
+    const excludedKitchenCount = kitchens.filter((kitchen) => !scopedStoreyIds.has(kitchen.storeyId)).length
+    if (excludedFixtureCount > 0 || excludedKitchenCount > 0) {
+      dispatch({
+        type: 'demo-asset-error-set',
+        message: `Demo scope excluded ${excludedFixtureCount} fixture(s) and ${excludedKitchenCount} kitchen area(s) outside included floors.`,
+      })
     } else {
       dispatch({ type: 'demo-asset-error-set', message: null })
     }
@@ -750,15 +773,19 @@ export function WorkspacePage({
         })
     }
     // W5 advanced flag: only when it is ON and a map exists does the suggest
-    // flow snap to shafts/free cells. Off (the default) keeps suggestions
+    // flow snap to shafts/free cells. Off (the demo default) keeps suggestions
     // byte-identical to the flag-free path.
     const continuitySnap =
       continuitySnapEnabled && continuityMap !== null ? { map: continuityMap.map } : undefined
     startTransition(() => {
-      nextRiserLabelRef.current = 1
+      // Labels continue after the preserved (manual / moved) stacks; with none
+      // preserved this is 1, exactly as before.
+      nextRiserLabelRef.current = getNextRiserLabelNumber(
+        selectPreservedRisersOnResuggest({ risers: risersRef.current, adjustLog }),
+      )
       const suggestion = buildSuggestedRisersWithSnap(
         storeys,
-        selectedStoreyId,
+        sourceStoreyId,
         fixtures,
         kitchens,
         // Suggestion mixes plan bounds with source-frame fixture positions,
@@ -775,6 +802,117 @@ export function WorkspacePage({
       })
     })
   }
+
+  /**
+   * Plain mode (V3): one stack per wet core of the open floor, snapped through
+   * the continuity map when one is built (shaft → free cell → wall-side edge →
+   * flagged centroid), each stack bounded vertically by the V4 extent computed
+   * from the whole-building fixture scan. The scan is awaited with visible
+   * progress and can be cancelled; its result is cached per model so a
+   * re-suggest is instant. Manual and moved stacks survive the re-suggest
+   * (reducer merge rule).
+   */
+  async function suggestRisersWetCorePath(sourceStoreyId: StoreyId) {
+    if (suggestAbortRef.current !== null) return
+    dispatch({ type: 'demo-asset-error-set', message: null })
+    const controller = new AbortController()
+    suggestAbortRef.current = controller
+    dispatch({ type: 'suggest-started' })
+    try {
+      const modelId = webIfcModelIdRef.current
+      const cacheKey = buildDetectionCacheKey(modelId, linkedModelsRef.current)
+      let aggregation = detectionCacheKeyRef.current === cacheKey ? detectionDebugRef.current : null
+      if (aggregation === null && modelId !== null) {
+        const api = await getIfcApi()
+        const alignments = storeyAlignmentsRef.current
+        const linked = linkedModelsRef.current
+        aggregation = await aggregateStoreyDetections(
+          api,
+          modelId,
+          storeys,
+          DEFAULT_RISER_PLACEMENT_RULE_PROFILE,
+          undefined,
+          {
+            signal: controller.signal,
+            hostFileName: hostFileNameRef.current ?? 'host.ifc',
+            linkedTargetsFor: (hostStoreyId) => collectLinkedDetectionTargets(alignments, linked, hostStoreyId),
+            onProgress: async (processed, total, storey) => {
+              dispatch({ type: 'suggest-progress', processed, total, storeyName: storey.name })
+              await waitForNextPaint()
+            },
+          },
+        )
+        detectionDebugRef.current = aggregation
+        detectionCacheKeyRef.current = cacheKey
+      }
+      if (controller.signal.aborted) {
+        dispatch({ type: 'suggest-cancelled' })
+        return
+      }
+
+      const map = continuitySnapEnabled && continuityMap !== null ? continuityMap.map : null
+      const buildingFixtures =
+        aggregation === null
+          ? null
+          : toStackExtentFixtures(
+              Object.values(aggregation.fixturesByStoreyId).flat(),
+              Object.values(aggregation.kitchensByStoreyId).flat(),
+            )
+      // Labels continue after the preserved (manual / moved) stacks.
+      nextRiserLabelRef.current = getNextRiserLabelNumber(
+        selectPreservedRisersOnResuggest({ risers: risersRef.current, adjustLog }),
+      )
+      const result = buildWetCoreSuggestedRisers({
+        storeys,
+        sourceStoreyId,
+        fixtures,
+        kitchens,
+        // Suggestion mixes plan bounds with source-frame fixture positions,
+        // so it must see the source-frame bounding box, not the local one.
+        floorMeshes: floorMeshes ? { ...floorMeshes, boundingBox: pickSourceBoundingBox(floorMeshes) } : null,
+        nextLabel: () => takeNextRiserLabel(nextRiserLabelRef),
+        // Fixture positions come from web-ifc geometry, which is metres
+        // regardless of the declared unit (see buildContinuityMapForModel).
+        wetCore: { planUnits: 'm', continuityMap: map },
+        stackExtent:
+          buildingFixtures === null
+            ? undefined
+            : { buildingFixtures, planUnits: 'm', continuityMap: map, collectorStoreyId: null },
+      })
+      startTransition(() => {
+        dispatch({
+          type: 'risers-suggested',
+          risers: result.risers,
+          snapOutcomes: map === null ? null : result.snapOutcomes,
+          stackExtents: buildingFixtures === null ? null : result.stackExtents,
+          stackCoreIds: result.stacks.flatMap((stack) =>
+            stack.anchor === 'wet-core' ? [{ stackId: stack.stackId, coreId: stack.core.id }] : [],
+          ),
+          wetCore: {
+            sourceStoreyId,
+            stacks: result.stacks,
+            cores: result.cores,
+            diagnostics: result.diagnostics,
+          },
+        })
+      })
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        dispatch({ type: 'suggest-cancelled' })
+      } else {
+        dispatch({
+          type: 'suggest-failed',
+          message: err instanceof Error ? err.message : 'Riser suggestion failed.',
+        })
+      }
+    } finally {
+      suggestAbortRef.current = null
+    }
+  }
+
+  const handleCancelSuggestRisers = useCallback(() => {
+    suggestAbortRef.current?.abort()
+  }, [])
 
   async function handleDownloadIfc() {
     if (
@@ -859,6 +997,29 @@ export function WorkspacePage({
                 },
           continuitySnapEnabled,
           riserSnapOutcomes,
+          // Wet-core placement (V3) + per-stack extents (V4); null in demo mode.
+          wetCoreSuggestion:
+            wetCoreSuggestion === null
+              ? null
+              : {
+                  sourceStoreyId: wetCoreSuggestion.sourceStoreyId,
+                  cores: wetCoreSuggestion.cores.map((core) => ({
+                    id: core.id,
+                    memberExpressIds: core.memberExpressIds,
+                    kindsFingerprint: core.kindsFingerprint,
+                    centroid: core.centroid,
+                    bbox: core.bbox,
+                  })),
+                  stacks: wetCoreSuggestion.stacks.map((stack) =>
+                    stack.anchor === 'wet-core'
+                      ? { stackLabel: stack.stackLabel, anchor: stack.anchor, coreId: stack.core.id, placement: stack.placement }
+                      : { stackLabel: stack.stackLabel, anchor: stack.anchor, kitchenExpressId: stack.kitchenExpressId, snap: stack.snap },
+                  ),
+                  supersededCoreIds: wetCoreSuggestion.supersededCoreIds,
+                  preservedStackIds: wetCoreSuggestion.preservedStackIds,
+                  diagnostics: wetCoreSuggestion.diagnostics,
+                },
+          riserStackExtents,
           floorClassification,
           validationReport: buildRiserValidationReport({
             exportRunId,
@@ -1271,6 +1432,13 @@ export function WorkspacePage({
       continuitySnapEnabled={continuitySnapEnabled}
       onToggleContinuitySnap={handleToggleContinuitySnap}
       riserSnapOutcomes={riserSnapOutcomes}
+      storeys={storeys}
+      wetCoreSuggestion={wetCoreSuggestion}
+      riserStackExtents={riserStackExtents}
+      isSuggestingRisers={isSuggestingRisers}
+      suggestProgress={suggestProgress}
+      suggestError={suggestError}
+      onCancelSuggestRisers={handleCancelSuggestRisers}
     />
   )
 
@@ -1430,6 +1598,11 @@ function buildLinkedToHostStoreyIdMap(
     }
   }
   return map
+}
+
+/** Cache key of the whole-building detection scan: host model + linked files. */
+function buildDetectionCacheKey(webIfcModelId: number | null, linkedModels: LinkedModelState[]): string {
+  return `${webIfcModelId ?? 'none'}|${linkedModels.map((model) => `${model.fileName}#${model.webIfcModelId}`).join(',')}`
 }
 
 function takeNextRiserLabel(nextRiserLabelRef: MutableRefObject<number>): string {

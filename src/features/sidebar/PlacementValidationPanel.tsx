@@ -4,8 +4,20 @@ import type { buildRiserValidationReport } from '@/shared/routes/buildRiserValid
 import type { StoreyAlignment } from '@/domain/alignStoreys'
 import type { MergedStoreyDetection } from '@/domain/mergeFixturesAcrossFiles'
 import type { EngineerComparisonReport } from '@/domain/engineerComparisonMetrics'
-import type { SuggestedRiserSnapOutcome } from '@/shared/routes/buildSuggestedRisers'
+import type { Storey } from '@/domain/types'
+import type {
+  SuggestedRiserSnapOutcome,
+  SuggestedRiserStackExtent,
+  WetCoreSuggestedStack,
+} from '@/shared/routes/buildSuggestedRisers'
+import type { WetCore } from '@/domain/wetCores'
 import { formatLengthM } from '@/shared/lengthUnits'
+import {
+  collectPlacementWarnings,
+  describeDedupeRadii,
+  describeWetCoreMembers,
+  describeWetCoreStackPlacement,
+} from './wetCoreCopy'
 
 type ValidationReport = ReturnType<typeof buildRiserValidationReport>
 
@@ -27,9 +39,25 @@ export interface ContinuityMapSummary {
   diagnosticsCount: number
 }
 
+/** Outcome of the last wet-core suggest run (V3); shape mirrors the page state. */
+export interface WetCoreSuggestionSummary {
+  sourceStoreyId: number
+  stacks: WetCoreSuggestedStack[]
+  cores: WetCore[]
+  supersededCoreIds: string[]
+  preservedStackIds: string[]
+  diagnostics: string[]
+}
+
 interface PlacementValidationPanelProps {
   report: ValidationReport | null
   detectionAggregation: StoreyDetectionAggregation | null
+  /** Storeys for naming stack extents; empty before a model is loaded. */
+  storeys?: Storey[]
+  /** Wet-core suggestion of the last run (V3); null in demo mode / before suggesting. */
+  wetCoreSuggestion?: WetCoreSuggestionSummary | null
+  /** Per-stack vertical extents (V4) of the last run; null when not bounded. */
+  riserStackExtents?: SuggestedRiserStackExtent[] | null
   demoFlowEnabled?: boolean
   /** Why the initial floor was auto-opened (plain mode); null in demo mode. */
   initialStoreyDecision?: InitialStoreyDecision | null
@@ -189,8 +217,8 @@ function CrossFileMergeSection({ merge }: { merge: MergedStoreyDetection }) {
       </ul>
       <p className="sidebar__panel-copy">
         {merge.duplicates.length === 0
-          ? `No cross-file duplicates within ${merge.dedupeToleranceMm} mm.`
-          : `${merge.duplicates.length} duplicate${merge.duplicates.length === 1 ? '' : 's'} dropped (same kind within ${merge.dedupeToleranceMm} mm; host instance kept).`}
+          ? `No cross-file duplicates within ${describeDedupeRadii(merge.dedupeToleranceMm)}.`
+          : `${merge.duplicates.length} duplicate${merge.duplicates.length === 1 ? '' : 's'} dropped (same kind within ${describeDedupeRadii(merge.dedupeToleranceMm)}; host instance kept).`}
       </p>
     </section>
   )
@@ -396,9 +424,74 @@ function ContinuityMapSection({
   )
 }
 
+function WetCoreSection({
+  suggestion,
+  extents,
+  storeys,
+}: {
+  suggestion: WetCoreSuggestionSummary
+  extents: SuggestedRiserStackExtent[] | null
+  storeys: Storey[]
+}) {
+  const storeyName = (id: number) => storeys.find((storey) => storey.id === id)?.name ?? `storey ${id}`
+  const warnings = collectPlacementWarnings(suggestion.stacks)
+  const extentByLabel = new Map((extents ?? []).map((entry) => [entry.stackLabel, entry.extent]))
+  return (
+    <section className="sidebar__panel" data-testid="wet-cores">
+      <p className="sidebar__panel-title">Wet cores and stack placement</p>
+      <p className="sidebar__panel-copy">
+        {suggestion.cores.length} wet {suggestion.cores.length === 1 ? 'core' : 'cores'} on the open floor (fixtures within 2.6 m
+        of each other), {suggestion.stacks.length} {suggestion.stacks.length === 1 ? 'stack' : 'stacks'} placed.
+        {suggestion.preservedStackIds.length > 0 &&
+          ` ${suggestion.preservedStackIds.length} manually placed/moved ${suggestion.preservedStackIds.length === 1 ? 'stack was' : 'stacks were'} preserved.`}
+        {suggestion.supersededCoreIds.length > 0 &&
+          ` ${suggestion.supersededCoreIds.length} ${suggestion.supersededCoreIds.length === 1 ? 'core keeps its moved stack' : 'cores keep their moved stacks'} instead of a new suggestion.`}
+      </p>
+      {warnings.length > 0 && (
+        <ul className="risers-panel__legend-list" role="alert" data-testid="placement-warnings">
+          {warnings.map((warning) => (
+            <li key={warning.stackLabel}>
+              <strong>{warning.stackLabel} needs review:</strong> {warning.message}
+            </li>
+          ))}
+        </ul>
+      )}
+      <ul className="risers-panel__legend-list" data-testid="wet-core-stacks">
+        {suggestion.stacks.map((stack) => {
+          const extent = extentByLabel.get(stack.stackLabel)
+          return (
+            <li key={stack.stackId}>
+              <strong>{stack.stackLabel}:</strong>{' '}
+              {stack.anchor === 'wet-core' ? `${describeWetCoreMembers(stack.core)} — ` : ''}
+              {describeWetCoreStackPlacement(stack)}
+              {extent !== undefined && (
+                <>
+                  {' '}
+                  Extent <span dir="auto">{storeyName(extent.collectorStoreyId)}</span> →{' '}
+                  <span dir="auto">{storeyName(extent.topStoreyId)}</span> ({extent.storeyIds.length}{' '}
+                  {extent.storeyIds.length === 1 ? 'storey' : 'storeys'}
+                  {extent.reasons.length > 0 ? `; ${extent.reasons.join('; ')}` : ''}).
+                </>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+      {suggestion.diagnostics.map((line) => (
+        <p key={line} className="sidebar__panel-copy" dir="auto">
+          {line}
+        </p>
+      ))}
+    </section>
+  )
+}
+
 export function PlacementValidationPanel({
   report,
   detectionAggregation,
+  storeys = [],
+  wetCoreSuggestion = null,
+  riserStackExtents = null,
   demoFlowEnabled = false,
   initialStoreyDecision = null,
   storeyAlignments = [],
@@ -465,6 +558,10 @@ export function PlacementValidationPanel({
     />
   )
 
+  const wetCoreSection = wetCoreSuggestion !== null && (
+    <WetCoreSection suggestion={wetCoreSuggestion} extents={riserStackExtents} storeys={storeys} />
+  )
+
   if (!report) {
     return (
       <>
@@ -472,6 +569,7 @@ export function PlacementValidationPanel({
         {multiModelSections}
         {engineerSection}
         {continuitySection}
+        {wetCoreSection}
         <p className="sidebar__panel-copy">Suggest risers to populate export validation details.</p>
       </>
     )
@@ -491,6 +589,7 @@ export function PlacementValidationPanel({
       {multiModelSections}
       {engineerSection}
       {continuitySection}
+      {wetCoreSection}
       <p className="sidebar__panel-title">Placement and export readiness</p>
       <ul className="risers-panel__legend-list">
         <li><strong>Processed floors:</strong> {report.summary.processedFloorCount}</li>

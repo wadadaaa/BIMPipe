@@ -1,6 +1,8 @@
 import type { Fixture, KitchenArea, Riser, RiserId } from '@/domain/types'
+import type { WetCoreSuggestedStack } from '@/shared/routes/buildSuggestedRisers'
 import { formatLengthM, type LengthUnit } from '@/shared/lengthUnits'
 import { detectPlanUnits } from '@/shared/routes/planGeometry'
+import { describePlacementRule, describeWetCoreMembers, describeWetCoreStackPlacement } from './wetCoreCopy'
 import './RisersPanel.css'
 
 interface RisersPanelProps {
@@ -27,6 +29,13 @@ interface RisersPanelProps {
    * we fall back to the coordinate-magnitude heuristic.
    */
   modelLengthUnit?: LengthUnit | null
+  /** Wet-core stacks of the last suggest run (V3); null in demo mode / before suggesting. */
+  wetCoreStacks?: WetCoreSuggestedStack[] | null
+  /** Async suggest lifecycle (V3). */
+  isSuggestingRisers?: boolean
+  suggestProgress?: { processed: number; total: number; storeyName: string | null } | null
+  suggestError?: string | null
+  onCancelSuggestRisers?: () => void
 }
 
 export function RisersPanel({
@@ -46,10 +55,22 @@ export function RisersPanel({
   demoFloorOpened = false,
   sanitaryRouteCount = 0,
   modelLengthUnit = null,
+  wetCoreStacks = null,
+  isSuggestingRisers = false,
+  suggestProgress = null,
+  suggestError = null,
+  onCancelSuggestRisers = () => {},
 }: RisersPanelProps) {
   const canSuggest =
     fixtures.some((fixture) => fixture.position !== null) ||
     kitchens.some((kitchen) => kitchen.position !== null)
+  const wetCoreStackById = new Map((wetCoreStacks ?? []).map((stack) => [stack.stackId, stack]))
+  const suggestTitle = demoFlowEnabled
+    ? 'Auto-place one riser per toilet and one outer-corner riser per kitchen.'
+    : 'Auto-place one riser stack per wet core (fixtures within 2.6 m of each other) and one outer-corner stack per kitchen. Dragged and manually added stacks are kept.'
+  const emptyCopy = demoFlowEnabled
+    ? 'No risers placed yet. Use Suggest to generate one riser per toilet and one per kitchen, or place them manually.'
+    : 'No risers placed yet. Use Suggest to generate one riser stack per wet core and one per kitchen, or place them manually.'
   const coordinateUnit: LengthUnit =
     modelLengthUnit !== null
       ? 'm'
@@ -93,16 +114,37 @@ export function RisersPanel({
         <button
           className="risers-panel__btn risers-panel__btn--ghost"
           onClick={onSuggestRisers}
-          disabled={!canSuggest}
-          title={
-            canSuggest
-              ? 'Auto-place one riser per toilet and one outer-corner riser per kitchen.'
-              : 'Open a floor with fixtures or kitchens first'
-          }
+          disabled={!canSuggest || isSuggestingRisers}
+          title={canSuggest ? suggestTitle : 'Open a floor with fixtures or kitchens first'}
         >
-          {risers.length > 0 ? 'Re-suggest' : 'Suggest'}
+          {isSuggestingRisers ? 'Suggesting…' : risers.length > 0 ? 'Re-suggest' : 'Suggest'}
         </button>
       </div>
+
+      {isSuggestingRisers && (
+        <div className="risers-panel__hint" role="status" data-testid="suggest-progress">
+          <span>
+            {suggestProgress === null
+              ? 'Scanning the building for fixtures…'
+              : `Scanning storey ${suggestProgress.processed} of ${suggestProgress.total}`}
+            {suggestProgress?.storeyName ? (
+              <>
+                {' '}(<span dir="auto">{suggestProgress.storeyName}</span>)
+              </>
+            ) : null}
+            {' '}— stacks are bounded by where matching wet cores exist.
+          </span>{' '}
+          <button type="button" className="risers-panel__btn risers-panel__btn--ghost" onClick={onCancelSuggestRisers}>
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {suggestError !== null && (
+        <p className="risers-panel__error" role="alert" dir="auto">
+          Suggest failed: {suggestError}
+        </p>
+      )}
 
       {isAddingRiser && (
         <p className="risers-panel__hint">Click on the floor plan to place a riser, then drag it to the exact corner if needed.</p>
@@ -182,7 +224,7 @@ export function RisersPanel({
               <path d="M12 8v4l2.5 2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </span>
-          <p>No risers placed yet. Use Suggest to generate one riser per toilet and one per kitchen, or place them manually.</p>
+          <p>{emptyCopy}</p>
         </div>
       ) : (
         <div className="risers-panel__list">
@@ -191,17 +233,37 @@ export function RisersPanel({
             <strong className="risers-panel__summary-count">{risers.length}</strong>
           </div>
 
-          {risers.map((riser, index) => (
+          {risers.map((riser, index) => {
+            const wetCoreStack = wetCoreStackById.get(riser.stackId)
+            const flagged =
+              wetCoreStack?.anchor === 'wet-core' &&
+              wetCoreStack.placement.rule === 'centroid' &&
+              wetCoreStack.placement.flagged
+            return (
             <div
               key={riser.id}
-              className="risers-panel__item risers-panel__item--enter"
+              className={[
+                'risers-panel__item',
+                'risers-panel__item--enter',
+                flagged ? 'risers-panel__item--flagged' : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
               style={{ animationDelay: `${Math.min(index, 12) * 35}ms` }}
+              title={wetCoreStack === undefined ? undefined : describeWetCoreStackPlacement(wetCoreStack)}
             >
               <span className="risers-panel__item-marker">{riser.stackLabel}</span>
               <span className="risers-panel__item-coords">
                 {demoFlowEnabled
                   ? describeRiserLocation(riser, fixtures, kitchens, coordinateUnit)
                   : formatRiserPlanPosition(riser.position, coordinateUnit)}
+                {wetCoreStack !== undefined && (
+                  <small className="risers-panel__item-placement" data-testid="stack-placement">
+                    {wetCoreStack.anchor === 'wet-core'
+                      ? `${describeWetCoreMembers(wetCoreStack.core)} · ${describePlacementRule(wetCoreStack)}`
+                      : `kitchen · ${describePlacementRule(wetCoreStack)}`}
+                  </small>
+                )}
               </span>
               <span className="risers-panel__item-source" title="Riser source">
                 {riser.source ?? "placed"}
@@ -215,13 +277,15 @@ export function RisersPanel({
                 ×
               </button>
             </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
   )
 }
 
+/** Compact placement tag for the riser list ("shaft", "free cell", "wall side", "needs review"). */
 /**
  * Viewer plan coordinates are (x, z) with z = -(IFC Y); display IFC-style
  * (X, Y) so the sign matches the exported model (the exporter writes -z as Y).

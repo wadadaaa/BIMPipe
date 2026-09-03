@@ -233,7 +233,11 @@ describe('WorkspacePage', () => {
     await waitFor(() => {
       expect(levelTwoButton).toHaveClass('storey-list__item--selected')
     })
-    expect(mocks.extractFloorMeshes).toHaveBeenCalledWith(expect.anything(), 101, 2)
+    // The selection lands before the lazily imported extractor module resolves,
+    // so the geometry call is awaited rather than asserted synchronously.
+    await waitFor(() => {
+      expect(mocks.extractFloorMeshes).toHaveBeenCalledWith(expect.anything(), 101, 2)
+    })
     // Demo mode keeps its legacy floor-selection semantics: the fixture-scan
     // chooser must never run in the demo flow.
     expect(mocks.chooseInitialStoreyByFixtures).not.toHaveBeenCalled()
@@ -447,22 +451,29 @@ describe('WorkspacePage', () => {
     const placeRisersButton = await screen.findByRole('button', { name: /place risers/i })
     await user.click(placeRisersButton)
 
+    // Plain mode uses the wet-core path (V3): the mocked plan coordinates are
+    // metres, so the three fixtures are hundreds of metres apart and each forms
+    // its own wet core → 3 core stacks + 1 kitchen stack. Without a continuity
+    // map each core stack sits 150 mm outside the core's wall-side edge, so
+    // every fixture gets a real (non-degenerate) route to its own stack.
     await screen.findByLabelText('Remove riser R1')
     await screen.findByLabelText('Remove riser R2')
     await screen.findByLabelText('Remove riser R3')
+    await screen.findByLabelText('Remove riser R4')
+    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('risers:4')
+    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('routes:3')
+    // The wet-core placement of each stack is explained in the riser list.
+    expect(screen.getAllByTestId('stack-placement')[0]).toHaveTextContent('1 WC · wall-side edge')
 
-    // Suggested toilet risers sit exactly on the toilets, so their routes are
-    // degenerate (zero plan length) and skipped. The bath (T2: all fixtures flow
-    // through routing) already yields one real branch route to the kitchen riser.
-    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('routes:1')
-
-    // Removing R2 rebinds WC-12 to R1, which yields a second real
-    // fixture-to-riser route with no demo mode active.
+    // Removing R2 rebinds WC-12 to the next riser: the route count stays at 3
+    // but the straight offset run becomes an L-run (one extra branch segment).
     await user.click(screen.getByLabelText('Remove riser R2'))
 
     await waitFor(() => {
-      expect(screen.getByTestId('floor-viewer')).toHaveTextContent('routes:2')
+      expect(screen.getByTestId('floor-viewer')).toHaveTextContent('risers:3')
     })
+    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('routes:3')
+    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('branchSegments:4')
 
     // Demo-only chrome stays hidden, but the routing limitations surface in dev.
     expect(screen.queryByLabelText('Sanitary demo flow')).not.toBeInTheDocument()
@@ -522,11 +533,12 @@ describe('WorkspacePage', () => {
     await user.click(placeRisersButton)
 
     await screen.findByLabelText('Remove riser R1')
+    await screen.findByLabelText('Remove riser R4')
 
-    // Both toilets sit exactly on their suggested risers (zero-length runs emit no
-    // segments); the bath routes to the kitchen corner riser as an axis-aligned
-    // L-run, so the dev flow shows its two branch segments right after suggestion.
-    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('branchSegments:2')
+    // Wet-core path (V3): each fixture is its own core here and its stack sits
+    // 150 mm outside the core's wall-side edge, an axis-aligned offset → one
+    // branch segment per fixture right after suggestion.
+    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('branchSegments:3')
 
     await user.click(screen.getByRole('button', { name: 'toggle-branch-routes' }))
     await waitFor(() => {
@@ -535,7 +547,7 @@ describe('WorkspacePage', () => {
 
     await user.click(screen.getByRole('button', { name: 'toggle-branch-routes' }))
     await waitFor(() => {
-      expect(screen.getByTestId('floor-viewer')).toHaveTextContent('branchSegments:2')
+      expect(screen.getByTestId('floor-viewer')).toHaveTextContent('branchSegments:3')
     })
   })
 
