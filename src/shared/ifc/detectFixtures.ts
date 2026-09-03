@@ -73,34 +73,132 @@ const KNOWN_KINDS = new Set<string>([
 ])
 
 const EXCLUDED_FIXTURE_PATTERN = /shower|מקלח(?:ת|ון)|אגנית/i
-const FLOOR_DRAIN_PATTERN = /floor\s*drain|מחסום\s*רצפה/i
+// Floor traps / drains / roof & balcony outlets. Covers Revit family tokens
+// (`Floor_Drain`, `Floor_Trap`) and the Hebrew abbreviations `מ.ר` (מחסום רצפה)
+// and `ק.ב` / `ק.ב.נ` used as type labels. JS `\b` is ASCII-only, so Hebrew
+// abbreviations are delimited with letter/digit lookarounds instead.
+const FLOOR_DRAIN_PATTERN =
+  /floor[\s_-]*drain|floor[\s_-]*trap|roof[\s_-]*(?:drain|outlet)|balcony[\s_-]*(?:drain|outlet)|מחסום\s*רצפה|נקז|(?<![\p{L}\d])(?:מ\.ר|ק\.ב(?:\.נ)?)(?![\p{L}\d])/iu
 const KITCHEN_PATTERN = /kitchen(?:ette)?|מטבח/i
 const EXPLICIT_WASH_BASIN_PATTERN = /wash.?hand.?basin|washbasin|hand.?basin|lavatory|כיור\s*רחצה/i
+
+/** Zero-width / BOM characters occasionally embedded in Revit family names. */
+const INVISIBLE_CHARS_PATTERN = /[\u200B-\u200F\uFEFF]/g
 
 function toFixtureKind(raw: string): FixtureKind {
   const upper = raw.toUpperCase()
   return KNOWN_KINDS.has(upper) ? (upper as FixtureKind) : 'OTHER'
 }
 
-// Keyword → FixtureKind mapping for ambiguous exports where plumbing fixtures are
-// represented as proxy/furnishing/flow elements. The keywords intentionally cover
-// both English and common Hebrew labels seen in local BIM exports.
-const KEYWORD_MATCHERS: Array<[RegExp, FixtureKind]> = [
-  [/toilet|toiletpan|water closet|\bwc\b|אסלה/i, 'TOILETPAN'],
-  [/kitchen.?sink|sink.*kitchen|כיור\s*מטבח|מטבח.*כיור/i, 'SINK'],
-  [/wash.?hand.?basin|washbasin|hand.?basin|lavatory|כיור\s*רחצה|כיור/i, 'WASHHANDBASIN'],
-  [/\bsink\b|kitchen sink/i, 'SINK'],
-  [/\bbath(?!room)|bathtub|אמבט(?:יה)?/i, 'BATH'],
-  [/urinal|משתנה/i, 'URINAL'],
-  [/bidet|בידה/i, 'BIDET'],
-  [/cistern|flush tank|ניאגר/i, 'CISTERN'],
+/**
+ * Why a piece of text is explicitly NOT a sanitary fixture. Exclusions are
+ * evaluated before any fixture keyword so an accessory that mentions its host
+ * (`Flushing-Tank-for-Toilet`) or a fire terminal can never spawn a fixture.
+ */
+export type FixtureExclusionReason = 'accessory' | 'fire-protection' | 'floor-drain'
+
+export type FixtureTextClassification =
+  | { type: 'fixture'; kind: FixtureKind }
+  | { type: 'excluded'; reason: FixtureExclusionReason }
+  | { type: 'unmatched' }
+
+type FixtureTextRule =
+  | { pattern: RegExp; kind: FixtureKind }
+  | {
+      pattern: RegExp
+      exclude: FixtureExclusionReason
+      /**
+       * The exclusion is skipped when this pattern matches EARLIER in the text
+       * than `pattern`. Revit names are `Family : Type` with the subject first,
+       * so `Water Closet - Flush Tank` is a toilet variant while
+       * `Flushing-Tank-for-Toilet` is an accessory that merely names its host.
+       */
+      unlessHostFirst?: RegExp
+    }
+
+const TOILET_PATTERN = /toilet|water closet|\bwc\b|אסל(?:ה|ת|ות)/i
+const BASIN_OR_SINK_PATTERN = /basin|lavatory|\bsinks?\b|slop[\s_-]*sink|כיור|עביט/i
+/** Any fixture the accessory could belong to; used by `unlessHostFirst`. */
+const ACCESSORY_HOST_PATTERN = new RegExp(
+  `${TOILET_PATTERN.source}|${BASIN_OR_SINK_PATTERN.source}|\\bbath(?!room)|bathtub|אמבט|urinal|משתנ|bidet|בידה`,
+  'i',
+)
+
+/**
+ * Ordered text rules for exports where plumbing fixtures are only identifiable
+ * through human-readable metadata (Revit `Category : Family : Type` names,
+ * ObjectType, Description). The FIRST matching rule wins, so order encodes
+ * precedence:
+ *
+ *   1. accessories (cisterns / flushing tanks, P-traps, siphons)   → excluded,
+ *      unless a host fixture is named first (`Water Closet - Flush Tank`)
+ *   2. floor traps / drains / roof outlets                          → excluded*
+ *   3. fire protection (sprinklers, hydrants, fire cabinets/hoses) → excluded
+ *   4. basin / sink evidence                                        → SINK / WASHHANDBASIN
+ *   5. toilet evidence (only reached when no basin evidence exists) → TOILETPAN
+ *   6. bath, urinal, bidet
+ *
+ * Basin/sink rules precede toilet rules on purpose: a bare `WC` token is part of
+ * many basin family names (`Sink-WC`, `Basin WC`), so basin evidence in the same
+ * name wins over it. English and Hebrew labels are covered side by side.
+ *
+ * (*) floor drains follow `DETECT_FIXTURES_CONFIG.includeShowerFloorDrains`
+ *     in `classifyFixtureLine`; every other exclusion is unconditional.
+ */
+const FIXTURE_TEXT_RULES: readonly FixtureTextRule[] = [
+  // 1. accessories
+  {
+    pattern: /flush(?:ing)?[\s_-]*tank|cistern|ניאגר(?:ה)?/i,
+    exclude: 'accessory',
+    unlessHostFirst: ACCESSORY_HOST_PATTERN,
+  },
+  {
+    pattern: /\bp[\s_-]*trap|bottle[\s_-]*trap|siphon|סיפון/i,
+    exclude: 'accessory',
+    unlessHostFirst: ACCESSORY_HOST_PATTERN,
+  },
+  // 2. floor drains / traps / outlets
+  { pattern: FLOOR_DRAIN_PATTERN, exclude: 'floor-drain' },
+  // 3. fire protection
+  {
+    pattern:
+      /sprinkler|\bspr\b|hydrant|fire[\s_-]*(?:protection|cabinet|hose|reel|extinguisher|fighting)|hose[\s_-]*reel|ספרינקלר|מתז|הידרנט|כיבוי/i,
+    exclude: 'fire-protection',
+  },
+  // 4. basin / sink evidence
+  { pattern: /kitchen.?sink|sink.*kitchen|כיור\s*מטבח|מטבח.*כיור/i, kind: 'SINK' },
+  { pattern: /wash.?hand.?basin|washbasin|hand.?basin|\bbasins?\b|lavatory|כיור\s*רחצה|כיור/i, kind: 'WASHHANDBASIN' },
+  { pattern: /\bsinks?\b|slop[\s_-]*sink|עביט/i, kind: 'SINK' },
+  // 5. toilet evidence
+  { pattern: TOILET_PATTERN, kind: 'TOILETPAN' },
+  // 6. others
+  { pattern: /\bbath(?!room)|bathtub|אמבט(?:יה)?/i, kind: 'BATH' },
+  { pattern: /urinal|משתנ(?:ה|ות)/i, kind: 'URINAL' },
+  { pattern: /bidet|בידה/i, kind: 'BIDET' },
 ]
 
-export function inferFixtureKindFromText(text: string): FixtureKind | null {
-  for (const [pattern, kind] of KEYWORD_MATCHERS) {
-    if (pattern.test(text)) return kind
+/**
+ * Pure, ordered text classifier (see `FIXTURE_TEXT_RULES`). Exposed so tests and
+ * diagnostics can see WHY a line was excluded, not just that it was.
+ */
+export function classifyFixtureText(text: string): FixtureTextClassification {
+  const normalized = text.replace(INVISIBLE_CHARS_PATTERN, '')
+  for (const rule of FIXTURE_TEXT_RULES) {
+    const matchIndex = normalized.search(rule.pattern)
+    if (matchIndex === -1) continue
+    if ('kind' in rule) return { type: 'fixture', kind: rule.kind }
+    if (rule.unlessHostFirst) {
+      const hostIndex = normalized.search(rule.unlessHostFirst)
+      if (hostIndex !== -1 && hostIndex < matchIndex) continue
+    }
+    return { type: 'excluded', reason: rule.exclude }
   }
-  return null
+  return { type: 'unmatched' }
+}
+
+export function inferFixtureKindFromText(text: string): FixtureKind | null {
+  const classification = classifyFixtureText(text)
+  return classification.type === 'fixture' ? classification.kind : null
 }
 
 export function isExcludedFixtureText(text: string): boolean {
@@ -125,10 +223,6 @@ export const DETECT_FIXTURES_CONFIG: Required<DetectFixturesOptions> = {
   includeShowerFloorDrains: false,
 }
 
-function isShowerFloorDrainText(text: string): boolean {
-  return EXCLUDED_FIXTURE_PATTERN.test(text) || FLOOR_DRAIN_PATTERN.test(text)
-}
-
 function isKitchenText(text: string): boolean {
   return KITCHEN_PATTERN.test(text)
 }
@@ -141,8 +235,17 @@ export type FixtureClassificationSource = 'sanitary-terminal' | 'flow-terminal' 
  * and the lightweight per-storey fixture scan (`scanStoreyFixtures`). This is
  * THE single source of classification rules; both callers must stay on it.
  *
- * Returns null when the element is not a plumbing fixture (or is an excluded
- * shower/floor drain under the current options).
+ * Returns null when the element is not a plumbing fixture: no evidence, an
+ * excluded shower/floor drain under the current options, or an explicit text
+ * exclusion (accessory, fire protection — see `FIXTURE_TEXT_RULES`).
+ *
+ * Precedence per source:
+ *   - shower text/PredefinedType → null (or OTHER when floor drains are included)
+ *   - typed sources: a known IFC PredefinedType is authoritative (a sanitary
+ *     terminal explicitly typed CISTERN stays a CISTERN)
+ *   - otherwise the ordered text rules decide; text exclusions return null so an
+ *     accessory or fire terminal never spawns a fixture, whatever its IFC class
+ *   - an untyped IfcSanitaryTerminal with no text evidence is still OTHER
  */
 export function classifyFixtureLine(
   source: FixtureClassificationSource,
@@ -150,16 +253,20 @@ export function classifyFixtureLine(
   options: Required<DetectFixturesOptions> = DETECT_FIXTURES_CONFIG,
 ): FixtureKind | null {
   const typedSearchText = `${predefinedType} ${searchText}`
-  if (!options.includeShowerFloorDrains && isExcludedFixtureText(typedSearchText)) return null
+  const isShower = isExcludedFixtureText(typedSearchText)
+  if (!options.includeShowerFloorDrains && isShower) return null
 
-  const fallbackKind = inferFixtureKindFromText(searchText)
+  const textClass = classifyFixtureText(searchText)
+  const fallbackKind = textClass.type === 'fixture' ? textClass.kind : null
+  const isFloorDrain = textClass.type === 'excluded' && textClass.reason === 'floor-drain'
   const showerFloorDrainKind: FixtureKind | null =
-    options.includeShowerFloorDrains && isShowerFloorDrainText(typedSearchText) ? 'OTHER' : null
+    options.includeShowerFloorDrains && (isShower || isFloorDrain) ? 'OTHER' : null
 
   if (source === 'keyword') return fallbackKind ?? showerFloorDrainKind
 
   const predefinedKind = toFixtureKind(predefinedType)
   if (predefinedKind !== 'OTHER') return predefinedKind
+  if (textClass.type === 'excluded') return showerFloorDrainKind
   return source === 'sanitary-terminal' ? (fallbackKind ?? 'OTHER') : (fallbackKind ?? showerFloorDrainKind)
 }
 
