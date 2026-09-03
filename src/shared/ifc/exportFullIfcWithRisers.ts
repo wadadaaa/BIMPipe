@@ -1,4 +1,5 @@
 import { Vector3 } from 'three'
+import { BRANCH_FALLBACK_DIAMETER_MM } from '@/domain/branchDefaults'
 import type { FloorRoutes, RouteSegment, RouteSegmentEndpoint } from '@/domain/branchRouting'
 import type { SanitaryFixtureRoute } from '@/shared/routes/buildSanitaryRoutes'
 import {
@@ -159,8 +160,12 @@ export type FullIfcWithRisersDebugResult = {
 
 /** Outer diameter written when the placement result does not specify one. */
 export const DEFAULT_RISER_DIAMETER_MM = 110
-/** Outer diameter written for exported branch route segments. */
-export const BRANCH_ROUTE_PIPE_DIAMETER_MM = 110
+/**
+ * Branch route segments carry their own `diameterMm` (per-kind defaults in
+ * `src/domain/branchDefaults.ts`); this is only the guard used when a segment
+ * arrives without a finite positive diameter.
+ */
+export const BRANCH_ROUTE_FALLBACK_DIAMETER_MM = BRANCH_FALLBACK_DIAMETER_MM
 /**
  * Maximum allowed distance, in millimetres, between a branch-route group's
  * riser connection point and the current riser plan position. Routes are
@@ -1336,11 +1341,10 @@ function writeBranchRouteSegments(
     return { handles: [], ownerHistory: null, writtenCount: 0 }
   }
 
-  const radiusSourceUnits = (BRANCH_ROUTE_PIPE_DIAMETER_MM / 2) / millimetresPerSourceUnit
-  const diameterSourceUnits = BRANCH_ROUTE_PIPE_DIAMETER_MM / millimetresPerSourceUnit
   const elementType = schema === 'IFC2X3' ? ifc.IFCFLOWSEGMENT : ifc.IFCPIPESEGMENT
   const handles: IfcHandle[] = []
   const elements: IfcEntityRef[] = []
+  const elementsByDiameterMm = new Map<number, IfcEntityRef[]>()
   let ownerHistory: IfcHandle | null = null
 
   for (const floor of branchRoutes) {
@@ -1375,6 +1379,9 @@ function writeBranchRouteSegments(
         )
       }
       const runAxis = runVector.clone().normalize()
+      const diameterMm = resolveBranchSegmentExportDiameterMm(segment)
+      const diameterSourceUnits = diameterMm / millimetresPerSourceUnit
+      const radiusSourceUnits = diameterSourceUnits / 2
 
       const element = writeBranchSegmentElement(
         api,
@@ -1385,6 +1392,7 @@ function writeBranchRouteSegments(
         storeyContext,
         segment,
         stackLabel,
+        diameterMm,
         startLocal,
         runAxis,
         runLength,
@@ -1394,6 +1402,9 @@ function writeBranchRouteSegments(
 
       writeFlowSegmentOccurrencePset(api, ifc, modelId, storeyContext.ownerHistory, element, runLength, diameterSourceUnits)
       writePipeSegmentBaseQuantities(api, ifc, modelId, storeyContext.ownerHistory, element, runLength, diameterSourceUnits)
+      const sameDiameter = elementsByDiameterMm.get(diameterMm) ?? []
+      sameDiameter.push(element)
+      elementsByDiameterMm.set(diameterMm, sameDiameter)
       appendBranchSegmentToStoreyContainment(
         api,
         ifc,
@@ -1426,7 +1437,17 @@ function writeBranchRouteSegments(
     })
 
     if (schema === 'IFC2X3') {
-      writeSharedBranchPipeSegmentType(api, ifc, modelId, ownerHistory, elements, millimetresPerSourceUnit)
+      for (const diameterMm of [...elementsByDiameterMm.keys()].sort((a, b) => a - b)) {
+        writeSharedBranchPipeSegmentType(
+          api,
+          ifc,
+          modelId,
+          ownerHistory,
+          elementsByDiameterMm.get(diameterMm) ?? [],
+          diameterMm,
+          millimetresPerSourceUnit,
+        )
+      }
     } else {
       // TODO(BIM-51): like the stack and sanitary-route paths, IFC4 branch export
       // intentionally writes no IfcPipeSegmentType / type-level Pset_PipeSegmentTypeCommon yet.
@@ -1455,6 +1476,7 @@ function writeBranchSegmentElement(
   storeyContext: StoreyContext,
   segment: RouteSegment,
   stackLabel: string,
+  diameterMm: number,
   startLocal: Vector3,
   runAxis: Vector3,
   runLength: number,
@@ -1565,7 +1587,7 @@ function writeBranchSegmentElement(
     Name: api.CreateIfcType(
       modelId,
       types.IFCLABEL,
-      `BIMPipe ${roleLabel} ${BRANCH_ROUTE_PIPE_DIAMETER_MM}mm -> ${stackLabel}`,
+      `BIMPipe ${roleLabel} ${diameterMm}mm -> ${stackLabel}`,
     ),
     Description: api.CreateIfcType(
       modelId,
@@ -1580,18 +1602,28 @@ function writeBranchSegmentElement(
   })
 }
 
-// One shared IfcPipeSegmentType covers every exported branch segment (all branches
-// share BRANCH_ROUTE_PIPE_DIAMETER_MM), matching the IFC2X3-only behavior of the
-// stack and sanitary-route paths.
+function resolveBranchSegmentExportDiameterMm(segment: RouteSegment): number {
+  const diameterMm = segment.diameterMm
+  if (!Number.isFinite(diameterMm) || diameterMm <= 0) {
+    return BRANCH_ROUTE_FALLBACK_DIAMETER_MM
+  }
+  return diameterMm
+}
+
+// One shared IfcPipeSegmentType per distinct branch diameter (Ø50 / Ø63 / Ø110)
+// covers every exported branch segment of that diameter, matching the
+// IFC2X3-only behavior of the stack and sanitary-route paths.
 function writeSharedBranchPipeSegmentType(
   api: IfcAPI,
   ifc: ImportedIfcTypes,
   modelId: number,
   ownerHistory: IfcHandle | null,
   elements: IfcEntityRef[],
+  diameterMm: number,
   millimetresPerSourceUnit: number,
 ): void {
-  const typeName = `BIMPipe PVC ${BRANCH_ROUTE_PIPE_DIAMETER_MM} Branch`
+  if (elements.length === 0) return
+  const typeName = `BIMPipe PVC ${diameterMm} Branch`
   const pipeSegmentType = writeLabeledLine(api, modelId, 'branch pipe segment type', {
     expressID: -1,
     type: ifc.IFCPIPESEGMENTTYPE,
@@ -1602,7 +1634,7 @@ function writeSharedBranchPipeSegmentType(
     ApplicableOccurrence: null,
     HasPropertySets: [],
     RepresentationMaps: null,
-    Tag: api.CreateIfcType(modelId, ifc.IFCLABEL, `BranchRoutes-${BRANCH_ROUTE_PIPE_DIAMETER_MM}-Type`),
+    Tag: api.CreateIfcType(modelId, ifc.IFCLABEL, `BranchRoutes-${diameterMm}-Type`),
     ElementType: api.CreateIfcType(modelId, ifc.IFCLABEL, typeName),
     PredefinedType: { type: 3, value: 'RIGIDSEGMENT' },
   })
@@ -1618,7 +1650,7 @@ function writeSharedBranchPipeSegmentType(
     RelatingType: handleRef(pipeSegmentType.expressID),
   })
 
-  const diameterSourceUnits = BRANCH_ROUTE_PIPE_DIAMETER_MM / millimetresPerSourceUnit
+  const diameterSourceUnits = diameterMm / millimetresPerSourceUnit
   const properties = [
     writePropertySingleValue(
       api,
@@ -1642,7 +1674,7 @@ function writeSharedBranchPipeSegmentType(
       modelId,
       'Reference',
       api.GetTypeCodeFromName('IFCIDENTIFIER'),
-      'BranchRoutes',
+      `BranchRoutes-${diameterMm}`,
     ),
   ]
   const pset = writePropertySet(api, ifc, modelId, ownerHistory, 'Pset_PipeSegmentTypeCommon', properties)

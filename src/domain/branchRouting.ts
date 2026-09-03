@@ -1,4 +1,14 @@
 import type { FixtureKind, RiserId, StoreyId } from '@/domain/types'
+import {
+  BRANCH_SLOPE_RATIO,
+  DEFAULT_BRANCH_SLOPE_DROP_MM,
+  DEFAULT_BRANCH_SLOPE_RUN_MM,
+  resolveBranchSegmentDiameterMm,
+} from './branchDefaults'
+
+// The slope constants live in the shared defaults table (`branchDefaults.ts`);
+// re-exported here so existing importers keep working.
+export { DEFAULT_BRANCH_SLOPE_DROP_MM, DEFAULT_BRANCH_SLOPE_RUN_MM }
 
 /**
  * Units the plan coordinates are expressed in. Plan geometry lives on the
@@ -49,6 +59,12 @@ export interface RouteSegment {
   kind: RouteSegmentKind
   /** Fixtures whose flow passes through this segment, sorted ascending. */
   servedFixtureExpressIds: number[]
+  /**
+   * Nominal diameter in millimetres from the served fixture kinds
+   * (`resolveBranchSegmentDiameterMm` in `branchDefaults.ts`): per-kind for a
+   * single fixture, Ø63 collector for ≥ 2 shared small fixtures, Ø110 when a WC is served.
+   */
+  diameterMm: number
   /** Riser this segment drains toward. */
   riserId: RiserId
   /** Vertical stack of the target riser, when known. */
@@ -98,16 +114,6 @@ export interface ComputeBranchRoutesOptions {
    */
   planUnits?: PlanUnits
 }
-
-/**
- * Default branch slope as a mm-per-mm-run constant pair:
- * 20 mm of drop per 1000 mm of run (2%). The ratio is dimensionless, so the
- * same 2% applies unchanged to metre-scale coordinates.
- */
-export const DEFAULT_BRANCH_SLOPE_DROP_MM = 20
-export const DEFAULT_BRANCH_SLOPE_RUN_MM = 1000
-
-const BRANCH_SLOPE_RATIO = DEFAULT_BRANCH_SLOPE_DROP_MM / DEFAULT_BRANCH_SLOPE_RUN_MM
 
 /**
  * Computes horizontal branch routing from every assigned fixture to its riser,
@@ -209,6 +215,7 @@ function routeRiserGroup(
     }
   }
   const riserStackId = assignments.find((assignment) => assignment.riserStackId !== undefined)?.riserStackId
+  const kindByFixture = new Map(assignments.map((assignment) => [assignment.fixtureExpressId, assignment.fixtureKind]))
 
   const buckets = new Map<string, LegBucket>()
   for (const assignment of assignments) {
@@ -248,6 +255,12 @@ function routeRiserGroup(
       segments.push({
         ...segment,
         id: `branch-seg|${storeyId}|${riserId}|${segments.length}`,
+        diameterMm: resolveBranchSegmentDiameterMm(
+          segment.servedFixtureExpressIds.flatMap((expressId) => {
+            const kind = kindByFixture.get(expressId)
+            return kind === undefined ? [] : [kind]
+          }),
+        ),
         riserId,
         riserStackId,
       })
@@ -270,7 +283,7 @@ function addLeg(
   buckets.set(key, { ...bucket, entries: [entry] })
 }
 
-type UnkeyedSegment = Omit<RouteSegment, 'id' | 'riserId' | 'riserStackId'>
+type UnkeyedSegment = Omit<RouteSegment, 'id' | 'diameterMm' | 'riserId' | 'riserStackId'>
 
 /**
  * Merges a bucket of collinear same-direction legs and splits the merged run
