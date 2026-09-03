@@ -140,7 +140,7 @@ gated('096 multi-IFC storey alignment + cross-file merge (gated: requires local 
 
         // --- dedupe with real coordinates ---
         // The real files have no cross-file duplicated fixtures, so exercise
-        // the 120 mm dedupe on real geometry by feeding A "00" against itself
+        // the per-kind dedupe on real geometry by feeding A "00" against itself
         // under a second file name: every fixture must dedupe at ~0 mm and the
         // host instance must be the one kept.
         const a00Fixtures = await detectFixtures(api, linkedModelId, gfPair.linked.storeyId)
