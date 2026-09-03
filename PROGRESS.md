@@ -17,7 +17,11 @@ Privacy rule: `external/` and `refs/` hold private client data and are never com
 | V5 — One routing model | ✅ | commits `7d06d25`…`2006b8f`; branch runs only outside demo; podium 01 branch ratio 1.27 (pinned); Duplex export re-parsed; parity byte-identical |
 | V6 — Auto-select weighting | ✅ | commit `2c78e32` (pulled forward, domain-only); 096-P opens "01" (weight 13 vs 3/3), Duplex Level 1, SHBJ L04 (details below) |
 | V7 — Tower-band acceptance | ✅ | commits `6c38fcb`, `7224ce5`, `41d3f4a`; 5 cores → 5 stacks per storey, 100 % fingerprint match across the band, 15/15 routed, export round-trips; two domain fixes (host-scoped slab openings, 1 mm plan snap) |
-| Push | ⏳ | when all green |
+| Final gate + push | ✅ | commit `04f646f` (privacy wording fix); pushed to `origin/goal/real-floors-v0-v7`; merge into `main` pending independent review |
+
+### Goal 3 closing (2026-09-03)
+
+Final gate: lint 0 errors · 817/817 tests green with client files (783 passed / 34 skipped across the 18 gated files without them) · build green · react-doctor only the pre-existing `Model3DViewer` error. Privacy audit of the full branch diff (98 files, +13.5k/−0.8k) and all commit messages found one issue — verbatim client Revit type names carrying the consultant's content-library prefix in classifier test fixtures — neutralized in `04f646f` as wording only (classifier has no rule on the prefix; 82/82 tests unchanged). Test-integrity audit: no skipped/weakened assertions beyond the measured pin changes recorded per task above. Stale parity worktree and agent dev servers removed. Branch pushed at `04f646f` (49 commits over `main` @ `b6187ff`); merge into `main` pending independent review. Follow-up tickets worth filing: legacy readiness panel still shows per-toilet "New risers" beside wet-core stacks and "penthouse skipped" on short bands; dragged stacks keep a stale placement note; re-uploaded exports do not re-detect their own stacks; SHBJ free-cell placements can land in unslabbed gaps; no DU-based branch sizing; wide cores are warned, not split.
 
 ## Goal 3 milestones
 
