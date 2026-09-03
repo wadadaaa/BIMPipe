@@ -199,7 +199,13 @@ export function mergeContinuityStoreyInputs(
         spaces: [],
       }
       target.obstructions.push(...storey.obstructions.map((item) => ({ ...item, id: prefix(item.id) })))
-      target.voids.push(...storey.voids.map((item) => ({ ...item, id: prefix(item.id) })))
+      target.voids.push(
+        ...storey.voids.map((item) => ({
+          ...item,
+          id: prefix(item.id),
+          ...(item.hostId === undefined ? {} : { hostId: prefix(item.hostId) }),
+        })),
+      )
       target.spaces.push(...storey.spaces.map((item) => ({ ...item, id: prefix(item.id) })))
       byStorey.set(storey.storeyId, target)
     }

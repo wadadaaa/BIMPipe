@@ -257,10 +257,14 @@ export async function extractContinuityStoreyInputs(
         )
         continue
       }
+      const hostKind = obstructionKindOf(relation.hostId)
       voids.push({
         id: `opening:${relation.openingId}`,
-        kind: slabIds.has(relation.hostId) ? 'slab-opening' : 'void',
+        kind: hostKind === 'slab' ? 'slab-opening' : 'void',
         footprint,
+        // Scopes the carve to the host element (see ContinuityVoidInput.hostId);
+        // a host that is not an obstruction kind (e.g. a roof) carves nothing.
+        hostId: hostKind === null ? `element:${relation.hostId}` : `${hostKind}:${relation.hostId}`,
       })
     }
 
