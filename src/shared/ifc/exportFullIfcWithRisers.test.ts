@@ -40,6 +40,9 @@ vi.mock('web-ifc', () => ({
   IFCELEMENTQUANTITY: 27,
   IFCQUANTITYLENGTH: 28,
   IFCREAL: 29,
+  // Mock models declare no representation context: the frame reader finds no
+  // IfcGeometricRepresentationContext lines and no BIMPipe_Frame pset is written.
+  IFCGEOMETRICREPRESENTATIONCONTEXT: 30,
 }))
 
 const IFCPOSITIVELENGTHMEASURE = 19

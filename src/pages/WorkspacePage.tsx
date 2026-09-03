@@ -803,6 +803,7 @@ export function WorkspacePage({
           exportRunId,
           timestamp,
           sourceIfcName: modelFileName,
+          modelOrigin,
           storeys: storeys.map((storey) => ({
             id: storey.id,
             name: storey.name,
