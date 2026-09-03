@@ -1,4 +1,5 @@
 import type { PlanBounds } from '@/domain/types'
+import { dropIsolatedOriginVertices } from '@/shared/frame/originArtifacts'
 
 /**
  * Pure vertex → plan-footprint math for the vertical continuity map.
@@ -23,19 +24,13 @@ export interface WorldVertex {
  * Some exporter meshes contain stray vertices sitting exactly at the world
  * origin (uninitialised data). They wreck bbox/centroid math for elements that
  * live far from the origin, so they are dropped before any footprint is
- * computed. A vertex counts as stray only when all three coordinates are
- * (numerically) zero — legitimate geometry touching the exact origin point is
- * rare enough that this trade-off is acceptable, and it is documented here.
+ * computed. The rule is the shared origin guard
+ * (`src/shared/frame/originArtifacts.ts`): an exact-zero vertex is dropped
+ * only when it is isolated from the rest of the element's geometry, so an
+ * element that legitimately touches the origin keeps its vertex.
  */
-const STRAY_ORIGIN_EPSILON = 1e-9
-
 export function dropStrayOriginVertices(vertices: WorldVertex[]): WorldVertex[] {
-  return vertices.filter(
-    (vertex) =>
-      Math.abs(vertex.x) > STRAY_ORIGIN_EPSILON ||
-      Math.abs(vertex.y) > STRAY_ORIGIN_EPSILON ||
-      Math.abs(vertex.z) > STRAY_ORIGIN_EPSILON,
-  )
+  return dropIsolatedOriginVertices(vertices)
 }
 
 export interface VertexFootprint {

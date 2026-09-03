@@ -7,6 +7,7 @@ import type {
   EngineerStoreyRef,
 } from '@/domain/engineerPipes'
 import type { StoreyId } from '@/domain/types'
+import { dropIsolatedOriginVertices } from '@/shared/frame/originArtifacts'
 import {
   readCoordinates,
   readDirection,
@@ -31,8 +32,9 @@ import {
  *   composition `MappingTarget × MappingOrigin`; nested maps fall back to
  *   mesh bounds.
  * - The mesh-bounds fallback returns the bounding-box centreline along the
- *   longest box axis, after dropping stray world-origin vertices; diameters
- *   are not inferred from meshes (null).
+ *   longest box axis, after dropping isolated world-origin vertices (shared
+ *   guard in `src/shared/frame/originArtifacts.ts`); diameters are not
+ *   inferred from meshes (null).
  */
 
 const PSET_FLOW_SEGMENT_PIPE_SEGMENT = 'Pset_FlowSegmentPipeSegment'
@@ -448,24 +450,14 @@ function extractExtrusionAxisGeometry(
 }
 
 /**
- * Drops stray vertices at the world origin: points whose distance from the
- * origin is negligible (< 1e-6 x the farthest vertex) are export artifacts in
- * models placed far from the origin. When everything would be dropped, the
- * original points are kept (a legitimately origin-centred model).
+ * Drops stray world-origin vertices from a pipe mesh before its bounds are
+ * taken. Delegates to the shared origin guard
+ * (`src/shared/frame/originArtifacts.ts`): only exact-zero vertices that are
+ * isolated from the rest of the mesh are dropped; a mesh that is entirely at
+ * the origin, or that legitimately touches it, is returned unchanged.
  */
 export function filterOriginArtifacts(points: EngineerPoint3[]): EngineerPoint3[] {
-  let maxNormSq = 0
-  for (const point of points) {
-    const normSq = point.x * point.x + point.y * point.y + point.z * point.z
-    if (normSq > maxNormSq) maxNormSq = normSq
-  }
-  if (maxNormSq === 0) return points
-
-  const thresholdSq = maxNormSq * 1e-12 // (1e-6 x maxNorm)^2
-  const filtered = points.filter(
-    (point) => point.x * point.x + point.y * point.y + point.z * point.z > thresholdSq,
-  )
-  return filtered.length > 0 ? filtered : points
+  return dropIsolatedOriginVertices(points)
 }
 
 function extractMeshBoundsGeometry(

@@ -1,7 +1,7 @@
 import type { IfcAPI } from 'web-ifc'
 import type { Fixture, FixtureKind, StoreyId } from '@/domain/types'
 import { detectPlanUnits, planDistance } from '@/shared/routes/planGeometry'
-import { createArtifactAwareBoundsAccumulator } from '@/shared/frame/modelFrame'
+import { createOriginGuardedBoundsAccumulator } from '@/shared/frame/originArtifacts'
 import { collectSpatialTreeElements } from './collectSpatialTreeElements'
 
 interface DetectedFixtureCandidate extends Fixture {
@@ -16,10 +16,11 @@ interface DetectedFixtureCandidate extends Fixture {
  * This is more accurate than reading t[12,13,14] (the insertion origin), which
  * points to the pipe-connection stub rather than the visible body of the fixture.
  *
- * Bounds are artifact-aware: stray (0,0,0)-adjacent vertices in otherwise
- * far-from-origin meshes are dropped before the centre is computed, so a single
- * zero vertex cannot drag a fixture centroid hundreds of kilometres off the
- * building. Near-origin models keep every vertex.
+ * Bounds are origin-guarded (`src/shared/frame/originArtifacts.ts`): an exact
+ * (0,0,0) vertex that is isolated from the rest of the element's geometry is
+ * dropped before the centre is computed, so a single stray zero vertex cannot
+ * drag a fixture centroid off the building. Geometry that legitimately touches
+ * the origin (near-origin models) keeps every vertex.
  */
 export function getIfcElementPosition(
   api: IfcAPI,
@@ -30,7 +31,7 @@ export function getIfcElementPosition(
     const flatMesh = api.GetFlatMesh(webIfcModelId, expressId)
     if (flatMesh.geometries.size() === 0) return null
 
-    const bounds = createArtifactAwareBoundsAccumulator()
+    const bounds = createOriginGuardedBoundsAccumulator()
 
     for (let gi = 0; gi < flatMesh.geometries.size(); gi++) {
       const placed = flatMesh.geometries.get(gi)
