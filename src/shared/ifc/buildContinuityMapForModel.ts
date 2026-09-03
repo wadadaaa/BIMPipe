@@ -125,3 +125,165 @@ export async function buildContinuityMapForModel({
 
   return { map, diagnostics, extractMs, buildMs, processedStoreyCount: storeys.length }
 }
+
+// ---------------------------------------------------------------------------
+// Multi-model build (V3): host + every linked file contribute to ONE map
+// ---------------------------------------------------------------------------
+
+/** One loaded file that contributes geometry to the merged continuity map. */
+export interface ContinuityMapSource {
+  fileName: string
+  webIfcModelId: number
+  /** Resolved length unit of the file's raw attributes; null = unknown → file skipped with a diagnostic. */
+  lengthUnit: ModelLengthUnit | null
+  /** Linked storey ID → host storey ID; null when this file IS the host. */
+  sourceToHostStoreyId: Map<StoreyId, StoreyId> | null
+  /**
+   * Optional scope in the file's OWN storey ids. Linked files are normally
+   * scoped to the storeys that align to the host so a 100+ MB architecture
+   * file is not walked in full.
+   */
+  storeyIds?: ReadonlySet<StoreyId>
+}
+
+export interface ContinuitySourceContribution {
+  fileName: string
+  storeyCount: number
+  obstructionCount: number
+  voidCount: number
+  spaceCount: number
+  extractMs: number
+  /** Set when the file contributed nothing, with the reason. */
+  skippedReason: string | null
+}
+
+export interface ContinuityMapMultiBuildResult extends ContinuityMapBuildResult {
+  /** Files that actually contributed geometry, in input order. */
+  sourceFileNames: string[]
+  contributions: ContinuitySourceContribution[]
+}
+
+export interface BuildContinuityMapForModelsArgs {
+  api: IfcAPI
+  /** Host first, then linked files (upload order). */
+  sources: ContinuityMapSource[]
+  onProgress?: (progress: {
+    fileName: string
+    sourceIndex: number
+    sourceCount: number
+    processed: number
+    total: number
+  }) => void | Promise<void>
+}
+
+/**
+ * Merges the per-storey continuity inputs of several files (already in HOST
+ * storey ids and metres) into one bottom-to-top storey list. Element ids are
+ * prefixed with the file name so ids from different files never collide.
+ * Storey name/elevation come from the first file that mentions the storey
+ * (the host, since it is first). Pure, for tests.
+ */
+export function mergeContinuityStoreyInputs(
+  perSource: Array<{ fileName: string; storeys: ContinuityStoreyInput[] }>,
+): ContinuityStoreyInput[] {
+  const byStorey = new Map<StoreyId, ContinuityStoreyInput>()
+  for (const { fileName, storeys } of perSource) {
+    const prefix = (id: string) => `${fileName}:${id}`
+    for (const storey of storeys) {
+      const target = byStorey.get(storey.storeyId) ?? {
+        storeyId: storey.storeyId,
+        storeyName: storey.storeyName,
+        elevation: storey.elevation,
+        obstructions: [],
+        voids: [],
+        spaces: [],
+      }
+      target.obstructions.push(...storey.obstructions.map((item) => ({ ...item, id: prefix(item.id) })))
+      target.voids.push(...storey.voids.map((item) => ({ ...item, id: prefix(item.id) })))
+      target.spaces.push(...storey.spaces.map((item) => ({ ...item, id: prefix(item.id) })))
+      byStorey.set(storey.storeyId, target)
+    }
+  }
+  return [...byStorey.values()].sort((a, b) => a.elevation - b.elevation || a.storeyId - b.storeyId)
+}
+
+/**
+ * Builds ONE continuity map from every loaded file: the host's own geometry
+ * plus each linked file's walls / columns / slabs / openings / spaces, remapped
+ * onto host storeys. This is what lets slab openings modelled only in a linked
+ * structural file become shaft candidates for the host's fixtures.
+ */
+export async function buildContinuityMapForModels({
+  api,
+  sources,
+  onProgress,
+}: BuildContinuityMapForModelsArgs): Promise<ContinuityMapMultiBuildResult> {
+  const diagnostics: string[] = []
+  const contributions: ContinuitySourceContribution[] = []
+  const perSource: Array<{ fileName: string; storeys: ContinuityStoreyInput[] }> = []
+  let extractMs = 0
+
+  for (const [sourceIndex, source] of sources.entries()) {
+    if (source.lengthUnit === null) {
+      const reason = `${source.fileName} declares no supported length unit; its storey elevations cannot be converted, so it was left out of the continuity map.`
+      diagnostics.push(reason)
+      contributions.push(emptyContribution(source.fileName, 0, reason))
+      continue
+    }
+    if (source.sourceToHostStoreyId !== null && source.sourceToHostStoreyId.size === 0) {
+      const reason = `${source.fileName}: none of its storeys align to the host, so it was left out of the continuity map.`
+      diagnostics.push(reason)
+      contributions.push(emptyContribution(source.fileName, 0, reason))
+      continue
+    }
+
+    const extractStart = performance.now()
+    const extraction = await extractContinuityStoreyInputs(api, source.webIfcModelId, {
+      storeyIds: source.storeyIds,
+      onStoreyProgress:
+        onProgress === undefined
+          ? undefined
+          : (processed, total) =>
+              onProgress({ fileName: source.fileName, sourceIndex, sourceCount: sources.length, processed, total }),
+    })
+    const sourceExtractMs = performance.now() - extractStart
+    extractMs += sourceExtractMs
+    diagnostics.push(...extraction.diagnostics.map((line) => `${source.fileName}: ${line}`))
+
+    let storeys = convertContinuityElevationsToMeters(extraction.storeys, source.lengthUnit)
+    if (source.sourceToHostStoreyId !== null) {
+      const remap = remapContinuityStoreysToHost(storeys, source.sourceToHostStoreyId)
+      storeys = remap.storeys
+      diagnostics.push(...remap.diagnostics.map((line) => `${source.fileName}: ${line}`))
+    }
+    perSource.push({ fileName: source.fileName, storeys })
+    contributions.push({
+      fileName: source.fileName,
+      storeyCount: storeys.length,
+      obstructionCount: storeys.reduce((sum, storey) => sum + storey.obstructions.length, 0),
+      voidCount: storeys.reduce((sum, storey) => sum + storey.voids.length, 0),
+      spaceCount: storeys.reduce((sum, storey) => sum + storey.spaces.length, 0),
+      extractMs: sourceExtractMs,
+      skippedReason: null,
+    })
+  }
+
+  const merged = mergeContinuityStoreyInputs(perSource)
+  const buildStart = performance.now()
+  const map = buildContinuityMap({ units: 'm', storeys: merged })
+  const buildMs = performance.now() - buildStart
+
+  return {
+    map,
+    diagnostics,
+    extractMs,
+    buildMs,
+    processedStoreyCount: merged.length,
+    sourceFileNames: perSource.map((entry) => entry.fileName),
+    contributions,
+  }
+}
+
+function emptyContribution(fileName: string, extractMs: number, skippedReason: string): ContinuitySourceContribution {
+  return { fileName, storeyCount: 0, obstructionCount: 0, voidCount: 0, spaceCount: 0, extractMs, skippedReason }
+}

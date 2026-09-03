@@ -1,5 +1,12 @@
 import type { Fixture, KitchenArea, PlanBounds, StoreyId } from '@/domain/types'
 import { snapPointToContinuity, type ContinuityMap } from '@/domain/continuityMap'
+import {
+  clusterWetCores,
+  placeWetCoreStack,
+  type WetCore,
+  type WetCorePlanUnits,
+  type WetCoreStackPlacement,
+} from '@/domain/wetCores'
 import { detectPlanUnits, planDistance, type Point3D } from './planGeometry'
 import type { RiserPlacementRuleProfile } from './riserPlacementProfile'
 
@@ -169,6 +176,119 @@ function suggestWithContinuitySnap(
       return { x: outcome.position.x, y: position.y, z: outcome.position.z, snap }
     },
   )
+}
+
+// ---------------------------------------------------------------------------
+// Wet-core path (V3): one stack per wet core, plus one dedicated stack per kitchen
+// ---------------------------------------------------------------------------
+
+export interface WetCoreSuggestOptions {
+  /** Unit of every fixture / kitchen plan coordinate. Never assumed. */
+  planUnits: WetCorePlanUnits
+  /**
+   * W5 continuity map in the same units; when it covers the storey the
+   * placement chain snaps to shafts / free cells and flags obstructed cores.
+   * Null/undefined = no structure loaded → wall-side-edge rule.
+   */
+  continuityMap?: ContinuityMap | null
+  /** Snap search radius in millimetres. Defaults to {@link MAX_SNAP_MM}. */
+  maxSnapMm?: number
+}
+
+/** One suggested stack of the wet-core path with its provenance. */
+export type WetCoreSuggestedPosition =
+  | (Point3D & { anchor: 'wet-core'; core: WetCore; placement: WetCoreStackPlacement })
+  | (Point3D & {
+      anchor: 'kitchen'
+      kitchenExpressId: number
+      storeyId: StoreyId
+      /** Continuity snap of the kitchen corner position when a map was available. */
+      snap: RiserContinuitySnap | null
+    })
+
+export interface WetCoreSuggestion {
+  /** Cores first (storey, then dominant plan axis), then kitchens in the default kitchen order. */
+  positions: WetCoreSuggestedPosition[]
+  cores: WetCore[]
+  /** Explicit notes about inputs that could not be used (fixtures without positions …). */
+  diagnostics: string[]
+}
+
+/**
+ * Wet-core riser suggestion (V3): clusters every positioned fixture into wet
+ * cores (`clusterWetCores`) and places exactly ONE stack per core through the
+ * placement chain shaft → free cell → wall-side edge → flagged centroid
+ * (`placeWetCoreStack`). Kitchen areas keep the dedicated outer-corner stack of
+ * the toilet-anchored path (kitchen waste is its own stack); the corner is
+ * snapped to the continuity map when one covers the storey, a miss keeps the
+ * corner with the reason attached.
+ */
+export function suggestWetCoreRiserPositions(
+  fixtures: Fixture[],
+  kitchens: KitchenArea[],
+  floorPlanBounds: PlanBounds | null,
+  ruleProfile: Partial<RiserPlacementRuleProfile> | null | undefined,
+  options: WetCoreSuggestOptions,
+): WetCoreSuggestion {
+  const { planUnits } = options
+  const map = options.continuityMap ?? null
+  const maxSnap = resolveMaxSnap(planUnits, options.maxSnapMm)
+  const diagnostics: string[] = []
+
+  const clustered = clusterWetCores(fixtures, { units: planUnits })
+  if (clustered.skippedFixtureExpressIds.length > 0) {
+    diagnostics.push(
+      `${clustered.skippedFixtureExpressIds.length} fixture(s) without a plan position were not clustered: ` +
+        clustered.skippedFixtureExpressIds.join(', '),
+    )
+  }
+
+  const positions: WetCoreSuggestedPosition[] = clustered.cores.map((core) => {
+    const placement = placeWetCoreStack(core, {
+      units: planUnits,
+      continuityMap: map,
+      maxSnap,
+      floorPlanBounds,
+    })
+    return { x: placement.position.x, y: core.centroidY, z: placement.position.z, anchor: 'wet-core', core, placement }
+  })
+
+  const fixtureOffsetToleranceMm = ruleProfile?.fixtureOffsetToleranceMm ?? 450
+  const positionedKitchens = kitchens.filter(
+    (kitchen): kitchen is PositionedKitchen => kitchen.position !== null,
+  )
+  const kitchenPositions = buildKitchenRiserPositions(positionedKitchens, floorPlanBounds, fixtureOffsetToleranceMm)
+  kitchenPositions.forEach((position, index) => {
+    const kitchen = positionedKitchens[index]
+    let snap: RiserContinuitySnap | null = null
+    let finalPosition = position
+    if (map !== null && map.units === planUnits) {
+      const outcome = snapPointToContinuity(map, kitchen.storeyId, { x: position.x, z: position.z }, maxSnap)
+      if (outcome.kind === 'miss') {
+        snap = { status: 'snapMiss', reason: outcome.reason }
+      } else {
+        snap =
+          outcome.kind === 'shaft'
+            ? { status: 'snapped', target: 'shaft', shaftId: outcome.shaftId, distance: outcome.distance, original: { ...position } }
+            : { status: 'snapped', target: 'free-cell', cell: outcome.cell, distance: outcome.distance, original: { ...position } }
+        finalPosition = { x: outcome.position.x, y: position.y, z: outcome.position.z }
+      }
+    }
+    positions.push({
+      ...finalPosition,
+      anchor: 'kitchen',
+      kitchenExpressId: kitchen.expressId,
+      storeyId: kitchen.storeyId,
+      snap,
+    })
+  })
+
+  return { positions, cores: clustered.cores, diagnostics }
+}
+
+function resolveMaxSnap(planUnits: WetCorePlanUnits, maxSnapMm: number | undefined): number {
+  if (maxSnapMm !== undefined) return planUnits === 'mm' ? maxSnapMm : maxSnapMm / 1000
+  return planUnits === 'mm' ? MAX_SNAP_MM : MAX_SNAP_M
 }
 
 function buildKitchenRiserPositions(

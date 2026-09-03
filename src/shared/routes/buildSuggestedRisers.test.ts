@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest'
 import type { DemoConfig } from '@/shared/demoConfig'
 import type { ContinuityMap } from '@/domain/continuityMap'
 import { toStackExtentFixtures } from '@/domain/riserStackExtent'
-import type { Fixture, Riser, Storey } from '@/domain/types'
+import type { Fixture, KitchenArea, Riser, Storey } from '@/domain/types'
+import type { FloorMeshes } from '@/shared/ifc/extractFloorMeshes'
 import {
   buildSuggestedRisers,
   buildSuggestedRisersWithSnap,
+  buildWetCoreSuggestedRisers,
   type StackExtentOptions,
 } from './buildSuggestedRisers'
 
@@ -327,6 +329,146 @@ describe('buildSuggestedRisersWithSnap (V4 stack extent)', () => {
     expect(first.stackExtents).toEqual(second.stackExtents)
     expect(first.risers.map((riser) => [riser.storeyId, riser.position])).toEqual(
       second.risers.map((riser) => [riser.storeyId, riser.position]),
+    )
+  })
+})
+
+describe('buildWetCoreSuggestedRisers (V3 wet cores)', () => {
+  const metric: Storey[] = [
+    { id: 1, name: 'GF', elevation: 0, modelId: 'model-1' },
+    { id: 2, name: '1', elevation: 3, modelId: 'model-1' },
+    { id: 3, name: '2', elevation: 6, modelId: 'model-1' },
+  ]
+  const fixtureAt = (expressId: number, kind: Fixture['kind'], x: number, z: number): Fixture => ({
+    expressId,
+    name: `F-${expressId}`,
+    kind,
+    storeyId: 2,
+    position: { x, y: 3, z },
+  })
+  // Two wet cores on storey 1: WC + basin (1 m apart) and a lone WC 10 m away;
+  // a fixture on another storey and one without a position are ignored/reported.
+  const fixtures: Fixture[] = [
+    fixtureAt(1, 'TOILETPAN', 10, 5),
+    fixtureAt(2, 'WASHHANDBASIN', 11, 5),
+    fixtureAt(3, 'TOILETPAN', 20, 5),
+    { ...fixtureAt(4, 'TOILETPAN', 10, 5), storeyId: 3 },
+    { ...fixtureAt(5, 'SINK', 0, 0), position: null },
+  ]
+  const kitchen: KitchenArea = {
+    expressId: 50,
+    name: 'Kitchen',
+    storeyId: 2,
+    position: { x: 30, y: 3, z: 10 },
+  }
+  const floorMeshes = {
+    boundingBox: { min: { x: 0, y: 0, z: 0 }, max: { x: 40, y: 0, z: 20 } },
+  } as unknown as FloorMeshes
+
+  it('places exactly one stack per wet core plus one per kitchen, spanning eligible storeys', () => {
+    const result = buildWetCoreSuggestedRisers({
+      storeys: metric,
+      sourceStoreyId: 2,
+      fixtures,
+      kitchens: [kitchen],
+      floorMeshes,
+      nextLabel: makeLabeler(),
+      wetCore: { planUnits: 'm' },
+    })
+
+    expect(result.cores.map((core) => core.id)).toEqual(['wet-core:2:1+2', 'wet-core:2:3'])
+    expect(result.stacks.map((stack) => stack.anchor)).toEqual(['wet-core', 'wet-core', 'kitchen'])
+    expect(result.stacks.map((stack) => stack.stackLabel)).toEqual(['R1', 'R2', 'R3'])
+    expect(new Set(result.risers.map((riser) => riser.stackId)).size).toBe(3)
+    expect(result.risers.every((riser) => riser.source === 'detected')).toBe(true)
+    // Every stack spans the eligible storeys (GF, 1; storey 2 is the top → penthouse-excluded).
+    expect(result.risers.filter((riser) => riser.stackLabel === 'R1').map((riser) => riser.storeyId)).toEqual([1, 2])
+    expect(result.diagnostics).toEqual(['1 fixture(s) without a plan position were not clustered: 5'])
+    // Stack ids are wired for override keying.
+    expect(result.stacks.every((stack) => stack.stackId.length > 0)).toBe(true)
+    expect(result.stacks[0].stackId).toBe(result.risers[0].stackId)
+  })
+
+  it('without a continuity map uses the wall-side edge and reports no snap outcome for it', () => {
+    const result = buildWetCoreSuggestedRisers({
+      storeys: metric,
+      sourceStoreyId: 2,
+      fixtures,
+      kitchens: [],
+      floorMeshes,
+      nextLabel: makeLabeler(),
+      wetCore: { planUnits: 'm' },
+    })
+    const first = result.stacks[0]
+    expect(first.anchor).toBe('wet-core')
+    if (first.anchor !== 'wet-core') return
+    // Plan centre is (20, 10); the core (x 10–11, z 5) is farthest from it on its minX edge.
+    expect(first.placement.rule).toBe('wall-side-edge')
+    expect(first.position).toEqual({ x: 9.85, y: 3, z: 5 })
+    expect(result.snapOutcomes).toEqual([])
+  })
+
+  it('snaps a core to a shaft candidate and the kitchen corner to the map; extents are evaluated at the final XY', () => {
+    const map: ContinuityMap = {
+      units: 'm',
+      cellSize: 0.25,
+      grids: [],
+      shaftCandidates: [
+        {
+          id: 'shaft-space:2:space:1',
+          source: 'shaft-named-space',
+          center: { x: 11.5, z: 5.5 },
+          bounds: { minX: 11.3, maxX: 11.7, minZ: 5.3, maxZ: 5.7 },
+          polygon: null,
+          storeyIds: [2],
+        },
+      ],
+      diagnostics: [],
+    }
+    const result = buildWetCoreSuggestedRisers({
+      storeys: metric,
+      sourceStoreyId: 2,
+      fixtures,
+      kitchens: [kitchen],
+      floorMeshes,
+      nextLabel: makeLabeler(),
+      wetCore: { planUnits: 'm', continuityMap: map },
+      stackExtent: { buildingFixtures: toStackExtentFixtures(fixtures, [kitchen]), planUnits: 'm', continuityMap: map },
+    })
+
+    const [first, second, third] = result.stacks
+    expect(first.anchor === 'wet-core' && first.placement.rule).toBe('shaft')
+    expect(first.position).toEqual({ x: 11.5, y: 3, z: 5.5 })
+    // Second core: map has no grid for the storey and no candidate in range → wall-side edge.
+    expect(second.anchor === 'wet-core' && second.placement.rule).toBe('wall-side-edge')
+    // Kitchen: corner stays, map miss is explicit.
+    expect(third.anchor).toBe('kitchen')
+    expect(third.anchor === 'kitchen' && third.snap?.status).toBe('snapMiss')
+    expect(result.snapOutcomes.map((outcome) => [outcome.stackLabel, outcome.snap.status])).toEqual([
+      ['R1', 'snapped'],
+      ['R3', 'snapMiss'],
+    ])
+    expect(result.stackExtents).toHaveLength(3)
+    expect(result.stackExtents[0].extent.storeyIds).toContain(2)
+    expect(result.risers.every((riser) => !('snap' in riser) && !('placement' in riser))).toBe(true)
+  })
+
+  it('is deterministic regardless of fixture input order', () => {
+    const run = (input: Fixture[]) =>
+      buildWetCoreSuggestedRisers({
+        storeys: metric,
+        sourceStoreyId: 2,
+        fixtures: input,
+        kitchens: [],
+        floorMeshes,
+        nextLabel: makeLabeler(),
+        wetCore: { planUnits: 'm' },
+      })
+    const first = run(fixtures)
+    const second = run([...fixtures].reverse())
+    expect(second.cores.map((core) => core.id)).toEqual(first.cores.map((core) => core.id))
+    expect(second.risers.map((riser) => [riser.stackLabel, riser.storeyId, riser.position])).toEqual(
+      first.risers.map((riser) => [riser.stackLabel, riser.storeyId, riser.position]),
     )
   })
 })
