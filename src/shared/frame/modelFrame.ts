@@ -197,12 +197,76 @@ export type ModelOriginDetectedBy =
   | 'site-placement'
   | 'building-placement'
   | 'storey-geometry'
+  | 'context'
   | 'none'
+
+/**
+ * Documented ABSOLUTE frame of a model whose geometry sits near the origin
+ * because the survey offset lives in the representation context's
+ * WorldCoordinateSystem (Revit "Project Base Point" exports) rather than in the
+ * site/building placement chain.
+ *
+ * web-ifc does not apply this WCS, so nothing is translated: the viewer renders
+ * the geometry where it is, domain coordinates stay in project-base-point
+ * space, and the export writes them back unchanged. This record exists so
+ * exports and debug output can state where that space sits in the world.
+ */
+export interface ModelSourceFrame {
+  detectedBy: 'context'
+  /** WCS location in the model's declared length unit (IFC axes, Z-up). */
+  offsetSourceUnits: { x: number; y: number; z: number }
+  /** Same offset in metres; null when the model declares no usable length unit. */
+  offsetM: { x: number; y: number; z: number } | null
+  lengthUnit: LengthUnit | null
+  /** TrueNorth angle from project +Y, degrees, positive toward +X; null when absent. */
+  trueNorthDeg: number | null
+  /** WCS RefDirection rotation about +Z, degrees counter-clockwise from +X; 0 when absent. */
+  wcsRotationDeg: number
+}
 
 export interface ModelOriginDecision {
   /** Origin in viewer metres (Y-up); (0,0,0) when the model is near the origin. */
   origin: Point3D
   detectedBy: ModelOriginDetectedBy
+  /**
+   * Present only when `detectedBy === 'context'`. Absent (not null) otherwise
+   * so decisions for placement/centroid/near-origin models stay byte-identical.
+   */
+  sourceFrame?: ModelSourceFrame
+}
+
+/** Structural input for {@link resolveContextSourceFrame}; matches `RepresentationContextFrame`. */
+export interface ContextFrameInput {
+  wcsLocationSource: { x: number; y: number; z: number }
+  wcsLocationM: { x: number; y: number; z: number } | null
+  lengthUnit: LengthUnit | null
+  trueNorthDeg: number | null
+  wcsRotationDeg: number
+}
+
+/**
+ * Turns a representation-context reading into a source frame when — and only
+ * when — the WCS is far from the origin (>1 km in plan). The far verdict uses
+ * the declared unit; when the unit is undeclared it falls back to the same
+ * magnitude convention as the placement probe (`detectPlanUnits`: raw values
+ * above 1000 are treated as mm-scale, else metres). Returns null for an
+ * identity/near WCS.
+ */
+export function resolveContextSourceFrame(context: ContextFrameInput): ModelSourceFrame | null {
+  const { wcsLocationSource, wcsLocationM, lengthUnit } = context
+  const verdictUnit: LengthUnit =
+    lengthUnit ??
+    (Math.max(Math.abs(wcsLocationSource.x), Math.abs(wcsLocationSource.y)) > 1000 ? 'mm' : 'm')
+  if (!isFarFromOrigin(wcsLocationSource.x, wcsLocationSource.y, verdictUnit)) return null
+
+  return {
+    detectedBy: 'context',
+    offsetSourceUnits: { ...wcsLocationSource },
+    offsetM: wcsLocationM === null ? null : { ...wcsLocationM },
+    lengthUnit,
+    trueNorthDeg: context.trueNorthDeg,
+    wcsRotationDeg: context.wcsRotationDeg,
+  }
 }
 
 export interface ModelOriginCandidates {

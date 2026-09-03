@@ -10,6 +10,7 @@ import {
   isFarFromOrigin,
   isIdentityModelFrame,
   isOriginArtifactVertex,
+  resolveContextSourceFrame,
   shouldDropOriginArtifacts,
   toLocalPoint,
   toSourcePoint,
@@ -212,5 +213,64 @@ describe('chooseModelOrigin', () => {
       }),
     ).toEqual({ origin: { x: 0, y: 0, z: 0 }, detectedBy: 'none' })
     expect(chooseModelOrigin({})).toEqual({ origin: { x: 0, y: 0, z: 0 }, detectedBy: 'none' })
+  })
+})
+
+describe('resolveContextSourceFrame', () => {
+  const farCm = {
+    wcsLocationSource: { x: 19_671_472.4, y: 74_328_886.6, z: 1250 },
+    wcsLocationM: { x: 196_714.724, y: 743_288.866, z: 12.5 },
+    lengthUnit: 'cm' as const,
+    trueNorthDeg: 6.53,
+    wcsRotationDeg: 0,
+  }
+
+  it('returns a context source frame for a far WCS, copying offsets and rotation', () => {
+    expect(resolveContextSourceFrame(farCm)).toEqual({
+      detectedBy: 'context',
+      offsetSourceUnits: { x: 19_671_472.4, y: 74_328_886.6, z: 1250 },
+      offsetM: { x: 196_714.724, y: 743_288.866, z: 12.5 },
+      lengthUnit: 'cm',
+      trueNorthDeg: 6.53,
+      wcsRotationDeg: 0,
+    })
+  })
+
+  it('returns null for an identity or near-origin WCS (Duplex, ADAM, 096)', () => {
+    expect(
+      resolveContextSourceFrame({ ...farCm, wcsLocationSource: { x: 0, y: 0, z: 0 }, wcsLocationM: { x: 0, y: 0, z: 0 } }),
+    ).toBeNull()
+    // 900 m in cm units is below the 1 km threshold.
+    expect(
+      resolveContextSourceFrame({
+        ...farCm,
+        wcsLocationSource: { x: 90_000, y: 0, z: 0 },
+        wcsLocationM: { x: 900, y: 0, z: 0 },
+      }),
+    ).toBeNull()
+  })
+
+  it('uses the declared unit for the far verdict', () => {
+    // 150,000 raw units: far in metres and centimetres, near in millimetres.
+    const base = { ...farCm, wcsLocationSource: { x: 150_000, y: 0, z: 0 } }
+    expect(resolveContextSourceFrame({ ...base, lengthUnit: 'm', wcsLocationM: { x: 150_000, y: 0, z: 0 } })).not.toBeNull()
+    expect(resolveContextSourceFrame({ ...base, lengthUnit: 'cm', wcsLocationM: { x: 1_500, y: 0, z: 0 } })).not.toBeNull()
+    expect(resolveContextSourceFrame({ ...base, lengthUnit: 'mm', wcsLocationM: { x: 150, y: 0, z: 0 } })).toBeNull()
+  })
+
+  it('falls back to the magnitude convention when the unit is undeclared and keeps offsetM null', () => {
+    // Raw > 1000 is read as mm-scale: 150,000 is only 150 m -> near.
+    expect(
+      resolveContextSourceFrame({
+        ...farCm,
+        lengthUnit: null,
+        wcsLocationM: null,
+        wcsLocationSource: { x: 150_000, y: 0, z: 0 },
+      }),
+    ).toBeNull()
+    const frame = resolveContextSourceFrame({ ...farCm, lengthUnit: null, wcsLocationM: null })
+    expect(frame).not.toBeNull()
+    expect(frame!.offsetM).toBeNull()
+    expect(frame!.lengthUnit).toBeNull()
   })
 })
