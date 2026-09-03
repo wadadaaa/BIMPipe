@@ -543,7 +543,7 @@ function RoutingModelSection({
           )}
           {summary.overlength.length > 0 && (
             <li>
-              <strong>Beyond branch limit:</strong> {summary.overlength.length} fixture(s) kept on a moved core stack farther than 4 m.
+              <strong>Beyond branch limit:</strong> {summary.overlength.length} fixture(s) kept on their wet core&apos;s stack farther than 4 m (wide core or moved stack).
             </li>
           )}
         </ul>

@@ -106,7 +106,7 @@ export function RoutesPanel({ floor, assignments, stackLabelByRiserId, fixtureNa
               <span dir="auto">{fixtureNameByExpressId.get(assignment.fixtureExpressId) ?? `#${assignment.fixtureExpressId}`}</span>{' '}
               routes to its core stack {stackLabelByRiserId.get(assignment.riserId) ?? assignment.riserId} at{' '}
               {formatMetres(assignment.units === 'mm' ? assignment.planDistance / 1000 : assignment.planDistance)}, beyond the 4 m
-              branch limit (kept because the moved stack wins).
+              branch limit (kept: the fixture belongs to that stack&apos;s wet core, and a moved stack always wins).
             </li>
           ))}
         </ul>
