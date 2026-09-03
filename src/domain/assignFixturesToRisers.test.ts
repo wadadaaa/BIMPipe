@@ -167,4 +167,84 @@ describe('assignFixturesToRisers', () => {
     expect(result[0]).toMatchObject({ unassigned: false, riserId: 'a', planDistance: 500 })
     expect(result[1]).toMatchObject({ unassigned: false, riserId: 'b', planDistance: 500 })
   })
+
+  it('marks plain nearest assignments explicitly', () => {
+    const result = assignFixturesToRisers([fixture(1, 5000, 5000)], [riser('r1', 5000, 5500)])
+
+    expect(result[0]).toMatchObject({ assignedBy: 'nearest', exceedsMaxBranchLength: false })
+  })
+})
+
+describe('assignFixturesToRisers with wet-core membership (V5)', () => {
+  const coreMembership = {
+    fixtureCoreIds: new Map<number, string>([
+      [1, 'core-A'],
+      [2, 'core-A'],
+    ]),
+    stackCoreIds: new Map<string, string>([['stack-core-a', 'core-A']]),
+  }
+
+  it('routes a core member to its core stack even when another riser is nearer', () => {
+    const result = assignFixturesToRisers(
+      [fixture(1, 5000, 5000)],
+      [riser('core-a', 5000, 7000), riser('manual', 5000, 5200)],
+      { coreMembership },
+    )
+
+    expect(result[0]).toMatchObject({
+      unassigned: false,
+      assignedBy: 'wet-core',
+      riserId: 'core-a',
+      stackId: 'stack-core-a',
+      planDistance: 2000,
+      exceedsMaxBranchLength: false,
+    })
+  })
+
+  it('follows the preserved (moved) stack that superseded the core stack — overrides win', () => {
+    // The moved stack keeps the stack id → core id mapping in the reducer; the
+    // fixture follows it even beyond the branch limit, but is flagged.
+    const result = assignFixturesToRisers(
+      [fixture(1, 5000, 5000)],
+      [riser('core-a', 5000, 5000 + MAX_BRANCH_LENGTH_MM + 1000), riser('other', 5000, 5100)],
+      { coreMembership },
+    )
+
+    expect(result[0]).toMatchObject({
+      assignedBy: 'wet-core',
+      riserId: 'core-a',
+      exceedsMaxBranchLength: true,
+      planDistance: MAX_BRANCH_LENGTH_MM + 1000,
+    })
+  })
+
+  it('falls back to the nearest in-range riser for fixtures without a core (manual stacks, other storeys)', () => {
+    const result = assignFixturesToRisers(
+      [fixture(9, 5000, 5000)],
+      [riser('core-a', 5000, 7000), riser('manual', 5000, 5200)],
+      { coreMembership },
+    )
+
+    expect(result[0]).toMatchObject({ assignedBy: 'nearest', riserId: 'manual', planDistance: 200 })
+  })
+
+  it('falls back to nearest when the core stack has no riser on the fixture storey', () => {
+    const result = assignFixturesToRisers(
+      [fixture(1, 5000, 5000, 'BATH', 3)],
+      [riser('core-a', 5000, 5000, 2), riser('near-3', 5000, 5300, 3)],
+      { coreMembership },
+    )
+
+    expect(result[0]).toMatchObject({ assignedBy: 'nearest', riserId: 'near-3', planDistance: 300 })
+  })
+
+  it('still reports unassigned fixtures when neither a core stack nor an in-range riser exists', () => {
+    const result = assignFixturesToRisers(
+      [fixture(9, 5000, 5000)],
+      [riser('far', 5000, 5000 + MAX_BRANCH_LENGTH_MM + 1)],
+      { coreMembership },
+    )
+
+    expect(result[0]).toMatchObject({ unassigned: true, reason: 'no-riser-within-branch-length' })
+  })
 })
