@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { Fixture } from '@/domain/types'
+import type { FixtureRiserAssignment } from '@/domain/assignFixturesToRisers'
 import './FixturesPanel.css'
 
 interface FixturesPanelProps {
@@ -8,6 +9,47 @@ interface FixturesPanelProps {
   canPlaceRisers?: boolean
   hasRisers?: boolean
   onPlaceRisers?: () => void
+  /** Fixture-to-riser assignments for the active floor; empty until risers exist. */
+  assignments?: FixtureRiserAssignment[]
+}
+
+type FixtureGroupKey = Fixture['kind'] | 'KITCHEN_SINK'
+
+const FIXTURE_GROUP_ORDER: FixtureGroupKey[] = [
+  'TOILETPAN',
+  'KITCHEN_SINK',
+  'SINK',
+  'WASHHANDBASIN',
+  'BATH',
+  'URINAL',
+  'BIDET',
+  'CISTERN',
+  'OTHER',
+]
+
+const FIXTURE_GROUP_LABELS: Record<FixtureGroupKey, string> = {
+  TOILETPAN: 'Toilets',
+  KITCHEN_SINK: 'Kitchen sinks',
+  SINK: 'Sinks',
+  WASHHANDBASIN: 'Basins',
+  BATH: 'Baths',
+  URINAL: 'Urinals',
+  BIDET: 'Bidets',
+  CISTERN: 'Cisterns',
+  OTHER: 'Other fixtures',
+}
+
+const UNASSIGNED_REASON_TITLES: Record<
+  Extract<FixtureRiserAssignment, { unassigned: true }>['reason'],
+  string
+> = {
+  'no-plan-position': 'No plan position detected',
+  'no-riser-on-storey': 'No riser on this floor',
+  'no-riser-within-branch-length': 'No riser within the max branch length (4 m)',
+}
+
+function getFixtureGroupKey(fixture: Fixture): FixtureGroupKey {
+  return fixture.kind === 'SINK' && fixture.isKitchenSink ? 'KITCHEN_SINK' : fixture.kind
 }
 
 export function FixturesPanel({
@@ -16,6 +58,7 @@ export function FixturesPanel({
   canPlaceRisers = false,
   hasRisers = false,
   onPlaceRisers,
+  assignments = [],
 }: FixturesPanelProps) {
   const [isFiring, setIsFiring] = useState(false)
 
@@ -31,7 +74,7 @@ export function FixturesPanel({
       <div className="fixtures-panel">
         <div className="fixtures-panel__loading">
           <span className="fixtures-panel__loading-dot" />
-          Finding toilets...
+          Finding fixtures...
         </div>
       </div>
     )
@@ -41,12 +84,27 @@ export function FixturesPanel({
     return (
       <div className="fixtures-panel__empty">
         <span className="fixtures-panel__empty-icon">WC</span>
-        <p>No toilets were detected on this floor.</p>
+        <p>No sanitary fixtures were detected on this floor.</p>
       </div>
     )
   }
 
   const positionedCount = fixtures.filter((fixture) => fixture.position !== null).length
+  const unassignedByExpressId = new Map(
+    assignments
+      .filter((assignment): assignment is Extract<FixtureRiserAssignment, { unassigned: true }> =>
+        assignment.unassigned,
+      )
+      .map((assignment) => [assignment.fixtureExpressId, assignment]),
+  )
+  const unassignedCount = fixtures.filter((fixture) =>
+    unassignedByExpressId.has(fixture.expressId),
+  ).length
+  const fixtureGroups = FIXTURE_GROUP_ORDER.map((key) => ({
+    key,
+    label: FIXTURE_GROUP_LABELS[key],
+    items: fixtures.filter((fixture) => getFixtureGroupKey(fixture) === key),
+  })).filter((group) => group.items.length > 0)
 
   return (
     <div className="fixtures-panel">
@@ -59,6 +117,12 @@ export function FixturesPanel({
         </div>
         <strong className="fixtures-panel__summary-count">{fixtures.length}</strong>
       </div>
+
+      {unassignedCount > 0 && (
+        <p className="fixtures-panel__unassigned-note" role="status">
+          {unassignedCount} fixture{unassignedCount === 1 ? '' : 's'} without a riser in range
+        </p>
+      )}
 
       {onPlaceRisers && (
         <button
@@ -118,33 +182,47 @@ export function FixturesPanel({
         </button>
       )}
 
-      <div className="fixtures-panel__group">
-        <div className="fixtures-panel__group-header">
-          <span className="fixtures-panel__group-label">Toilets</span>
-          <span className="fixtures-panel__group-count">{fixtures.length}</span>
+      {fixtureGroups.map((group) => (
+        <div className="fixtures-panel__group" key={group.key}>
+          <div className="fixtures-panel__group-header">
+            <span className="fixtures-panel__group-label">{group.label}</span>
+            <span className="fixtures-panel__group-count">{group.items.length}</span>
+          </div>
+          <ul className="fixtures-panel__list">
+            {group.items.map((fixture, index) => {
+              const unassignedAssignment = unassignedByExpressId.get(fixture.expressId)
+
+              return (
+                <li
+                  key={fixture.expressId}
+                  className="fixtures-panel__item-row fixtures-panel__item-row--enter"
+                  style={{ animationDelay: `${Math.min(index, 12) * 35}ms` }}
+                >
+                  <div className="fixtures-panel__item fixtures-panel__item--static">
+                    <span className="fixtures-panel__item-copy">
+                      <span className="fixtures-panel__item-name" dir="auto">
+                        {fixture.name}
+                      </span>
+                      <span className="fixtures-panel__item-meta">
+                        {fixture.position === null ? 'Detected without plan point' : 'Detected from IFC'}
+                      </span>
+                    </span>
+                    {unassignedAssignment && (
+                      <span
+                        className="fixtures-panel__item-badge"
+                        title={UNASSIGNED_REASON_TITLES[unassignedAssignment.reason]}
+                      >
+                        Unassigned
+                      </span>
+                    )}
+                    <span className="fixtures-panel__item-id">#{fixture.expressId}</span>
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
         </div>
-        <ul className="fixtures-panel__list">
-          {fixtures.map((fixture, index) => (
-            <li
-              key={fixture.expressId}
-              className="fixtures-panel__item-row fixtures-panel__item-row--enter"
-              style={{ animationDelay: `${Math.min(index, 12) * 35}ms` }}
-            >
-              <div className="fixtures-panel__item fixtures-panel__item--static">
-                <span className="fixtures-panel__item-copy">
-                  <span className="fixtures-panel__item-name" dir="auto">
-                    {fixture.name}
-                  </span>
-                  <span className="fixtures-panel__item-meta">
-                    {fixture.position === null ? 'Detected without plan point' : 'Detected from IFC'}
-                  </span>
-                </span>
-                <span className="fixtures-panel__item-id">#{fixture.expressId}</span>
-              </div>
-            </li>
-          ))}
-        </ul>
-      </div>
+      ))}
     </div>
   )
 }

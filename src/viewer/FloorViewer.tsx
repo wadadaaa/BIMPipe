@@ -4,7 +4,10 @@ import { MapControls } from 'three/examples/jsm/controls/MapControls.js'
 import type { ThemeMode } from '@/app/App'
 import type { SanitaryFixtureRoute } from '@/shared/routes/buildSanitaryRoutes'
 import type { FloorMeshes } from '@/shared/ifc/extractFloorMeshes'
+import type { RouteSegment } from '@/domain/branchRouting'
 import type { Fixture, FixtureKind, KitchenArea, Riser, RiserId } from '@/domain/types'
+import type { LengthUnit } from '@/shared/lengthUnits'
+import { formatStoreyElevationChip } from './formatStoreyElevation'
 import { ViewTransition } from '@/shared/reactViewTransition'
 import {
   buildSanitaryRouteFactCards,
@@ -12,6 +15,15 @@ import {
   getSanitaryPresentationState,
   type SanitaryPresentationMode,
 } from './sanitaryPresentation'
+import { getBranchRoutePresentation } from './branchRoutePresentation'
+import type {
+  EngineerOverlaySegment,
+  EngineerOverlayStackMarker,
+} from './engineerNetworkPresentation'
+import type {
+  ContinuityOverlayRect,
+  ContinuityShaftMarker,
+} from './continuityOverlayPresentation'
 import './FloorViewer.css'
 
 const HOVER_ACCENT = new THREE.Color(0xffb45f)
@@ -19,6 +31,14 @@ const SELECTED_ACCENT = new THREE.Color(0xff6a7f)
 
 interface FloorViewerProps {
   floorMeshes: FloorMeshes | null
+  /**
+   * Architecture walls/columns of the aligned linked-model storey (W4),
+   * rendered as a faint non-interactive underlay beneath the host plan. Must
+   * be extracted in the SAME local frame as `floorMeshes`.
+   */
+  underlayMeshes?: FloorMeshes | null
+  /** File the underlay came from, shown as a viewer chip. */
+  underlaySourceFileName?: string | null
   isLoading: boolean
   error: string | null
   theme: ThemeMode
@@ -26,6 +46,12 @@ interface FloorViewerProps {
   onObjectSelect: (expressId: number | null) => void
   modelFileName?: string | null
   selectedStoreyElevation?: number | null
+  /**
+   * Declared IFC length unit of raw attribute values such as the storey
+   * elevation. null = the model does not declare a supported unit; the
+   * elevation chip then shows the raw number with no unit suffix.
+   */
+  modelLengthUnit?: LengthUnit | null
   storeyCount?: number
   hoveredExpressId?: number | null
   selectedExpressId?: number | null
@@ -38,13 +64,52 @@ interface FloorViewerProps {
   onFixtureAdd?: (pos: { x: number; y: number; z: number }) => void
   onRiserAdd?: (pos: { x: number; y: number; z: number }) => void
   onRiserMove?: (id: RiserId, pos: { x: number; y: number; z: number }) => void
+  /**
+   * Fired once per drag, on pointer-up, when the riser actually changed plan
+   * position. `from`/`to` are in the viewer's local frame, like onRiserMove.
+   */
+  onRiserMoveCommit?: (
+    id: RiserId,
+    from: { x: number; y: number; z: number },
+    to: { x: number; y: number; z: number },
+  ) => void
   onSwitch3D?: () => void
   sanitaryRoutes?: SanitaryFixtureRoute[]
   demoFlowEnabled?: boolean
+  /** Branch route segments computed for the currently selected floor (T3). */
+  branchRouteSegments?: RouteSegment[]
+  branchRoutesVisible?: boolean
+  onToggleBranchRoutes?: () => void
+  /**
+   * Engineer network overlay (W7), already storey-filtered and converted to
+   * the local viewer frame by `engineerNetworkPresentation`. Empty when the
+   * layer is toggled off; `engineerOverlayAvailable` keeps the toggle shown.
+   */
+  engineerSegments?: EngineerOverlaySegment[]
+  engineerStackMarkers?: EngineerOverlayStackMarker[]
+  engineerOverlayAvailable?: boolean
+  engineerOverlayVisible?: boolean
+  onToggleEngineerOverlay?: () => void
+  /** Floor segments without a verifiable frame, excluded from drawing. */
+  engineerExcludedSegmentCount?: number
+  /**
+   * Continuity-map debug overlay (W5), already storey-filtered and converted
+   * to the local viewer frame by `continuityOverlayPresentation`. Blocked
+   * cells render as merged translucent rects, shaft candidates as outlined
+   * fills plus positioned markers. Empty when the layer is toggled off.
+   */
+  continuityBlockedRects?: ContinuityOverlayRect[]
+  continuityShaftMarkers?: ContinuityShaftMarker[]
+  continuityBlockedCellCount?: number
+  continuityOverlayAvailable?: boolean
+  continuityOverlayVisible?: boolean
+  onToggleContinuityOverlay?: () => void
 }
 
 export function FloorViewer({
   floorMeshes,
+  underlayMeshes = null,
+  underlaySourceFileName = null,
   isLoading,
   error,
   theme,
@@ -52,6 +117,7 @@ export function FloorViewer({
   onObjectSelect,
   modelFileName = null,
   selectedStoreyElevation = null,
+  modelLengthUnit = null,
   storeyCount = 0,
   hoveredExpressId = null,
   selectedExpressId = null,
@@ -64,9 +130,25 @@ export function FloorViewer({
   onFixtureAdd = () => {},
   onRiserAdd = () => {},
   onRiserMove = () => {},
+  onRiserMoveCommit = () => {},
   onSwitch3D,
   sanitaryRoutes = [],
   demoFlowEnabled = false,
+  branchRouteSegments = [],
+  branchRoutesVisible = true,
+  onToggleBranchRoutes,
+  engineerSegments = [],
+  engineerStackMarkers = [],
+  engineerOverlayAvailable = false,
+  engineerOverlayVisible = true,
+  onToggleEngineerOverlay,
+  engineerExcludedSegmentCount = 0,
+  continuityBlockedRects = [],
+  continuityShaftMarkers = [],
+  continuityBlockedCellCount = 0,
+  continuityOverlayAvailable = false,
+  continuityOverlayVisible = true,
+  onToggleContinuityOverlay,
 }: FloorViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
@@ -80,9 +162,15 @@ export function FloorViewer({
   const selectedMeshRef = useRef<THREE.Mesh | null>(null)
   const boundsRef = useRef<THREE.Box3 | null>(null)
   const floorGroupRef = useRef<THREE.Group | null>(null)
+  const underlayGroupRef = useRef<THREE.Group | null>(null)
+  const continuityGroupRef = useRef<THREE.Group | null>(null)
   const projectionVecRef = useRef(new THREE.Vector3())
   const routeLineRefsRef = useRef<Map<string, SVGLineElement>>(new Map())
   const routeLabelRefsRef = useRef<Map<string, SVGTextElement>>(new Map())
+  const branchRouteLineRefsRef = useRef<Map<string, SVGLineElement>>(new Map())
+  const engineerLineRefsRef = useRef<Map<string, SVGLineElement>>(new Map())
+  const engineerRingRefsRef = useRef<Map<string, HTMLDivElement>>(new Map())
+  const shaftMarkerRefsRef = useRef<Map<string, HTMLDivElement>>(new Map())
   const [routeProjectionStatus, setRouteProjectionStatus] = useState<{ failed: number; total: number }>({ failed: 0, total: 0 })
   const [sanitaryViewMode, setSanitaryViewMode] = useState<SanitaryPresentationMode>('after')
 
@@ -99,6 +187,8 @@ export function FloorViewer({
     riserId: RiserId
     startClickWorld: THREE.Vector3
     startPos: { x: number; y: number; z: number }
+    // Last position sent through onRiserMove; undefined until the pointer moves.
+    lastPos?: { x: number; y: number; z: number }
   } | null>(null)
   // Pointer-down position — used to distinguish a click from a pan gesture
   const clickStartRef = useRef<{ x: number; y: number } | null>(null)
@@ -156,6 +246,9 @@ export function FloorViewer({
       animateFixtureMarkers()
       animateRiserMarkers()
       animateRouteLines()
+      animateBranchRouteLines()
+      animateEngineerOverlay()
+      animateShaftMarkers()
     }
 
     const queueRender = () => {
@@ -195,6 +288,18 @@ export function FloorViewer({
         scene.remove(floorGroupRef.current)
         disposeSceneObject(floorGroupRef.current)
         floorGroupRef.current = null
+      }
+
+      if (underlayGroupRef.current) {
+        scene.remove(underlayGroupRef.current)
+        disposeSceneObject(underlayGroupRef.current)
+        underlayGroupRef.current = null
+      }
+
+      if (continuityGroupRef.current) {
+        scene.remove(continuityGroupRef.current)
+        disposeSceneObject(continuityGroupRef.current)
+        continuityGroupRef.current = null
       }
 
       scheduleRenderRef.current = () => {}
@@ -260,6 +365,61 @@ export function FloorViewer({
     scheduleRender()
   }, [floorMeshes, onObjectHover, onObjectSelect, theme])
 
+  // Architecture underlay: swapped independently of the host plan so the plan
+  // stays visible while the linked-model storey is still tessellating.
+  useEffect(() => {
+    const scene = sceneRef.current
+    if (!scene) return
+
+    if (underlayGroupRef.current) {
+      scene.remove(underlayGroupRef.current)
+      disposeSceneObject(underlayGroupRef.current)
+      underlayGroupRef.current = null
+    }
+
+    if (!underlayMeshes) {
+      scheduleRender()
+      return
+    }
+
+    const { group } = underlayMeshes
+    styleUnderlayGroup(group, theme)
+    scene.add(group)
+    underlayGroupRef.current = group
+    scheduleRender()
+  }, [underlayMeshes, theme])
+
+  // Continuity-map debug overlay (W5): merged blocked-cell rects + shaft fills
+  // as ONE non-interactive Three group (a per-cell DOM overlay would be ~70k
+  // nodes on a 096 storey). Depends on floorMeshes so the quads re-anchor to
+  // the current floor's plan elevation.
+  useEffect(() => {
+    const scene = sceneRef.current
+    if (!scene) return
+
+    if (continuityGroupRef.current) {
+      scene.remove(continuityGroupRef.current)
+      disposeSceneObject(continuityGroupRef.current)
+      continuityGroupRef.current = null
+    }
+
+    if (continuityBlockedRects.length === 0 && continuityShaftMarkers.length === 0) {
+      scheduleRender()
+      return
+    }
+
+    // Guard against non-finite floor bounds (real 096 storeys contain broken
+    // meshes with NaN vertices); with depth testing off, y only anchors the
+    // quads, so 0 is a safe fallback.
+    const rawPlanY = boundsRef.current ? (boundsRef.current.min.y + boundsRef.current.max.y) / 2 : 0
+    const planY = Number.isFinite(rawPlanY) ? rawPlanY : 0
+    const group = buildContinuityOverlayGroup(continuityBlockedRects, continuityShaftMarkers, planY)
+    scene.add(group)
+    continuityGroupRef.current = group
+    scheduleRender()
+    // floorMeshes re-anchors planY to the newly opened floor's elevation.
+  }, [continuityBlockedRects, continuityShaftMarkers, floorMeshes])
+
   useEffect(() => {
     const floorGroup = floorGroupRef.current
     if (!floorGroup) return
@@ -324,10 +484,15 @@ export function FloorViewer({
   const hasSanitaryPresentation = sanitaryPresentationState.hasPresentation
   const visibleSanitaryRoutes = sanitaryPresentationState.visibleRoutes
   const visibleRisers = sanitaryPresentationState.visibleRisers
+  const branchRoutePresentation = useMemo(
+    () => getBranchRoutePresentation({ segments: branchRouteSegments, visible: branchRoutesVisible }),
+    [branchRouteSegments, branchRoutesVisible],
+  )
+  const visibleBranchRouteSegments = branchRoutePresentation.visibleSegments
 
   useEffect(() => {
     scheduleRender()
-  }, [floorMeshes, plottedFixtures, plottedKitchens, risers, sanitaryRoutes, sanitaryViewMode])
+  }, [floorMeshes, plottedFixtures, plottedKitchens, risers, sanitaryRoutes, sanitaryViewMode, branchRoutePresentation, engineerSegments, engineerStackMarkers, continuityShaftMarkers])
 
   useEffect(() => {
     const frameId = requestAnimationFrame(() => {
@@ -373,17 +538,25 @@ export function FloorViewer({
     if (!drag || drag.riserId !== riser.id) return
     const currentWorld = eventToFloorWorld(e)
     if (!currentWorld) return
-    onRiserMove(drag.riserId, {
+    drag.lastPos = {
       x: drag.startPos.x + (currentWorld.x - drag.startClickWorld.x),
       y: drag.startPos.y + (currentWorld.y - drag.startClickWorld.y),
       z: drag.startPos.z + (currentWorld.z - drag.startClickWorld.z),
-    })
+    }
+    onRiserMove(drag.riserId, drag.lastPos)
   }
 
   function handleRiserPointerUp(e: React.PointerEvent<HTMLButtonElement>) {
-    if (riserDragRef.current) {
+    const drag = riserDragRef.current
+    if (drag) {
       e.currentTarget.releasePointerCapture(e.pointerId)
       riserDragRef.current = null
+      // Commit exactly once per drag, and only when the plan position changed
+      // (a plain click without movement is not an adjustment).
+      const { startPos, lastPos } = drag
+      if (lastPos && (lastPos.x !== startPos.x || lastPos.z !== startPos.z)) {
+        onRiserMoveCommit(drag.riserId, startPos, lastPos)
+      }
     }
   }
 
@@ -546,7 +719,7 @@ export function FloorViewer({
 
           {selectedStoreyElevation !== null && (
             <span className="floor-viewer__chip">
-              {Math.round(selectedStoreyElevation).toLocaleString()} mm
+              {formatStoreyElevationChip(selectedStoreyElevation, modelLengthUnit)}
             </span>
           )}
 
@@ -558,7 +731,7 @@ export function FloorViewer({
 
           {plottedFixtures.length > 0 && (
             <span className="floor-viewer__chip floor-viewer__chip--fixture">
-              {plottedFixtures.length} toilets
+              {plottedFixtures.length} fixtures
             </span>
           )}
 
@@ -580,8 +753,36 @@ export function FloorViewer({
             </span>
           )}
 
+          {visibleBranchRouteSegments.length > 0 && (
+            <span className="floor-viewer__chip floor-viewer__chip--branch-route">
+              {visibleBranchRouteSegments.length} branch {visibleBranchRouteSegments.length === 1 ? 'run' : 'runs'}
+            </span>
+          )}
+
+          {engineerSegments.length > 0 && (
+            <span className="floor-viewer__chip floor-viewer__chip--engineer">
+              {engineerSegments.length} engineer {engineerSegments.length === 1 ? 'pipe' : 'pipes'}
+              {engineerExcludedSegmentCount > 0
+                ? ` (+${engineerExcludedSegmentCount} without plottable geometry)`
+                : ''}
+            </span>
+          )}
+
+          {continuityBlockedCellCount > 0 && (
+            <span className="floor-viewer__chip floor-viewer__chip--continuity">
+              Continuity: {continuityBlockedCellCount.toLocaleString('en-US')} blocked cells,{' '}
+              {continuityShaftMarkers.length} shaft {continuityShaftMarkers.length === 1 ? 'candidate' : 'candidates'}
+            </span>
+          )}
+
           {storeyCount > 0 && (
             <span className="floor-viewer__chip">{storeyCount} storeys</span>
+          )}
+
+          {underlayMeshes && underlaySourceFileName && (
+            <span className="floor-viewer__chip" dir="auto">
+              Underlay: {underlaySourceFileName}
+            </span>
           )}
         </div>
       </div>
@@ -589,6 +790,43 @@ export function FloorViewer({
       {!showOverlay && (
         <>
           <svg className="floor-viewer__route-overlay" aria-hidden="true">
+            {engineerSegments.map((segment) => (
+              <line
+                key={segment.key}
+                ref={(el) => {
+                  if (el) engineerLineRefsRef.current.set(segment.key, el)
+                  else engineerLineRefsRef.current.delete(segment.key)
+                }}
+                className="floor-viewer__engineer-line"
+                data-engineer-from-x={String(segment.from.x)}
+                data-engineer-from-y={String(segment.from.y)}
+                data-engineer-from-z={String(segment.from.z)}
+                data-engineer-to-x={String(segment.to.x)}
+                data-engineer-to-y={String(segment.to.y)}
+                data-engineer-to-z={String(segment.to.z)}
+              />
+            ))}
+            {visibleBranchRouteSegments.map((segment) => (
+              <line
+                key={segment.key}
+                ref={(el) => {
+                  if (el) branchRouteLineRefsRef.current.set(segment.key, el)
+                  else branchRouteLineRefsRef.current.delete(segment.key)
+                }}
+                className={[
+                  'floor-viewer__branch-route-line',
+                  segment.kind === 'trunk'
+                    ? 'floor-viewer__branch-route-line--trunk'
+                    : 'floor-viewer__branch-route-line--fixture-branch',
+                ].join(' ')}
+                data-branch-from-x={String(segment.from.x)}
+                data-branch-from-y={String(segment.from.y)}
+                data-branch-from-z={String(segment.from.z)}
+                data-branch-to-x={String(segment.to.x)}
+                data-branch-to-y={String(segment.to.y)}
+                data-branch-to-z={String(segment.to.z)}
+              />
+            ))}
             {visibleSanitaryRoutes.flatMap((route) =>
               route.segments.map((segment, index) => {
                 const routeKey = `${route.fixtureExpressId}-${segment.routeRole}-${index}`
@@ -783,6 +1021,46 @@ export function FloorViewer({
             ))}
           </div>
 
+          {/* Engineer riser stacks (W7) — ring markers, plan positions valid model-wide */}
+          {engineerStackMarkers.length > 0 && (
+            <div className="floor-viewer__engineer-overlay" aria-hidden="true">
+              {engineerStackMarkers.map((marker) => (
+                <div
+                  key={marker.key}
+                  className="floor-viewer__engineer-ring"
+                  ref={(el) => {
+                    if (el) engineerRingRefsRef.current.set(marker.key, el)
+                    else engineerRingRefsRef.current.delete(marker.key)
+                  }}
+                  data-engineer-x={String(marker.x)}
+                  data-engineer-z={String(marker.z)}
+                  title={`Engineer riser — Ø${Math.round(marker.diameterMm)} mm, ${marker.storeyCount} ${marker.storeyCount === 1 ? 'storey' : 'storeys'}`}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Continuity shaft candidates (W5) — positioned markers over the teal fills */}
+          {continuityShaftMarkers.length > 0 && (
+            <div className="floor-viewer__continuity-overlay" aria-hidden="true">
+              {continuityShaftMarkers.map((marker) => (
+                <div
+                  key={marker.key}
+                  className="floor-viewer__shaft-marker"
+                  ref={(el) => {
+                    if (el) shaftMarkerRefsRef.current.set(marker.key, el)
+                    else shaftMarkerRefsRef.current.delete(marker.key)
+                  }}
+                  data-shaft-x={String(marker.x)}
+                  data-shaft-z={String(marker.z)}
+                  title={`${marker.label}${marker.name ? ` "${marker.name}"` : ''} — ${marker.storeyCount} ${marker.storeyCount === 1 ? 'storey' : 'storeys'}`}
+                >
+                  S
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Riser markers — positioned imperatively in the rAF loop via data-* attributes */}
           <div className="floor-viewer__riser-overlay" aria-hidden="true">
             {visibleRisers.map((riser, index) => (
@@ -833,7 +1111,7 @@ export function FloorViewer({
       {!showOverlay && (
         <div className="floor-viewer__legend" aria-hidden="true">
           <span className="floor-viewer__legend-item floor-viewer__legend-item--fixture">
-            Amber = toilets
+            Amber = fixtures
           </span>
           <span className="floor-viewer__legend-item floor-viewer__legend-item--kitchen">
             Mint = kitchens
@@ -847,6 +1125,21 @@ export function FloorViewer({
           <span className="floor-viewer__legend-item floor-viewer__legend-item--route-branch">
             Dashed amber = branch route
           </span>
+          {branchRoutePresentation.hasRoutes && (
+            <span className="floor-viewer__legend-item floor-viewer__legend-item--branch-route">
+              Violet = fixture branch runs
+            </span>
+          )}
+          {engineerOverlayAvailable && engineerOverlayVisible && (
+            <span className="floor-viewer__legend-item floor-viewer__legend-item--engineer">
+              Magenta = engineer network (rings = engineer risers)
+            </span>
+          )}
+          {continuityOverlayAvailable && continuityOverlayVisible && (
+            <span className="floor-viewer__legend-item floor-viewer__legend-item--continuity">
+              Orange = blocked cells, teal = shaft candidates
+            </span>
+          )}
           {isAddingFixture && (
             <span className="floor-viewer__legend-item floor-viewer__legend-item--fixture">
               Click to place {getFixtureKindLabel(pendingFixtureKind).toLowerCase()}
@@ -877,6 +1170,48 @@ export function FloorViewer({
               onClick={onSwitch3D}
             >
               3D
+            </button>
+          )}
+          {onToggleBranchRoutes && branchRoutePresentation.hasRoutes && (
+            <button
+              className="floor-viewer__btn"
+              title={
+                branchRoutesVisible
+                  ? 'Hide branch routes on this floor'
+                  : 'Show branch routes on this floor'
+              }
+              aria-pressed={branchRoutesVisible}
+              onClick={onToggleBranchRoutes}
+            >
+              Runs
+            </button>
+          )}
+          {onToggleEngineerOverlay && engineerOverlayAvailable && (
+            <button
+              className="floor-viewer__btn"
+              title={
+                engineerOverlayVisible
+                  ? 'Hide the engineer network on this floor'
+                  : 'Show the engineer network on this floor'
+              }
+              aria-pressed={engineerOverlayVisible}
+              onClick={onToggleEngineerOverlay}
+            >
+              Engineer
+            </button>
+          )}
+          {onToggleContinuityOverlay && continuityOverlayAvailable && (
+            <button
+              className="floor-viewer__btn"
+              title={
+                continuityOverlayVisible
+                  ? 'Hide the continuity map (blocked cells + shafts) on this floor'
+                  : 'Show the continuity map (blocked cells + shafts) on this floor'
+              }
+              aria-pressed={continuityOverlayVisible}
+              onClick={onToggleContinuityOverlay}
+            >
+              Continuity
             </button>
           )}
         </div>
@@ -974,6 +1309,84 @@ export function FloorViewer({
 
     if (projectionFailures !== routeProjectionStatus.failed || routeLines.size !== routeProjectionStatus.total) {
       setRouteProjectionStatus({ failed: projectionFailures, total: routeLines.size })
+    }
+  }
+
+  function animateBranchRouteLines() {
+    const canvas = canvasRef.current
+    const camera = cameraRef.current
+    if (!canvas || !camera) return
+
+    for (const [, line] of branchRouteLineRefsRef.current) {
+      const from = new THREE.Vector3(
+        parseFloat(line.dataset['branchFromX'] ?? '0'),
+        parseFloat(line.dataset['branchFromY'] ?? '0'),
+        parseFloat(line.dataset['branchFromZ'] ?? '0'),
+      )
+      const to = new THREE.Vector3(
+        parseFloat(line.dataset['branchToX'] ?? '0'),
+        parseFloat(line.dataset['branchToY'] ?? '0'),
+        parseFloat(line.dataset['branchToZ'] ?? '0'),
+      )
+
+      const fromPt = projectOverlayPointOnPlan(from, canvas, camera, planPlaneRef.current)
+      const toPt = projectOverlayPointOnPlan(to, canvas, camera, planPlaneRef.current)
+      if (!fromPt || !toPt) {
+        line.style.opacity = '0'
+        continue
+      }
+      line.style.opacity = ''
+      line.setAttribute('x1', `${fromPt.x}`)
+      line.setAttribute('y1', `${fromPt.y}`)
+      line.setAttribute('x2', `${toPt.x}`)
+      line.setAttribute('y2', `${toPt.y}`)
+    }
+  }
+
+  function animateEngineerOverlay() {
+    const canvas = canvasRef.current
+    const camera = cameraRef.current
+    if (!canvas || !camera) return
+
+    for (const [, line] of engineerLineRefsRef.current) {
+      const from = new THREE.Vector3(
+        parseFloat(line.dataset['engineerFromX'] ?? '0'),
+        parseFloat(line.dataset['engineerFromY'] ?? '0'),
+        parseFloat(line.dataset['engineerFromZ'] ?? '0'),
+      )
+      const to = new THREE.Vector3(
+        parseFloat(line.dataset['engineerToX'] ?? '0'),
+        parseFloat(line.dataset['engineerToY'] ?? '0'),
+        parseFloat(line.dataset['engineerToZ'] ?? '0'),
+      )
+
+      const fromPt = projectOverlayPointOnPlan(from, canvas, camera, planPlaneRef.current)
+      const toPt = projectOverlayPointOnPlan(to, canvas, camera, planPlaneRef.current)
+      if (!fromPt || !toPt) {
+        line.style.opacity = '0'
+        continue
+      }
+      line.style.opacity = ''
+      line.setAttribute('x1', `${fromPt.x}`)
+      line.setAttribute('y1', `${fromPt.y}`)
+      line.setAttribute('x2', `${toPt.x}`)
+      line.setAttribute('y2', `${toPt.y}`)
+    }
+
+    for (const [, ring] of engineerRingRefsRef.current) {
+      const x = parseFloat(ring.dataset['engineerX'] ?? '0')
+      const z = parseFloat(ring.dataset['engineerZ'] ?? '0')
+      // Stacks carry no elevation; y=0 is flattened onto the plan plane anyway.
+      positionOverlayMarker(ring, x, 0, z)
+    }
+  }
+
+  function animateShaftMarkers() {
+    for (const [, el] of shaftMarkerRefsRef.current) {
+      const x = parseFloat(el.dataset['shaftX'] ?? '0')
+      const z = parseFloat(el.dataset['shaftZ'] ?? '0')
+      // Shaft centres carry no elevation; markers flatten onto the plan plane.
+      positionOverlayMarker(el, x, 0, z)
     }
   }
 
@@ -1244,6 +1657,134 @@ function styleFloorGroup(group: THREE.Group, theme: ThemeMode) {
       object.userData['anchor'] = anchor
     }
 
+    object.add(outline)
+  })
+}
+
+/**
+ * Builds the continuity-overlay Three group (W5): one merged mesh for all
+ * blocked-cell rects, one for shaft-candidate fills, plus shaft outlines.
+ * Quads sit on the plan plane at `planY`; depth testing is off so the overlay
+ * always draws above the plan, and nothing here participates in raycasts.
+ */
+function buildContinuityOverlayGroup(
+  blockedRects: ContinuityOverlayRect[],
+  shaftMarkers: ContinuityShaftMarker[],
+  planY: number,
+): THREE.Group {
+  const group = new THREE.Group()
+  const noRaycast = () => {}
+
+  const addRectFillMesh = (rects: ContinuityOverlayRect[], color: number, opacity: number) => {
+    if (rects.length === 0) return
+    const positions = new Float32Array(rects.length * 4 * 3)
+    const indices = new Uint32Array(rects.length * 6)
+    rects.forEach((rect, i) => {
+      const p = i * 12
+      positions.set(
+        [
+          rect.minX, planY, rect.minZ,
+          rect.maxX, planY, rect.minZ,
+          rect.maxX, planY, rect.maxZ,
+          rect.minX, planY, rect.maxZ,
+        ],
+        p,
+      )
+      const v = i * 4
+      indices.set([v, v + 1, v + 2, v, v + 2, v + 3], i * 6)
+    })
+    const geometry = new THREE.BufferGeometry()
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    geometry.setIndex(new THREE.BufferAttribute(indices, 1))
+    const mesh = new THREE.Mesh(
+      geometry,
+      new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        depthTest: false,
+      }),
+    )
+    mesh.renderOrder = 3
+    mesh.raycast = noRaycast
+    group.add(mesh)
+  }
+
+  addRectFillMesh(blockedRects, 0xf97316, 0.2)
+  addRectFillMesh(shaftMarkers.map((marker) => marker.bounds), 0x2dd4bf, 0.32)
+
+  if (shaftMarkers.length > 0) {
+    const outlinePositions = new Float32Array(shaftMarkers.length * 8 * 3)
+    shaftMarkers.forEach((marker, i) => {
+      const { minX, maxX, minZ, maxZ } = marker.bounds
+      outlinePositions.set(
+        [
+          minX, planY, minZ, maxX, planY, minZ,
+          maxX, planY, minZ, maxX, planY, maxZ,
+          maxX, planY, maxZ, minX, planY, maxZ,
+          minX, planY, maxZ, minX, planY, minZ,
+        ],
+        i * 24,
+      )
+    })
+    const outlineGeometry = new THREE.BufferGeometry()
+    outlineGeometry.setAttribute('position', new THREE.BufferAttribute(outlinePositions, 3))
+    const outline = new THREE.LineSegments(
+      outlineGeometry,
+      new THREE.LineBasicMaterial({
+        color: 0x2dd4bf,
+        transparent: true,
+        opacity: 0.9,
+        depthWrite: false,
+        depthTest: false,
+      }),
+    )
+    outline.renderOrder = 3
+    outline.raycast = noRaycast
+    group.add(outline)
+  }
+
+  return group
+}
+
+/**
+ * Faint, non-interactive styling for the linked-model architecture underlay.
+ * Renders beneath the host plan (renderOrder 0 vs the plan's 1/2) and never
+ * participates in hover/selection raycasts.
+ */
+function styleUnderlayGroup(group: THREE.Group, theme: ThemeMode) {
+  const fillColor = new THREE.Color(theme === 'dark' ? 0x8fa3bd : 0x64748b)
+  const edgeColor = new THREE.Color(theme === 'dark' ? 0xa8bad2 : 0x475569)
+  const noRaycast = () => {}
+
+  group.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return
+
+    const material = new THREE.MeshBasicMaterial({
+      color: fillColor,
+      transparent: true,
+      opacity: 0.05,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    })
+    object.material = material
+    object.renderOrder = 0
+    object.raycast = noRaycast
+    object.updateMatrixWorld(true)
+
+    const outline = new THREE.LineSegments(
+      new THREE.EdgesGeometry(object.geometry as THREE.BufferGeometry, 28),
+      new THREE.LineBasicMaterial({
+        color: edgeColor,
+        transparent: true,
+        opacity: 0.34,
+        depthWrite: false,
+      }),
+    )
+    outline.renderOrder = 0
+    outline.raycast = noRaycast
     object.add(outline)
   })
 }

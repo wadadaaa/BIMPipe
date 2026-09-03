@@ -1,25 +1,73 @@
-import type { Fixture, KitchenArea, PlanBounds } from '@/domain/types'
-import { averagePosition, detectPlanUnits, planDistance, type Point3D } from './planGeometry'
+import type { Fixture, KitchenArea, PlanBounds, StoreyId } from '@/domain/types'
+import { snapPointToContinuity, type ContinuityMap } from '@/domain/continuityMap'
+import { detectPlanUnits, planDistance, type Point3D } from './planGeometry'
 import type { RiserPlacementRuleProfile } from './riserPlacementProfile'
-
-interface RiserCluster {
-  points: Point3D[]
-  centroid: Point3D
-}
 
 type PositionedFixture = Fixture & { position: NonNullable<Fixture['position']> }
 type PositionedKitchen = KitchenArea & { position: NonNullable<KitchenArea['position']> }
 
 /**
- * Groups nearby sanitary points into wet cores and returns one riser candidate
- * per core. Distances are measured on the viewer plan plane: X/Z, not X/Y.
+ * Max snap distance for continuity snapping (mm/m constant pair). A suggested
+ * riser only moves to a shaft candidate or free grid cell within this plan
+ * distance of its anchor; otherwise it stays put with an explicit `snapMiss`.
+ */
+export const MAX_SNAP_MM = 1500
+export const MAX_SNAP_M = 1.5
+
+export interface ContinuitySnapOptions {
+  /**
+   * Continuity map built by `src/domain/continuityMap.ts` from the same model.
+   * Must be in the same plan frame and units as the fixture positions.
+   */
+  map: ContinuityMap
+  /** Max snap distance in millimetres. Defaults to {@link MAX_SNAP_MM}. */
+  maxSnapMm?: number
+}
+
+export interface SuggestRiserOptions {
+  /**
+   * OFF by default (undefined). When provided, each suggestion snaps to the
+   * nearest shaft candidate (preferred) or free obstruction-grid cell within
+   * the max snap distance; unsnappable suggestions keep their original
+   * position and carry an explicit `snapMiss` reason.
+   */
+  continuitySnap?: ContinuitySnapOptions
+}
+
+export type RiserContinuitySnap =
+  | { status: 'snapped'; target: 'shaft'; shaftId: string; distance: number; original: Point3D }
+  | {
+      status: 'snapped'
+      target: 'free-cell'
+      cell: { col: number; row: number }
+      distance: number
+      original: Point3D
+    }
+  | { status: 'snapMiss'; reason: string }
+
+/**
+ * A suggested riser position. The `snap` field only exists when continuity
+ * snapping was requested via {@link SuggestRiserOptions.continuitySnap}; with
+ * the flag off the returned objects are plain `{ x, y, z }` points, identical
+ * to the pre-flag behaviour.
+ */
+export interface SuggestedRiserPosition extends Point3D {
+  snap?: RiserContinuitySnap
+}
+
+/**
+ * Returns one riser candidate per toilet plus one dedicated corner riser per kitchen.
+ * Non-toilet fixtures never spawn risers; they attach to the nearest riser instead
+ * (see `src/domain/assignFixturesToRisers.ts`). Distances are measured on the viewer
+ * plan plane: X/Z, not X/Y.
  */
 export function suggestRiserPositions(
   fixtures: Fixture[],
   kitchens: KitchenArea[] = [],
   floorPlanBounds: PlanBounds | null = null,
   ruleProfile?: Partial<RiserPlacementRuleProfile> | null,
-): Point3D[] {
+  options?: SuggestRiserOptions,
+): SuggestedRiserPosition[] {
   const fixtureOffsetToleranceMm = ruleProfile?.fixtureOffsetToleranceMm ?? 450
   const positionedFixtures = fixtures.filter(
     (fixture): fixture is PositionedFixture =>
@@ -30,45 +78,97 @@ export function suggestRiserPositions(
       kitchen.position !== null,
   )
   const dedicatedKitchenPositions = buildKitchenRiserPositions(positionedKitchens, floorPlanBounds, fixtureOffsetToleranceMm)
-  const points = positionedFixtures.map((fixture) => fixture.position)
-
-  if (points.length === 0 && dedicatedKitchenPositions.length === 0) return []
 
   const wcFixtures = positionedFixtures.filter((fixture) => fixture.kind === 'TOILETPAN')
-  if (wcFixtures.length > 0) {
-    return sortByDominantPlanAxis([
-      ...wcFixtures.map((fixture) => fixture.position),
-      ...dedicatedKitchenPositions,
-    ]).map((position) => ({
-      ...position,
-    }))
+
+  const continuitySnap = options?.continuitySnap
+  if (continuitySnap !== undefined) {
+    return suggestWithContinuitySnap(
+      wcFixtures,
+      positionedKitchens,
+      dedicatedKitchenPositions,
+      continuitySnap,
+    )
   }
 
-  const clusteredFixturePoints = positionedFixtures
-    .filter((fixture) => !fixture.isKitchenSink)
-    .map((fixture) => fixture.position)
-
-  if (clusteredFixturePoints.length === 0) {
-    return sortByDominantPlanAxis(dedicatedKitchenPositions).map((position) => ({ ...position }))
-  }
-
-  const units = detectPlanUnits([...clusteredFixturePoints, ...dedicatedKitchenPositions])
-  const maxWetCoreDiameter = units === 'mm' ? 2600 : 2.6
-  const spatialClusters = buildBoundedClusters(clusteredFixturePoints, maxWetCoreDiameter)
-  const targetCount = Math.min(
-    clusteredFixturePoints.length,
-    Math.max(spatialClusters.length, Math.ceil(clusteredFixturePoints.length / 4)),
-  )
-
-  const rawPositions =
-    targetCount <= spatialClusters.length
-      ? spatialClusters.map((cluster) => cluster.centroid)
-      : kMeansPlan(clusteredFixturePoints, targetCount)
-
-  return sortByDominantPlanAxis([
+  const anchorPositions = [
+    ...wcFixtures.map((fixture) => fixture.position),
     ...dedicatedKitchenPositions,
-    ...rawPositions,
-  ]).map((position) => ({ ...position }))
+  ]
+  if (anchorPositions.length === 0) return []
+
+  return sortByDominantPlanAxis(anchorPositions).map((position) => ({ ...position }))
+}
+
+interface SnapAnchor {
+  position: Point3D
+  storeyId: StoreyId
+}
+
+/**
+ * Flag-on path: same anchors and the same dominant-axis ordering as the
+ * default path, followed by continuity snapping. Shafts win over free cells;
+ * a miss keeps the anchor position and records the reason.
+ */
+function suggestWithContinuitySnap(
+  wcFixtures: PositionedFixture[],
+  positionedKitchens: PositionedKitchen[],
+  dedicatedKitchenPositions: Point3D[],
+  continuitySnap: ContinuitySnapOptions,
+): SuggestedRiserPosition[] {
+  const anchors: SnapAnchor[] = [
+    ...wcFixtures.map((fixture) => ({ position: fixture.position, storeyId: fixture.storeyId })),
+    // buildKitchenRiserPositions maps kitchens 1:1, so index i belongs to kitchen i.
+    ...dedicatedKitchenPositions.map((position, index) => ({
+      position,
+      storeyId: positionedKitchens[index].storeyId,
+    })),
+  ]
+  if (anchors.length === 0) return []
+
+  const { map } = continuitySnap
+  const maxSnapDistance =
+    continuitySnap.maxSnapMm !== undefined
+      ? map.units === 'mm'
+        ? continuitySnap.maxSnapMm
+        : continuitySnap.maxSnapMm / 1000
+      : map.units === 'mm'
+        ? MAX_SNAP_MM
+        : MAX_SNAP_M
+
+  return sortByDominantPlanAxisBy(anchors, (anchor) => anchor.position).map(
+    ({ position, storeyId }) => {
+      const outcome = snapPointToContinuity(
+        map,
+        storeyId,
+        { x: position.x, z: position.z },
+        maxSnapDistance,
+      )
+
+      if (outcome.kind === 'miss') {
+        return { ...position, snap: { status: 'snapMiss', reason: outcome.reason } }
+      }
+
+      const snap: RiserContinuitySnap =
+        outcome.kind === 'shaft'
+          ? {
+              status: 'snapped',
+              target: 'shaft',
+              shaftId: outcome.shaftId,
+              distance: outcome.distance,
+              original: { ...position },
+            }
+          : {
+              status: 'snapped',
+              target: 'free-cell',
+              cell: outcome.cell,
+              distance: outcome.distance,
+              original: { ...position },
+            }
+
+      return { x: outcome.position.x, y: position.y, z: outcome.position.z, snap }
+    },
+  )
 }
 
 function buildKitchenRiserPositions(
@@ -233,91 +333,26 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max)
 }
 
-function buildBoundedClusters(points: Point3D[], maxWetCoreDiameter: number): RiserCluster[] {
-  const clusters: RiserCluster[] = []
-
-  for (const point of sortByDominantPlanAxis(points)) {
-    let nearestCluster: RiserCluster | null = null
-    let nearestDistance = Infinity
-
-    for (const cluster of clusters) {
-      if (!canAddToCluster(cluster, point, maxWetCoreDiameter)) continue
-
-      const distance = planDistance(point, cluster.centroid)
-      if (distance < nearestDistance) {
-        nearestCluster = cluster
-        nearestDistance = distance
-      }
-    }
-
-    if (nearestCluster) {
-      nearestCluster.points.push(point)
-      nearestCluster.centroid = averagePosition(nearestCluster.points)
-      continue
-    }
-
-    clusters.push({ points: [point], centroid: { ...point } })
-  }
-
-  return clusters
-}
-
-function kMeansPlan(points: Point3D[], k: number): Point3D[] {
-  const sorted = sortByDominantPlanAxis(points)
-  const step = sorted.length / k
-  let centroids = Array.from({ length: k }, (_, i) => ({
-    ...sorted[Math.min(Math.floor(i * step + step / 2), sorted.length - 1)],
-  }))
-
-  for (let iteration = 0; iteration < 24; iteration++) {
-    const clusters: Point3D[][] = Array.from({ length: k }, () => [])
-
-    for (const point of points) {
-      let nearestIndex = 0
-      let nearestDistance = Infinity
-
-      for (let i = 0; i < centroids.length; i++) {
-        const distance = planDistance(point, centroids[i])
-        if (distance < nearestDistance) {
-          nearestDistance = distance
-          nearestIndex = i
-        }
-      }
-
-      clusters[nearestIndex].push(point)
-    }
-
-    let moved = false
-    centroids = centroids.map((centroid, i) => {
-      const cluster = clusters[i]
-      if (cluster.length === 0) return centroid
-
-      const next = averagePosition(cluster)
-      if (planDistance(centroid, next) > 1e-6) moved = true
-      return next
-    })
-
-    if (!moved) break
-  }
-
-  return centroids
-}
-
-function canAddToCluster(cluster: RiserCluster, point: Point3D, maxDiameter: number): boolean {
-  for (const existingPoint of cluster.points) {
-    if (planDistance(existingPoint, point) > maxDiameter) return false
-  }
-  return true
-}
-
 function sortByDominantPlanAxis(points: Point3D[]): Point3D[] {
-  const minX = Math.min(...points.map((point) => point.x))
-  const maxX = Math.max(...points.map((point) => point.x))
-  const minZ = Math.min(...points.map((point) => point.z))
-  const maxZ = Math.max(...points.map((point) => point.z))
+  return sortByDominantPlanAxisBy(points, (point) => point)
+}
+
+/**
+ * Same ordering as {@link sortByDominantPlanAxis} but generic, so the
+ * continuity-snapping path can keep storey ids attached to each anchor while
+ * producing the exact same order as the default path (stable sort, same
+ * comparator).
+ */
+function sortByDominantPlanAxisBy<T>(items: T[], getPoint: (item: T) => Point3D): T[] {
+  const minX = Math.min(...items.map((item) => getPoint(item).x))
+  const maxX = Math.max(...items.map((item) => getPoint(item).x))
+  const minZ = Math.min(...items.map((item) => getPoint(item).z))
+  const maxZ = Math.max(...items.map((item) => getPoint(item).z))
   const useZ = maxZ - minZ > maxX - minX
 
-  return [...points].sort((a, b) => {
+  return [...items].sort((left, right) => {
+    const a = getPoint(left)
+    const b = getPoint(right)
     const primary = useZ ? a.z - b.z : a.x - b.x
     if (primary !== 0) return primary
     return useZ ? a.x - b.x : a.z - b.z

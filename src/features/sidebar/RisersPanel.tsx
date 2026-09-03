@@ -1,4 +1,6 @@
 import type { Fixture, KitchenArea, Riser, RiserId } from '@/domain/types'
+import { formatLengthM, type LengthUnit } from '@/shared/lengthUnits'
+import { detectPlanUnits } from '@/shared/routes/planGeometry'
 import './RisersPanel.css'
 
 interface RisersPanelProps {
@@ -17,6 +19,14 @@ interface RisersPanelProps {
   demoFlowEnabled?: boolean
   demoFloorOpened?: boolean
   sanitaryRouteCount?: number
+  /**
+   * Length unit declared by the model's IfcUnitAssignment; null when unknown.
+   * Positions here are viewer coordinates, which web-ifc normalizes to metres
+   * whenever the model declares its length unit, so a resolved unit (mm/cm/m)
+   * means the coordinates are already metres. Only when the unit is unknown do
+   * we fall back to the coordinate-magnitude heuristic.
+   */
+  modelLengthUnit?: LengthUnit | null
 }
 
 export function RisersPanel({
@@ -35,10 +45,19 @@ export function RisersPanel({
   demoFlowEnabled = false,
   demoFloorOpened = false,
   sanitaryRouteCount = 0,
+  modelLengthUnit = null,
 }: RisersPanelProps) {
   const canSuggest =
     fixtures.some((fixture) => fixture.position !== null) ||
     kitchens.some((kitchen) => kitchen.position !== null)
+  const coordinateUnit: LengthUnit =
+    modelLengthUnit !== null
+      ? 'm'
+      : detectPlanUnits([
+          ...risers.map((riser) => riser.position),
+          ...fixtures.flatMap((fixture) => (fixture.position ? [fixture.position] : [])),
+          ...kitchens.flatMap((kitchen) => (kitchen.position ? [kitchen.position] : [])),
+        ])
   const positionedFixtureCount = demoFlowEnabled
     ? fixtures.filter((fixture) => fixture.position !== null).length
     : 0
@@ -100,7 +119,7 @@ export function RisersPanel({
             <DemoStep
               done={canSuggest}
               label="Sanitary inputs checked"
-              detail={`${positionedFixtureCount} toilet(s), ${positionedKitchenCount} kitchen area(s) with plan points`}
+              detail={`${positionedFixtureCount} fixture(s), ${positionedKitchenCount} kitchen area(s) with plan points`}
             />
             <DemoStep
               done={risers.length > 0}
@@ -181,8 +200,8 @@ export function RisersPanel({
               <span className="risers-panel__item-marker">{riser.stackLabel}</span>
               <span className="risers-panel__item-coords">
                 {demoFlowEnabled
-                  ? describeRiserLocation(riser, fixtures, kitchens)
-                  : `${fmt(riser.position.x)} m, ${fmt(riser.position.z)} m`}
+                  ? describeRiserLocation(riser, fixtures, kitchens, coordinateUnit)
+                  : formatRiserPlanPosition(riser.position, coordinateUnit)}
               </span>
               <span className="risers-panel__item-source" title="Riser source">
                 {riser.source ?? "placed"}
@@ -203,11 +222,23 @@ export function RisersPanel({
   )
 }
 
-function fmt(n: number): string {
-  return n.toFixed(1)
+/**
+ * Viewer plan coordinates are (x, z) with z = -(IFC Y); display IFC-style
+ * (X, Y) so the sign matches the exported model (the exporter writes -z as Y).
+ */
+function formatRiserPlanPosition(
+  position: { x: number; z: number },
+  unit: LengthUnit,
+): string {
+  return `${formatLengthM(position.x, unit)}, ${formatLengthM(-position.z, unit)}`
 }
 
-function describeRiserLocation(riser: Riser, fixtures: Fixture[], kitchens: KitchenArea[]): string {
+function describeRiserLocation(
+  riser: Riser,
+  fixtures: Fixture[],
+  kitchens: KitchenArea[],
+  unit: LengthUnit,
+): string {
   const anchors = [
     ...fixtures
       .filter((fixture) => fixture.position !== null)
@@ -224,9 +255,8 @@ function describeRiserLocation(riser: Riser, fixtures: Fixture[], kitchens: Kitc
     }))
     .sort((a, b) => a.distance - b.distance)[0]
 
-  const coordinateFallback = `${fmt(riser.position.x)} m, ${fmt(riser.position.z)} m`
-  if (!nearest) return coordinateFallback
-  return `near ${nearest.label} · ${fmt(nearest.distance)} m`
+  if (!nearest) return formatRiserPlanPosition(riser.position, unit)
+  return `near ${nearest.label} · ${formatLengthM(nearest.distance, unit)}`
 }
 
 function DemoStep({ done, label, detail }: { done: boolean; label: string; detail: string }) {

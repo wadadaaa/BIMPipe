@@ -6,7 +6,7 @@ import { Sidebar } from './Sidebar'
 describe('Sidebar', () => {
   it('renders the MVP tabs including decisions', () => {
     render(<Sidebar activeTab="fixtures" onTabChange={vi.fn()} />)
-    expect(screen.getByRole('tab', { name: /toilets/i })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /fixtures/i })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /risers/i })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /decisions/i })).toBeInTheDocument()
   })
@@ -14,7 +14,7 @@ describe('Sidebar', () => {
   it('marks the active tab as selected', () => {
     render(<Sidebar activeTab="risers" onTabChange={vi.fn()} />)
     expect(screen.getByRole('tab', { name: /risers/i })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByRole('tab', { name: /toilets/i })).toHaveAttribute('aria-selected', 'false')
+    expect(screen.getByRole('tab', { name: /fixtures/i })).toHaveAttribute('aria-selected', 'false')
   })
 
   it('calls onTabChange with the selected tab', async () => {
@@ -36,7 +36,7 @@ describe('Sidebar', () => {
       />,
     )
 
-    expect(screen.getAllByText('Toilets').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Fixtures').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Kitchens').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Risers').length).toBeGreaterThan(0)
     expect(screen.getAllByText('1').length).toBeGreaterThan(0)
@@ -198,7 +198,8 @@ describe('Sidebar', () => {
     )
 
     expect(screen.getByText(/near WC-1/i)).toBeInTheDocument()
-    expect(screen.queryByText(/125\.0 m, 220\.0 m/)).not.toBeInTheDocument()
+    // W2: coordinates are formatted via the canonical converter with IFC-Y sign.
+    expect(screen.queryByText(/125\.00 m, -220\.00 m/)).not.toBeInTheDocument()
   })
 
   it('keeps exact riser coordinates visible outside demo mode', () => {
@@ -216,7 +217,42 @@ describe('Sidebar', () => {
       />,
     )
 
-    expect(screen.getByText('125.0 m, 220.0 m')).toBeInTheDocument()
+    // W2 intended change: viewer z is -(IFC Y), so the displayed Y is negated,
+    // and both components go through the canonical metre formatter (2 decimals).
+    expect(screen.getByText('125.00 m, -220.00 m')).toBeInTheDocument()
     expect(screen.queryByText(/near WC-1/i)).not.toBeInTheDocument()
+  })
+
+  it('converts raw-mm coordinates to metres when the model unit is unknown (heuristic fallback)', () => {
+    render(
+      <Sidebar
+        activeTab="risers"
+        onTabChange={vi.fn()}
+        selectedStoreyName="02"
+        risers={[
+          { id: 'r1', stackId: 'stack-1', stackLabel: 'R1', storeyId: 2, position: { x: 12500, y: 0, z: -3000 } },
+        ]}
+      />,
+    )
+
+    expect(screen.getByText('12.50 m, 3.00 m')).toBeInTheDocument()
+  })
+
+  it('treats coordinates as metres when the model length unit is resolved', () => {
+    // Positions above the mm heuristic threshold: a resolved model unit means
+    // web-ifc already normalized geometry to metres, so no heuristic applies.
+    render(
+      <Sidebar
+        activeTab="risers"
+        onTabChange={vi.fn()}
+        selectedStoreyName="02"
+        modelLengthUnit="cm"
+        risers={[
+          { id: 'r1', stackId: 'stack-1', stackLabel: 'R1', storeyId: 2, position: { x: 1250, y: 0, z: -300 } },
+        ]}
+      />,
+    )
+
+    expect(screen.getByText('1250.00 m, 300.00 m')).toBeInTheDocument()
   })
 })

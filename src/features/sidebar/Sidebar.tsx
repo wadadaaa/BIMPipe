@@ -1,11 +1,22 @@
 import { startTransition } from 'react'
 import type { Fixture, KitchenArea, Riser, RiserId, SidebarTab } from '@/domain/types'
+import type { FixtureRiserAssignment } from '@/domain/assignFixturesToRisers'
 import type { StoreyDetectionAggregation } from '@/shared/ifc/aggregateStoreyDetections'
+import type { InitialStoreyDecision } from '@/shared/ifc/scanStoreyFixtures'
+import type { StoreyAlignment } from '@/domain/alignStoreys'
+import type { MergedStoreyDetection } from '@/domain/mergeFixturesAcrossFiles'
+import type { EngineerComparisonReport } from '@/domain/engineerComparisonMetrics'
 import type { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
+import type { SuggestedRiserSnapOutcome } from '@/shared/routes/buildSuggestedRisers'
+import type { LengthUnit } from '@/shared/lengthUnits'
 import { ViewTransition } from '@/shared/reactViewTransition'
 import { FixturesPanel } from './FixturesPanel'
 import { RisersPanel } from './RisersPanel'
-import { PlacementValidationPanel } from './PlacementValidationPanel'
+import {
+  PlacementValidationPanel,
+  type ContinuityMapSummary,
+  type EngineerBaselineSummary,
+} from './PlacementValidationPanel'
 import './Sidebar.css'
 
 interface SidebarProps {
@@ -16,6 +27,7 @@ interface SidebarProps {
   hasModel?: boolean
   fixtures?: Fixture[]
   kitchens?: KitchenArea[]
+  fixtureAssignments?: FixtureRiserAssignment[]
   isDetectingFixtures?: boolean
   risers?: Riser[]
   isAddingRiser?: boolean
@@ -28,18 +40,45 @@ interface SidebarProps {
   onDownloadFullIfc?: () => void
   validationReport?: ReturnType<typeof buildRiserValidationReport> | null
   detectionAggregation?: StoreyDetectionAggregation | null
+  /** Why the initial floor was auto-opened (plain mode); null in demo mode. */
+  initialStoreyDecision?: InitialStoreyDecision | null
+  /** Storey mapping per linked file (multi-IFC uploads); empty for single-file. */
+  storeyAlignments?: StoreyAlignment[]
+  /** Cross-file fixture merge accounting for the open floor; null for single-file. */
+  crossFileMerge?: MergedStoreyDetection | null
   sanitaryRouteLimitations?: string[]
   demoFlowEnabled?: boolean
   demoFloorOpened?: boolean
   sanitaryRouteCount?: number
+  /** Model length unit resolved from IfcUnitAssignment; null when unknown. */
+  modelLengthUnit?: LengthUnit | null
+  /** Engineer baseline (W7) summary for the Decisions tab; null until loaded. */
+  engineerBaseline?: EngineerBaselineSummary | null
+  isExtractingEngineerBaseline?: boolean
+  engineerBaselineError?: string | null
+  onLoadEngineerBaseline?: () => void
+  /** W7 metrics: our proposal vs the engineer baseline; null until both exist. */
+  engineerComparison?: EngineerComparisonReport | null
+  /** Continuity map (W5) summary for the Decisions tab; null until built. */
+  continuityMap?: ContinuityMapSummary | null
+  isBuildingContinuityMap?: boolean
+  continuityBuildProgress?: { processed: number; total: number } | null
+  continuityBuildError?: string | null
+  /** Undefined hides the affordance (no model loaded yet). */
+  onBuildContinuityMap?: () => void
+  /** W5 advanced flag: snap suggested risers to shafts/free cells. */
+  continuitySnapEnabled?: boolean
+  onToggleContinuitySnap?: () => void
+  /** Snap outcomes of the last suggest run; null when snapping was off. */
+  riserSnapOutcomes?: SuggestedRiserSnapOutcome[] | null
 }
 
 const TABS: { id: SidebarTab; label: string; focus: string; hint: string }[] = [
   {
     id: 'fixtures',
-    label: 'Toilets',
-    focus: 'Toilet inventory',
-    hint: 'Amber markers on the plan are detected toilets from the IFC. Kitchens stay visible on the plan for kitchen riser placement.',
+    label: 'Fixtures',
+    focus: 'Fixture inventory',
+    hint: 'Amber markers on the plan are detected sanitary fixtures from the IFC. Kitchens stay visible on the plan for kitchen riser placement.',
   },
   {
     id: 'risers',
@@ -63,6 +102,7 @@ export function Sidebar({
   hasModel = false,
   fixtures = [],
   kitchens = [],
+  fixtureAssignments = [],
   isDetectingFixtures = false,
   risers = [],
   isAddingRiser = false,
@@ -75,10 +115,27 @@ export function Sidebar({
   onDownloadFullIfc = () => {},
   validationReport = null,
   detectionAggregation = null,
+  initialStoreyDecision = null,
+  storeyAlignments = [],
+  crossFileMerge = null,
   sanitaryRouteLimitations = [],
   demoFlowEnabled = false,
   demoFloorOpened = false,
   sanitaryRouteCount = 0,
+  modelLengthUnit = null,
+  engineerBaseline = null,
+  isExtractingEngineerBaseline = false,
+  engineerBaselineError = null,
+  onLoadEngineerBaseline,
+  engineerComparison = null,
+  continuityMap = null,
+  isBuildingContinuityMap = false,
+  continuityBuildProgress = null,
+  continuityBuildError = null,
+  onBuildContinuityMap,
+  continuitySnapEnabled = false,
+  onToggleContinuitySnap = () => {},
+  riserSnapOutcomes = null,
 }: SidebarProps) {
   const activeTabMeta = TABS.find((tab) => tab.id === activeTab)!
   const riserPanelKey = risers.map((riser) => riser.id).join(':') || 'empty'
@@ -102,9 +159,9 @@ export function Sidebar({
 
       <div className="sidebar__summary-grid">
         <div className="sidebar__summary-card">
-          <span className="sidebar__summary-label">Toilets</span>
+          <span className="sidebar__summary-label">Fixtures</span>
           <strong
-            key={`toilets-${selectedStoreyName ? fixtures.length : 'idle'}`}
+            key={`fixtures-${selectedStoreyName ? fixtures.length : 'idle'}`}
             className="sidebar__summary-value sidebar__summary-value--flash"
           >
             {selectedStoreyName ? fixtures.length : '—'}
@@ -172,6 +229,7 @@ export function Sidebar({
             {activeTab === 'fixtures' ? (
               <FixturesPanel
                 fixtures={fixtures}
+                assignments={fixtureAssignments}
                 isLoading={isDetectingFixtures}
                 canPlaceRisers={
                   fixtures.some((fixture) => fixture.position !== null) ||
@@ -198,12 +256,29 @@ export function Sidebar({
                 demoFlowEnabled={demoFlowEnabled}
                 demoFloorOpened={demoFloorOpened}
                 sanitaryRouteCount={sanitaryRouteCount}
+                modelLengthUnit={modelLengthUnit}
               />
             ) : (
               <PlacementValidationPanel
                 report={validationReport}
                 detectionAggregation={detectionAggregation}
                 demoFlowEnabled={demoFlowEnabled}
+                initialStoreyDecision={initialStoreyDecision}
+                storeyAlignments={storeyAlignments}
+                crossFileMerge={crossFileMerge}
+                engineerBaseline={engineerBaseline}
+                isExtractingEngineerBaseline={isExtractingEngineerBaseline}
+                engineerBaselineError={engineerBaselineError}
+                onLoadEngineerBaseline={onLoadEngineerBaseline}
+                engineerComparison={engineerComparison}
+                continuityMap={continuityMap}
+                isBuildingContinuityMap={isBuildingContinuityMap}
+                continuityBuildProgress={continuityBuildProgress}
+                continuityBuildError={continuityBuildError}
+                onBuildContinuityMap={onBuildContinuityMap}
+                continuitySnapEnabled={continuitySnapEnabled}
+                onToggleContinuitySnap={onToggleContinuitySnap}
+                riserSnapOutcomes={riserSnapOutcomes}
               />
             )}
           </section>

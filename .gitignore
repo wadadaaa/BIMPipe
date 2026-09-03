@@ -45,3 +45,7 @@ __MACOSX/
 # IFC experiment outputs
 experiments/ifc-riser-lab/output/*
 !experiments/ifc-riser-lab/output/.gitkeep
+
+# Private client data (IFC models, drawings) — must never be committed
+external/
+refs/

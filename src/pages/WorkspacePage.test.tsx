@@ -6,11 +6,15 @@ import { WorkspacePage } from './WorkspacePage'
 const mocks = vi.hoisted(() => ({
   getIfcApi: vi.fn(),
   parseStoreys: vi.fn(),
+  resolveModelLengthUnit: vi.fn(),
   extractFloorMeshes: vi.fn(),
   detectFixtures: vi.fn(),
   detectKitchens: vi.fn(),
   exportFullIfcWithRisers: vi.fn(),
   exportFullIfcWithRisersWithDebug: vi.fn(),
+  getDemoRuntimeConfig: vi.fn(),
+  chooseInitialStoreyByFixtures: vi.fn(),
+  extractEngineerPipeNetwork: vi.fn(),
 }))
 
 vi.mock('@/shared/ifc/ifcApi', () => ({
@@ -19,6 +23,10 @@ vi.mock('@/shared/ifc/ifcApi', () => ({
 
 vi.mock('@/shared/ifc/parseStoreys', () => ({
   parseStoreys: mocks.parseStoreys,
+}))
+
+vi.mock('@/shared/ifc/resolveModelLengthUnit', () => ({
+  resolveModelLengthUnit: mocks.resolveModelLengthUnit,
 }))
 
 vi.mock('@/shared/ifc/extractFloorMeshes', () => ({
@@ -33,41 +41,77 @@ vi.mock('@/shared/ifc/detectKitchens', () => ({
   detectKitchens: mocks.detectKitchens,
 }))
 
+vi.mock('@/shared/ifc/scanStoreyFixtures', () => ({
+  chooseInitialStoreyByFixtures: mocks.chooseInitialStoreyByFixtures,
+}))
+
 vi.mock('@/shared/ifc/exportFullIfcWithRisers', () => ({
   exportFullIfcWithRisers: mocks.exportFullIfcWithRisers,
   exportFullIfcWithRisersWithDebug: mocks.exportFullIfcWithRisersWithDebug,
+}))
+
+vi.mock('@/shared/ifc/extractEngineerPipeNetwork', () => ({
+  extractEngineerPipeNetwork: mocks.extractEngineerPipeNetwork,
 }))
 
 vi.mock('@/shared/demoConfig', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/shared/demoConfig')>()
   return {
     ...actual,
-    getDemoRuntimeConfig: () => ({
-      enabled: true as const,
-      config: {
-        name: 'ADAM_10 test demo',
-        model: { fileName: 'tower.ifc', schema: 'IFC2X3', source: 'test', assetPath: 'test' },
-        scope: { includedFloors: ['קומה 2'], excludedFloors: [] },
-        routing: { mode: 'demo' as const, allowManualRiserSelection: true },
-      },
-    }),
+    getDemoRuntimeConfig: mocks.getDemoRuntimeConfig,
   }
 })
+
+const demoEnabledRuntime = {
+  enabled: true as const,
+  config: {
+    name: 'ADAM_10 test demo',
+    model: { fileName: 'tower.ifc', schema: 'IFC2X3', source: 'test', assetPath: 'test' },
+    scope: { includedFloors: ['קומה 2'], excludedFloors: [] },
+    routing: { mode: 'demo' as const, allowManualRiserSelection: true },
+  },
+}
 
 vi.mock('@/viewer/FloorViewer', () => ({
   FloorViewer: ({
     fixtures,
     kitchens,
     risers,
+    sanitaryRoutes,
+    branchRouteSegments,
+    branchRoutesVisible,
+    onToggleBranchRoutes,
+    engineerSegments,
+    engineerStackMarkers,
+    onToggleEngineerOverlay,
   }: {
     fixtures?: Array<unknown>
     kitchens?: Array<unknown>
     risers?: Array<unknown>
+    sanitaryRoutes?: Array<unknown>
+    branchRouteSegments?: Array<unknown>
+    branchRoutesVisible?: boolean
+    onToggleBranchRoutes?: () => void
+    engineerSegments?: Array<unknown>
+    engineerStackMarkers?: Array<unknown>
+    onToggleEngineerOverlay?: () => void
   }) => (
     <div data-testid="floor-viewer">
       <span>fixtures:{fixtures?.length ?? 0}</span>
       <span>kitchens:{kitchens?.length ?? 0}</span>
       <span>risers:{risers?.length ?? 0}</span>
+      <span>routes:{sanitaryRoutes?.length ?? 0}</span>
+      {/* Mirrors the real viewer: hidden floors draw zero branch segments. */}
+      <span>branchSegments:{branchRoutesVisible === false ? 0 : (branchRouteSegments?.length ?? 0)}</span>
+      {/* The page passes empty arrays when the engineer layer is toggled off. */}
+      <span>engineerSegments:{engineerSegments?.length ?? 0}</span>
+      <span>engineerStacks:{engineerStackMarkers?.length ?? 0}</span>
+      <button type="button" onClick={onToggleBranchRoutes}>
+        toggle-branch-routes
+      </button>
+      <button type="button" onClick={onToggleEngineerOverlay}>
+        toggle-engineer-overlay
+      </button>
     </div>
   ),
 }))
@@ -84,6 +128,8 @@ describe('WorkspacePage', () => {
     anchorClick.mockReset()
     HTMLAnchorElement.prototype.click = anchorClick
 
+    mocks.getDemoRuntimeConfig.mockReturnValue(demoEnabledRuntime)
+
     URL.createObjectURL = vi.fn(() => 'blob:test')
     URL.revokeObjectURL = vi.fn()
     window.requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
@@ -98,6 +144,15 @@ describe('WorkspacePage', () => {
     }
 
     mocks.getIfcApi.mockResolvedValue(api)
+    mocks.resolveModelLengthUnit.mockResolvedValue('mm')
+    // Plain-mode auto-select goes through the fixture chooser; keep the mocked
+    // choice on קומה 2 so plain-mode flows open the same floor as before.
+    mocks.chooseInitialStoreyByFixtures.mockResolvedValue({
+      storeyId: 2,
+      storeyName: 'קומה 2',
+      reason: 'Lowest of 1 toilet-bearing storeys sharing fixture fingerprint "TOILETPAN:2" (test).',
+      scanMs: 5,
+    })
     mocks.parseStoreys.mockResolvedValue([
       { id: 102, name: 'מרתף 2', elevation: -600, modelId: 'model-1' },
       { id: 2, name: 'קומה 2', elevation: 612, modelId: 'model-1' },
@@ -147,6 +202,7 @@ describe('WorkspacePage', () => {
   })
 
   afterEach(() => {
+    vi.unstubAllGlobals()
     HTMLAnchorElement.prototype.click = originalAnchorClick
     URL.createObjectURL = originalCreateObjectURL
     URL.revokeObjectURL = originalRevokeObjectURL
@@ -154,11 +210,15 @@ describe('WorkspacePage', () => {
     window.cancelAnimationFrame = originalCancelAnimationFrame
     mocks.getIfcApi.mockReset()
     mocks.parseStoreys.mockReset()
+    mocks.resolveModelLengthUnit.mockReset()
     mocks.extractFloorMeshes.mockReset()
     mocks.detectFixtures.mockReset()
     mocks.detectKitchens.mockReset()
     mocks.exportFullIfcWithRisers.mockReset()
     mocks.exportFullIfcWithRisersWithDebug.mockReset()
+    mocks.getDemoRuntimeConfig.mockReset()
+    mocks.chooseInitialStoreyByFixtures.mockReset()
+    mocks.extractEngineerPipeNetwork.mockReset()
   })
 
   it('auto-opens קומה 2 instead of מרתף 2 and excludes penthouse floor from auto-generated risers by default', async () => {
@@ -174,6 +234,9 @@ describe('WorkspacePage', () => {
       expect(levelTwoButton).toHaveClass('storey-list__item--selected')
     })
     expect(mocks.extractFloorMeshes).toHaveBeenCalledWith(expect.anything(), 101, 2)
+    // Demo mode keeps its legacy floor-selection semantics: the fixture-scan
+    // chooser must never run in the demo flow.
+    expect(mocks.chooseInitialStoreyByFixtures).not.toHaveBeenCalled()
 
     // Detection and placement are split — risers only appear after the user
     // explicitly clicks Place risers in the fixtures panel.
@@ -185,15 +248,18 @@ describe('WorkspacePage', () => {
     await screen.findByLabelText('Remove riser R3')
 
     expect(screen.getByLabelText('Sanitary demo flow')).toHaveTextContent('Route demo flow')
-    expect(screen.getByLabelText('Sanitary demo flow')).toHaveTextContent('Action needed')
+    // T2: the detected bath is carried through state and routes to the kitchen
+    // riser immediately after placement, so the demo flow is already exportable.
+    expect(screen.getByLabelText('Sanitary demo flow')).toHaveTextContent('Ready to export')
     expect(screen.getByText('ADAM_10 floor opened').closest('li')).toHaveClass('risers-panel__demo-step--done')
     expect(screen.getByText('Sanitary inputs checked').closest('li')).toHaveClass('risers-panel__demo-step--done')
     expect(screen.getByText('Risers selected').closest('li')).toHaveClass('risers-panel__demo-step--done')
-    expect(screen.getByText('Route preview generated').closest('li')).not.toHaveClass('risers-panel__demo-step--done')
+    expect(screen.getByText('Route preview generated').closest('li')).toHaveClass('risers-panel__demo-step--done')
     expect(screen.getByLabelText('Sanitary demo flow')).toHaveTextContent('WC routes use Ø110 intent')
     expect(screen.getByLabelText('Sanitary demo flow')).toHaveTextContent('2.0% slope toward the riser')
 
-    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('fixtures:2')
+    // All detected fixtures (2 toilets + 1 bath) reach the viewer, not only toilets.
+    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('fixtures:3')
     expect(screen.getByTestId('floor-viewer')).toHaveTextContent('kitchens:1')
     expect(screen.getByTestId('floor-viewer')).toHaveTextContent('risers:3')
 
@@ -222,7 +288,13 @@ describe('WorkspacePage', () => {
     expect(new Set(risers.map((riser: { stackLabel: string }) => riser.stackLabel))).toEqual(
       new Set(['R1', 'R3']),
     )
-    expect(anchorClick).toHaveBeenCalledTimes(2)
+    // Removing R2 above is a logged manual adjustment, so the export offers
+    // three files: the IFC, the debug mapping, and the adjustments JSON.
+    expect(anchorClick).toHaveBeenCalledTimes(3)
+    const downloadNames = anchorClick.mock.contexts.map(
+      (anchor) => (anchor as HTMLAnchorElement).download,
+    )
+    expect(downloadNames[2]).toBe('tower.adjustments.json')
   })
 
   it('writes IFC + debug mapping and keeps basement/roof/penthouse exclusions explicit in counts', async () => {
@@ -323,5 +395,222 @@ describe('WorkspacePage', () => {
       expect(mocks.extractFloorMeshes).not.toHaveBeenCalled()
     })
     expect(screen.getByText(/no active floor/i)).toBeInTheDocument()
+  })
+
+  it('plain mode auto-opens the chooser-selected storey and surfaces its reason in Decisions', async () => {
+    mocks.getDemoRuntimeConfig.mockReturnValue({ enabled: false as const })
+    // The chooser picks קומה 3 — NOT the "floor named 2" the legacy heuristic
+    // would pick — proving the open-model flow follows the fixture chooser.
+    mocks.chooseInitialStoreyByFixtures.mockResolvedValue({
+      storeyId: 3,
+      storeyName: 'קומה 3',
+      reason: 'Distinctive chooser test reason for the decisions surface.',
+      scanMs: 7,
+    })
+
+    const user = userEvent.setup()
+    render(<WorkspacePage />)
+
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]')
+    expect(input).not.toBeNull()
+    await user.upload(input!, new File([new ArrayBuffer(128)], 'anytower.ifc'))
+
+    const levelThreeButton = await screen.findByRole('button', { name: /קומה 3/i })
+    await waitFor(() => {
+      expect(levelThreeButton).toHaveClass('storey-list__item--selected')
+    })
+    expect(mocks.extractFloorMeshes).toHaveBeenCalledWith(expect.anything(), 101, 3)
+    expect(mocks.chooseInitialStoreyByFixtures).toHaveBeenCalledTimes(1)
+
+    await user.click(screen.getByRole('tab', { name: 'Decisions' }))
+    expect(await screen.findByText(/Auto-opened floor:/)).toBeInTheDocument()
+    expect(screen.getByText(/Distinctive chooser test reason/)).toBeInTheDocument()
+    expect(screen.getByText(/Fixture scan took 7 ms/)).toBeInTheDocument()
+  })
+
+  it('computes and surfaces sanitary routes without demo mode once fixtures and risers exist on the floor', async () => {
+    mocks.getDemoRuntimeConfig.mockReturnValue({ enabled: false as const })
+
+    const user = userEvent.setup()
+    render(<WorkspacePage />)
+
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]')
+    expect(input).not.toBeNull()
+    // Non-demo mode accepts any file name (no demo upload restriction).
+    await user.upload(input!, new File([new ArrayBuffer(128)], 'anytower.ifc'))
+
+    const levelTwoButton = await screen.findByRole('button', { name: /קומה 2/i })
+    await waitFor(() => {
+      expect(levelTwoButton).toHaveClass('storey-list__item--selected')
+    })
+
+    const placeRisersButton = await screen.findByRole('button', { name: /place risers/i })
+    await user.click(placeRisersButton)
+
+    await screen.findByLabelText('Remove riser R1')
+    await screen.findByLabelText('Remove riser R2')
+    await screen.findByLabelText('Remove riser R3')
+
+    // Suggested toilet risers sit exactly on the toilets, so their routes are
+    // degenerate (zero plan length) and skipped. The bath (T2: all fixtures flow
+    // through routing) already yields one real branch route to the kitchen riser.
+    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('routes:1')
+
+    // Removing R2 rebinds WC-12 to R1, which yields a second real
+    // fixture-to-riser route with no demo mode active.
+    await user.click(screen.getByLabelText('Remove riser R2'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('floor-viewer')).toHaveTextContent('routes:2')
+    })
+
+    // Demo-only chrome stays hidden, but the routing limitations surface in dev.
+    expect(screen.queryByLabelText('Sanitary demo flow')).not.toBeInTheDocument()
+    expect(screen.getByText('Sanitary routing preview notes')).toBeInTheDocument()
+    expect(
+      screen.getByText(/verify grouping before using this demo heuristic with anytower\.ifc/i),
+    ).toBeInTheDocument()
+  })
+
+  it('loads the bundled sample model through the same upload path as a user-picked file', async () => {
+    mocks.getDemoRuntimeConfig.mockReturnValue({ enabled: false as const })
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => new ArrayBuffer(128),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const user = userEvent.setup()
+    render(<WorkspacePage />)
+
+    await user.click(screen.getByRole('button', { name: /duplex mep/i }))
+
+    // The sample flows through handleFileAccepted: parse, auto-open, same as an upload.
+    const levelTwoButton = await screen.findByRole('button', { name: /קומה 2/i })
+    await waitFor(() => {
+      expect(levelTwoButton).toHaveClass('storey-list__item--selected')
+    })
+    expect(fetchMock).toHaveBeenCalledWith('/samples/Duplex_MEP_20110907.ifc')
+    expect(mocks.parseStoreys).toHaveBeenCalledTimes(1)
+    expect(screen.getAllByText('Duplex_MEP_20110907.ifc').length).toBeGreaterThan(0)
+  })
+
+  it('hides the sample model affordance in demo mode', () => {
+    // beforeEach enables demo mode; the demo only accepts its configured model.
+    render(<WorkspacePage />)
+    expect(screen.queryByRole('button', { name: /duplex mep/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /upload ifc file/i })).toBeInTheDocument()
+  })
+
+  it('shows branch routes after suggestion and the per-floor toggle hides and re-shows them', async () => {
+    mocks.getDemoRuntimeConfig.mockReturnValue({ enabled: false as const })
+
+    const user = userEvent.setup()
+    render(<WorkspacePage />)
+
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]')
+    expect(input).not.toBeNull()
+    await user.upload(input!, new File([new ArrayBuffer(128)], 'anytower.ifc'))
+
+    const levelTwoButton = await screen.findByRole('button', { name: /קומה 2/i })
+    await waitFor(() => {
+      expect(levelTwoButton).toHaveClass('storey-list__item--selected')
+    })
+
+    const placeRisersButton = await screen.findByRole('button', { name: /place risers/i })
+    await user.click(placeRisersButton)
+
+    await screen.findByLabelText('Remove riser R1')
+
+    // Both toilets sit exactly on their suggested risers (zero-length runs emit no
+    // segments); the bath routes to the kitchen corner riser as an axis-aligned
+    // L-run, so the dev flow shows its two branch segments right after suggestion.
+    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('branchSegments:2')
+
+    await user.click(screen.getByRole('button', { name: 'toggle-branch-routes' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('floor-viewer')).toHaveTextContent('branchSegments:0')
+    })
+
+    await user.click(screen.getByRole('button', { name: 'toggle-branch-routes' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('floor-viewer')).toHaveTextContent('branchSegments:2')
+    })
+  })
+
+  it('loads the engineer network on demand and the per-floor toggle hides and re-shows the layer', async () => {
+    mocks.getDemoRuntimeConfig.mockReturnValue({ enabled: false as const })
+    // One vertical SW-GRV segment on the auto-opened storey (id 2): drawable as
+    // a floor segment and eligible as a riser stack (Ø110, vertical).
+    mocks.extractEngineerPipeNetwork.mockResolvedValue({
+      metersPerSourceUnit: 1,
+      storeys: [{ id: 2, name: 'קומה 2', elevationSource: 612 }],
+      segments: [
+        {
+          expressId: 501,
+          name: 'Pipe 501',
+          systemName: 'SW-GRV 1',
+          storeyId: 2,
+          storeyName: 'קומה 2',
+          start: { x: 100, y: -50, z: 0 },
+          end: { x: 100, y: -50, z: 3 },
+          endpointSource: 'extrusion-axis',
+          outerDiameterMm: 110,
+          lengthM: 3,
+          invertElevationM: null,
+        },
+      ],
+    })
+
+    const user = userEvent.setup()
+    render(<WorkspacePage />)
+
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]')
+    expect(input).not.toBeNull()
+    await user.upload(input!, new File([new ArrayBuffer(128)], 'anytower.ifc'))
+
+    const levelTwoButton = await screen.findByRole('button', { name: /קומה 2/i })
+    await waitFor(() => {
+      expect(levelTwoButton).toHaveClass('storey-list__item--selected')
+    })
+
+    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('engineerSegments:0')
+
+    const placeRisersButton = await screen.findByRole('button', { name: /place risers/i })
+    await user.click(placeRisersButton)
+    await screen.findByLabelText('Remove riser R1')
+
+    await user.click(screen.getByRole('tab', { name: 'Decisions' }))
+    await user.click(await screen.findByRole('button', { name: /load engineer network/i }))
+
+    // Baseline summary lands in the Decisions tab; extraction ran on the host.
+    await screen.findByText(/1 pipe segment \(SW-GRV \/ VNT\), 1 engineer riser stack/)
+    expect(mocks.extractEngineerPipeNetwork).toHaveBeenCalledWith(expect.anything(), 101, {
+      systemPrefixes: ['SW-GRV', 'VNT'],
+    })
+
+    // Comparison metrics render once both the baseline and our risers exist.
+    const comparisonList = await screen.findByTestId('engineer-comparison')
+    expect(comparisonList).toHaveTextContent(/vs engineer 1/)
+    expect(comparisonList).toHaveTextContent(/Mean distance to nearest engineer riser:/)
+    expect(comparisonList).toHaveTextContent(/ m/)
+
+    // Layer is visible by default right after loading.
+    await waitFor(() => {
+      expect(screen.getByTestId('floor-viewer')).toHaveTextContent('engineerSegments:1')
+    })
+    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('engineerStacks:1')
+
+    await user.click(screen.getByRole('button', { name: 'toggle-engineer-overlay' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('floor-viewer')).toHaveTextContent('engineerSegments:0')
+    })
+    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('engineerStacks:0')
+
+    await user.click(screen.getByRole('button', { name: 'toggle-engineer-overlay' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('floor-viewer')).toHaveTextContent('engineerSegments:1')
+    })
   })
 })

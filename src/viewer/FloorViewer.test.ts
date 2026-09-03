@@ -1,6 +1,28 @@
 /// <reference types="node" />
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { formatStoreyElevationChip } from './formatStoreyElevation'
+
+describe('FloorViewer status bar elevation chip', () => {
+  it('formats the raw IFC elevation as metres using the declared model unit', () => {
+    // 096-style cm model: storey "01" stores Elevation 3015 (= 30.15 m).
+    expect(formatStoreyElevationChip(3015, 'cm')).toBe('30.15 m')
+    // Duplex-style mm model.
+    expect(formatStoreyElevationChip(3000, 'mm')).toBe('3.00 m')
+    expect(formatStoreyElevationChip(0, 'm')).toBe('0.00 m')
+  })
+
+  it('shows the raw number with no unit suffix when the model declares no supported unit', () => {
+    expect(formatStoreyElevationChip(612.4, null)).toBe('612')
+    expect(formatStoreyElevationChip(612.4, null)).not.toContain('mm')
+  })
+
+  it('never renders a hardcoded mm suffix for the elevation chip', () => {
+    const component = readFileSync('src/viewer/FloorViewer.tsx', 'utf8')
+    expect(component).not.toMatch(/selectedStoreyElevation\).toLocaleString\(\)\} mm/)
+    expect(component).toContain('formatStoreyElevationChip(selectedStoreyElevation, modelLengthUnit)')
+  })
+})
 
 describe('FloorViewer sanitary route presentation styles', () => {
   it('only returns route label and line modifier classes that are defined in CSS', () => {

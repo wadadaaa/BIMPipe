@@ -18,37 +18,73 @@ export async function collectSpatialTreeElements(
   webIfcModelId: number,
   storeyId: StoreyId,
 ): Promise<SpatialTreeElements> {
+  const maps = await readSpatialRelationMaps(api, webIfcModelId)
+  return walkSpatialTree(storeyId, maps)
+}
+
+/**
+ * Batched variant for whole-model scans: reads the spatial relation tables
+ * once and walks the tree for every requested storey. Behaviour per storey is
+ * identical to {@link collectSpatialTreeElements}; only the relation-table
+ * reads are shared, which matters on 40+ storey models.
+ */
+export async function collectSpatialTreeElementsForStoreys(
+  api: IfcAPI,
+  webIfcModelId: number,
+  storeyIds: StoreyId[],
+): Promise<Map<StoreyId, SpatialTreeElements>> {
+  const maps = await readSpatialRelationMaps(api, webIfcModelId)
+  return new Map(storeyIds.map((storeyId) => [storeyId, walkSpatialTree(storeyId, maps)]))
+}
+
+interface SpatialRelationMaps {
+  containedBySpatial: Map<number, number[]>
+  referencedBySpatial: Map<number, number[]>
+  childrenBySpatial: Map<number, number[]>
+}
+
+async function readSpatialRelationMaps(
+  api: IfcAPI,
+  webIfcModelId: number,
+): Promise<SpatialRelationMaps> {
   const {
     IFCRELCONTAINEDINSPATIALSTRUCTURE,
     IFCRELREFERENCEDINSPATIALSTRUCTURE,
     IFCRELAGGREGATES,
   } = await import('web-ifc')
 
-  const containedBySpatial = readStructureRelationMap(
-    api,
-    webIfcModelId,
-    IFCRELCONTAINEDINSPATIALSTRUCTURE,
-    'RelatingStructure',
-    'RelatedElements',
-  )
-  const referencedBySpatial = readStructureRelationMap(
-    api,
-    webIfcModelId,
-    IFCRELREFERENCEDINSPATIALSTRUCTURE,
-    'RelatingStructure',
-    'RelatedElements',
-  )
-  const childrenBySpatial = readStructureRelationMap(
-    api,
-    webIfcModelId,
-    IFCRELAGGREGATES,
-    'RelatingObject',
-    'RelatedObjects',
-  )
+  return {
+    containedBySpatial: readStructureRelationMap(
+      api,
+      webIfcModelId,
+      IFCRELCONTAINEDINSPATIALSTRUCTURE,
+      'RelatingStructure',
+      'RelatedElements',
+    ),
+    referencedBySpatial: readStructureRelationMap(
+      api,
+      webIfcModelId,
+      IFCRELREFERENCEDINSPATIALSTRUCTURE,
+      'RelatingStructure',
+      'RelatedElements',
+    ),
+    childrenBySpatial: readStructureRelationMap(
+      api,
+      webIfcModelId,
+      IFCRELAGGREGATES,
+      'RelatingObject',
+      'RelatedObjects',
+    ),
+  }
+}
 
+function walkSpatialTree(
+  rootId: number,
+  { containedBySpatial, referencedBySpatial, childrenBySpatial }: SpatialRelationMaps,
+): SpatialTreeElements {
   const elementIds = new Set<number>()
   const spatialNodeIds = new Set<number>()
-  const queue: number[] = [storeyId]
+  const queue: number[] = [rootId]
 
   while (queue.length > 0) {
     const spatialId = queue.shift()!

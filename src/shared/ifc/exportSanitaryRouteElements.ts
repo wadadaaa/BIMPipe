@@ -272,9 +272,10 @@ export function writeSanitaryRouteSystemAssignment(
     Name: api.CreateIfcType(modelId, ifc.IFCLABEL, 'BIMPipe Sanitary Route Assignment'),
     Description: null,
     RelatedObjects: routeHandles,
-    ...(schema === 'IFC2X3'
-      ? { RelatedObjectsType: api.CreateIfcType(modelId, ifc.IFCLABEL, 'IFCFLOWSEGMENT') }
-      : {}),
+    // Must be written explicitly as null on IFC4: omitting the attribute makes
+    // web-ifc serialize `*`, which misparses RelatingGroup on reopen.
+    RelatedObjectsType:
+      schema === 'IFC2X3' ? api.CreateIfcType(modelId, ifc.IFCLABEL, 'IFCFLOWSEGMENT') : null,
     RelatingGroup: handleRef(system.expressID),
   })
 

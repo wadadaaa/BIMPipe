@@ -2,7 +2,11 @@ import type { Fixture, KitchenArea, Riser, Storey, StoreyId } from '@/domain/typ
 import type { FloorMeshes } from '@/shared/ifc/extractFloorMeshes'
 import { buildRiserStack } from './buildRiserStacks'
 import { getEligibleStoreyIdsForAutoRisers } from './floorClassification'
-import { suggestRiserPositions } from './suggestRisers'
+import {
+  suggestRiserPositions,
+  type ContinuitySnapOptions,
+  type RiserContinuitySnap,
+} from './suggestRisers'
 import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE } from './riserPlacementProfile'
 import {
   getDemoRuntimeConfig,
@@ -33,6 +37,48 @@ export function buildSuggestedRisers(
   nextLabel: () => string,
   demoRuntime: ReturnType<typeof getDemoRuntimeConfig>,
 ): Riser[] {
+  return buildSuggestedRisersWithSnap(
+    storeys,
+    sourceStoreyId,
+    fixtures,
+    kitchens,
+    floorMeshes,
+    nextLabel,
+    demoRuntime,
+  ).risers
+}
+
+/** Continuity-snap outcome of one suggested riser stack (W5), for the UI/debug JSON. */
+export interface SuggestedRiserSnapOutcome {
+  stackLabel: string
+  snap: RiserContinuitySnap
+}
+
+export interface SuggestedRisersWithSnap {
+  risers: Riser[]
+  /**
+   * One entry per suggested stack, in suggestion order. Empty when snapping
+   * was requested but nothing was suggested; misses are included with their
+   * reasons — never silently dropped.
+   */
+  snapOutcomes: SuggestedRiserSnapOutcome[]
+}
+
+/**
+ * Same as {@link buildSuggestedRisers} but optionally snaps each suggestion to
+ * the continuity map (W5). With `continuitySnap` undefined the riser output is
+ * byte-identical to the plain function (the domain flag guarantees it).
+ */
+export function buildSuggestedRisersWithSnap(
+  storeys: Storey[],
+  sourceStoreyId: StoreyId,
+  fixtures: Fixture[],
+  kitchens: KitchenArea[],
+  floorMeshes: FloorMeshes | null,
+  nextLabel: () => string,
+  demoRuntime: ReturnType<typeof getDemoRuntimeConfig>,
+  continuitySnap?: ContinuitySnapOptions,
+): SuggestedRisersWithSnap {
   const ruleProfile = DEFAULT_RISER_PLACEMENT_RULE_PROFILE
   const floorPlanBounds = floorMeshes
     ? {
@@ -61,9 +107,29 @@ export function buildSuggestedRisers(
     }
     return true
   })
-  const positions = suggestRiserPositions(scopedFixtures, scopedKitchens, floorPlanBounds, ruleProfile)
-
-  return positions.flatMap((position) =>
-    buildRiserStack(targetStoreys, sourceStoreyId, position, nextLabel(), 'detected'),
+  const positions = suggestRiserPositions(
+    scopedFixtures,
+    scopedKitchens,
+    floorPlanBounds,
+    ruleProfile,
+    continuitySnap === undefined ? undefined : { continuitySnap },
   )
+
+  const risers: Riser[] = []
+  const snapOutcomes: SuggestedRiserSnapOutcome[] = []
+  for (const position of positions) {
+    const stackLabel = nextLabel()
+    // Pass a plain point so the optional `snap` field never leaks into risers.
+    risers.push(
+      ...buildRiserStack(
+        targetStoreys,
+        sourceStoreyId,
+        { x: position.x, y: position.y, z: position.z },
+        stackLabel,
+        'detected',
+      ),
+    )
+    if (position.snap !== undefined) snapOutcomes.push({ stackLabel, snap: position.snap })
+  }
+  return { risers, snapOutcomes }
 }

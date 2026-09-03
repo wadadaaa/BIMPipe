@@ -1,4 +1,4 @@
-import { lazy, startTransition, Suspense, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
+import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, type MutableRefObject } from 'react'
 import { IfcUpload } from '@/features/ifc-upload/IfcUpload'
 import { StoreyList } from '@/features/storey-list/StoreyList'
 import { Sidebar } from '@/features/sidebar/Sidebar'
@@ -8,17 +8,51 @@ import { WorkspaceLayout } from '@/widgets/WorkspaceLayout'
 import { TopBar } from '@/widgets/TopBar'
 import type { ThemeMode } from '@/app/App'
 import { getIfcApi } from '@/shared/ifc/ifcApi'
-import type { FloorMeshes } from '@/shared/ifc/extractFloorMeshes'
 import { aggregateStoreyDetections } from '@/shared/ifc/aggregateStoreyDetections'
 import { parseStoreys } from '@/shared/ifc/parseStoreys'
-import type { Fixture, KitchenArea, Riser, RiserId, Storey, StoreyId, SidebarTab } from '@/domain/types'
-import { buildRiserStack, removeRiserStack } from '@/shared/routes/buildRiserStacks'
+import { resolveModelLengthUnit } from '@/shared/ifc/resolveModelLengthUnit'
+import {
+  alignStoreysByElevation,
+  STOREY_ALIGNMENT_TOLERANCE_MM,
+  type AlignmentModelInput,
+  type StoreyAlignment,
+} from '@/domain/alignStoreys'
+import type { LengthUnit } from '@/shared/lengthUnits'
+import type { Fixture, KitchenArea, PlanBounds, Riser, RiserId, Storey, StoreyId, SidebarTab } from '@/domain/types'
+import type { FloorMeshes } from '@/shared/ifc/extractFloorMeshes'
+import type { InitialStoreyDecision } from '@/shared/ifc/scanStoreyFixtures'
+import type { FloorRoutes, RouteSegment } from '@/domain/branchRouting'
+import type { SanitaryFixtureRoute } from '@/shared/routes/buildSanitaryRoutes'
+import {
+  IDENTITY_MODEL_FRAME,
+  isIdentityModelFrame,
+  toLocalPoint,
+  toSourcePoint,
+  type ModelFrame,
+} from '@/shared/frame/modelFrame'
+import { serializeAdjustLog } from '@/domain/adjustLog'
+import { computeEngineerComparison } from '@/domain/engineerComparisonMetrics'
+import { isVerticalEngineerSegment } from '@/domain/engineerPipes'
+import { alignEngineerStacksToViewerPlan } from '@/shared/frame/ifcSourceFrame'
+import {
+  getEngineerOverlayPresentation,
+  resolveEngineerStoreyId,
+} from '@/viewer/engineerNetworkPresentation'
+import { getContinuityOverlayPresentation } from '@/viewer/continuityOverlayPresentation'
+import {
+  createInitialWorkspacePageState,
+  workspacePageReducer,
+  type LinkedModelState,
+} from './workspacePageState'
+import { buildRiserStack } from '@/shared/routes/buildRiserStacks'
 import { classifyFloors } from '@/shared/routes/floorClassification'
 import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE } from '@/shared/routes/riserPlacementProfile'
-import { buildSuggestedRisers } from '@/shared/routes/buildSuggestedRisers'
+import { buildSuggestedRisersWithSnap } from '@/shared/routes/buildSuggestedRisers'
 import { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
-import { buildDemoModeUploadError, getDemoRuntimeConfig, isStoreyIncludedInDemoScope } from '@/shared/demoConfig'
-import { buildSanitaryRoutingDemoPlan } from '@/shared/routes/buildSanitaryRoutes'
+import { buildDemoModeUploadError, isStoreyIncludedInDemoScope } from '@/shared/demoConfig'
+import { buildSanitaryRoutingDemoPlan, buildSanitaryRoutingPlan } from '@/shared/routes/buildSanitaryRoutes'
+import { buildBranchRoutesFromAssignments } from '@/shared/routes/buildBranchRoutes'
+import { assignFixturesToRisers } from '@/domain/assignFixturesToRisers'
 
 let floorViewerModulePromise: Promise<typeof import('@/viewer/FloorViewer')> | null = null
 let model3DViewerModulePromise: Promise<typeof import('@/viewer/Model3DViewer')> | null = null
@@ -27,6 +61,7 @@ let floorSelectionModulesPromise: Promise<
     typeof import('@/shared/ifc/extractFloorMeshes'),
     typeof import('@/shared/ifc/detectFixtures'),
     typeof import('@/shared/ifc/detectKitchens'),
+    typeof import('@/shared/ifc/resolveModelOrigin'),
   ]
 > | null = null
 
@@ -45,6 +80,7 @@ function loadFloorSelectionModules() {
     import('@/shared/ifc/extractFloorMeshes'),
     import('@/shared/ifc/detectFixtures'),
     import('@/shared/ifc/detectKitchens'),
+    import('@/shared/ifc/resolveModelOrigin'),
   ])
   return floorSelectionModulesPromise
 }
@@ -82,57 +118,84 @@ export function WorkspacePage({
   theme = 'dark',
   onToggleTheme = () => {},
 }: Partial<WorkspacePageProps>) {
-  // --- file / model ---
+  // All domain state lives in the colocated reducer module; this component only
+  // renders, derives memoized values, and dispatches actions.
+  const [state, dispatch] = useReducer(workspacePageReducer, undefined, createInitialWorkspacePageState)
+  const {
+    webIfcModelId,
+    modelFileName,
+    storeys,
+    modelLengthUnit,
+    isParsingStoreys,
+    uploadError,
+    demoUploadError,
+    demoAssetError,
+    demoRuntime,
+    demoRuntimeConfigError,
+    linkedModels,
+    storeyAlignments,
+    selectedStoreyId,
+    floorMeshes,
+    isExtractingGeometry,
+    geometryError,
+    underlay,
+    underlayError,
+    crossFileMerge,
+    initialStoreyDecision,
+    modelOrigin,
+    hoveredExpressId,
+    selectedExpressId,
+    fixtures,
+    kitchens,
+    isDetectingFixtures,
+    risers,
+    isAddingRiser,
+    adjustLog,
+    downloadMode,
+    downloadError,
+    activeTab,
+    viewMode,
+    branchRoutesVisibleByStorey,
+    engineerBaseline,
+    isExtractingEngineerBaseline,
+    engineerBaselineError,
+    engineerOverlayVisibleByStorey,
+    continuityMap,
+    isBuildingContinuityMap,
+    continuityBuildProgress,
+    continuityBuildError,
+    continuityOverlayVisibleByStorey,
+    continuitySnapEnabled,
+    riserSnapOutcomes,
+  } = state
+
+  // Imperative viewer/export plumbing that intentionally stays outside the
+  // reducer: web-ifc handles, raw source bytes, the riser label counter, and
+  // detection debug output that is only read (never rendered reactively).
   const webIfcModelIdRef = useRef<number | null>(null)
-  const [webIfcModelId, setWebIfcModelId] = useState<number | null>(null)
   const sourceIfcBytesRef = useRef<Uint8Array | null>(null)
   const nextRiserLabelRef = useRef(1)
-  const [modelFileName, setModelFileName] = useState<string | null>(null)
-
-  // --- storey loading ---
-  const [storeys, setStoreys] = useState<Storey[]>([])
-  const [isParsingStoreys, setIsParsingStoreys] = useState(false)
-  const [uploadError, setUploadError] = useState<string | null>(null)
-  const [demoUploadError, setDemoUploadError] = useState<string | null>(null)
-  const [demoAssetError, setDemoAssetError] = useState<string | null>(null)
-  const [{ demoRuntime, demoRuntimeConfigError }] = useState(() => {
-    try {
-      return { demoRuntime: getDemoRuntimeConfig(), demoRuntimeConfigError: null }
-    } catch (error) {
-      return {
-        demoRuntime: { enabled: false } as const,
-        demoRuntimeConfigError: error instanceof Error ? error.message : 'Demo mode config is invalid.',
-      }
-    }
-  })
-
-  // --- floor extraction ---
-  const [selectedStoreyId, setSelectedStoreyId] = useState<StoreyId | null>(null)
-  const [floorMeshes, setFloorMeshes] = useState<FloorMeshes | null>(null)
-  const [isExtractingGeometry, setIsExtractingGeometry] = useState(false)
-  const [geometryError, setGeometryError] = useState<string | null>(null)
-
-  // --- viewer interaction ---
-  const [hoveredExpressId, setHoveredExpressId] = useState<number | null>(null)
-  const [selectedExpressId, setSelectedExpressId] = useState<number | null>(null)
-
-  // --- fixtures ---
-  const [fixtures, setFixtures] = useState<Fixture[]>([])
-  const [kitchens, setKitchens] = useState<KitchenArea[]>([])
-  const [isDetectingFixtures, setIsDetectingFixtures] = useState(false)
   const detectionDebugRef = useRef<Awaited<ReturnType<typeof aggregateStoreyDetections>> | null>(null)
+  // Local-frame origin for rendering, mirrored from state so the async openStorey
+  // flow can read the resolved frame across awaits. null = not resolved yet for
+  // the current model (resolution happens on the first storey with geometry).
+  const modelFrameRef = useRef<ModelFrame | null>(null)
+  // Declared length unit mirrored from state for the same reason: openStorey
+  // runs before the storeys-parsed transition flushes, so it reads the ref.
+  const modelLengthUnitRef = useRef<LengthUnit | null>(null)
+  // Multi-file upload (W4): linked models and their storey alignments mirrored
+  // for openStorey, which runs before the linked-models-loaded transition
+  // flushes. hostFileNameRef feeds the cross-file merge accounting.
+  const linkedModelsRef = useRef<LinkedModelState[]>([])
+  const storeyAlignmentsRef = useRef<StoreyAlignment[]>([])
+  const hostFileNameRef = useRef<string | null>(null)
 
-  // --- risers ---
-  const [risers, setRisers] = useState<Riser[]>([])
-  const [isAddingRiser, setIsAddingRiser] = useState(false)
-  const [downloadMode, setDownloadMode] = useState<'full' | null>(null)
-  const [downloadError, setDownloadError] = useState<string | null>(null)
-
-  // --- sidebar ---
-  const [activeTab, setActiveTab] = useState<SidebarTab>('fixtures')
-
-  // --- view mode ---
-  const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d')
+  // Rendering frame derived from the reducer state. Identity for near-origin
+  // models, so localization below is a no-op that preserves array identities.
+  const modelFrame = useMemo<ModelFrame>(
+    () => (modelOrigin ? { origin: modelOrigin.origin } : IDENTITY_MODEL_FRAME),
+    [modelOrigin],
+  )
 
   // ---------------------------------------------------------------------------
 
@@ -148,44 +211,47 @@ export function WorkspacePage({
   useEffect(() => {
     const normalized = ensureRiserStackLabels(risers, nextRiserLabelRef)
     if (normalized !== risers) {
-      setRisers(normalized)
+      dispatch({ type: 'risers-normalized', risers: normalized })
       return
     }
 
     nextRiserLabelRef.current = getNextRiserLabelNumber(risers)
   }, [risers])
 
-  async function handleFileAccepted(file: File) {
-    const uploadDemoError = buildDemoModeUploadError(file.name, demoRuntime)
-    if (uploadDemoError) {
-      setDemoUploadError(uploadDemoError)
+  function handleFileAccepted(file: File) {
+    void handleFilesAccepted([file])
+  }
+
+  async function handleFilesAccepted(files: File[]) {
+    const [file, ...linkedFiles] = files
+    if (!file) return
+    if (demoRuntime.enabled && linkedFiles.length > 0) {
+      // Demo mode stays single-file only (its scope config is built around one model).
+      dispatch({
+        type: 'demo-upload-rejected',
+        message: 'Demo mode accepts a single IFC file. Linked models are unavailable here.',
+      })
       return
     }
-    if (demoUploadError !== null) setDemoUploadError(null)
+    const uploadDemoError = buildDemoModeUploadError(file.name, demoRuntime)
+    if (uploadDemoError) {
+      dispatch({ type: 'demo-upload-rejected', message: uploadDemoError })
+      return
+    }
     sourceIfcBytesRef.current = null
     nextRiserLabelRef.current = 1
-    // Sync the ref alongside the state update so openStorey sees the cleared
-    // count when it runs synchronously after this transition is queued.
+    // Sync the refs alongside the state update so openStorey sees the cleared
+    // count and unresolved frame when it runs after this transition is queued.
     risersRef.current = []
-    setIsParsingStoreys(true)
-    setModelFileName(file.name)
-    setUploadError(null)
+    modelFrameRef.current = null
+    modelLengthUnitRef.current = null
+    hostFileNameRef.current = file.name
+    const previousLinkedModels = linkedModelsRef.current
+    linkedModelsRef.current = []
+    storeyAlignmentsRef.current = []
+    dispatch({ type: 'upload-started', fileName: file.name })
     startTransition(() => {
-      setStoreys([])
-      setSelectedStoreyId(null)
-      setFloorMeshes(null)
-      setGeometryError(null)
-      setHoveredExpressId(null)
-      setSelectedExpressId(null)
-      setFixtures([])
-      setKitchens([])
-      setRisers([])
-      setIsAddingRiser(false)
-      setActiveTab('fixtures')
-      setDownloadError(null)
-      setDemoAssetError(null)
-      setViewMode('2d')
-      setWebIfcModelId(null)
+      dispatch({ type: 'upload-reset' })
     })
 
     try {
@@ -194,33 +260,77 @@ export function WorkspacePage({
         file.arrayBuffer(),
       ])
 
-      // Close any previously opened model
+      // Close any previously opened models (host and linked).
       if (webIfcModelIdRef.current !== null) {
         api.CloseModel(webIfcModelIdRef.current)
+      }
+      for (const previous of previousLinkedModels) {
+        try {
+          api.CloseModel(previous.webIfcModelId)
+        } catch {
+          // Already closed/invalid handles must not break the new upload.
+        }
       }
 
       const data = new Uint8Array(buffer)
       sourceIfcBytesRef.current = data.slice()
       const newModelId = api.OpenModel(data)
       webIfcModelIdRef.current = newModelId
-      setWebIfcModelId(newModelId)
+      dispatch({ type: 'model-opened', webIfcModelId: newModelId })
 
       const domainModelId = crypto.randomUUID()
       const parsed = await parseStoreys(api, newModelId, domainModelId)
+      // Declared IFC length unit for raw attribute values (storey elevations).
+      // null = undeclared/unsupported — the UI then shows raw values, no guessing.
+      const modelLengthUnit = await resolveModelLengthUnit(api, newModelId)
+      modelLengthUnitRef.current = modelLengthUnit
       startTransition(() => {
-        setStoreys(parsed)
+        dispatch({ type: 'storeys-parsed', storeys: parsed, modelLengthUnit })
       })
+
+      if (linkedFiles.length > 0) {
+        // Linked models load BEFORE the floor auto-opens so the first opened
+        // floor already gets merged detection and the architecture underlay.
+        const { linkedModels: loadedLinkedModels, alignments } = await loadLinkedModels(
+          api,
+          { fileName: file.name, webIfcModelId: newModelId, lengthUnit: modelLengthUnit, storeys: parsed },
+          linkedFiles,
+        )
+        linkedModelsRef.current = loadedLinkedModels
+        storeyAlignmentsRef.current = alignments
+        startTransition(() => {
+          dispatch({ type: 'linked-models-loaded', linkedModels: loadedLinkedModels, alignments })
+        })
+      }
+
       preloadFloorInspectionModules()
-      const defaultStoreyId = findDefaultStoreyId(parsed)
-      if (defaultStoreyId !== null) {
-        void openStorey(defaultStoreyId)
+      if (demoRuntime.enabled) {
+        // Demo floor-selection semantics preserved untouched: the demo flow
+        // keeps the legacy name-based default floor (its configured scope is
+        // built around that floor), independent of the fixture chooser.
+        const defaultStoreyId = findDefaultStoreyId(parsed)
+        if (defaultStoreyId !== null) {
+          void openStorey(defaultStoreyId)
+        }
+      } else {
+        // Plain mode: pick the floor to open from per-storey fixture evidence
+        // (geometry-free scan + pure chooser). The decision, including its
+        // human-readable reason, lands in the Decisions tab and debug JSON.
+        const decision = await resolveInitialStoreyDecision(api, newModelId, parsed)
+        startTransition(() => {
+          dispatch({ type: 'initial-storey-chosen', decision })
+        })
+        if (decision.storeyId !== null) {
+          void openStorey(decision.storeyId)
+        }
       }
     } catch (err) {
-      setUploadError(
-        err instanceof Error ? err.message : 'Failed to parse IFC file.',
-      )
+      dispatch({
+        type: 'upload-failed',
+        message: err instanceof Error ? err.message : 'Failed to parse IFC file.',
+      })
     } finally {
-      setIsParsingStoreys(false)
+      dispatch({ type: 'upload-parsing-finished' })
     }
   }
 
@@ -229,68 +339,147 @@ export function WorkspacePage({
     if (modelId === null) return
 
     // Keep the "opening floor" feedback urgent so the loader paints before IFC work begins.
-    setSelectedStoreyId(id)
-    setFloorMeshes(null)
-    setGeometryError(null)
-    setIsExtractingGeometry(true)
-    setHoveredExpressId(null)
-    setSelectedExpressId(null)
-    setFixtures([])
-    setKitchens([])
-    setIsDetectingFixtures(true)
     // Risers are NOT cleared — they span all floors and persist across selection.
-    setIsAddingRiser(false)
-    setActiveTab(risersRef.current.length > 0 ? 'risers' : 'fixtures')
-    setDownloadError(null)
-    setDemoAssetError(null)
+    dispatch({ type: 'floor-opened', storeyId: id, hasRisers: risersRef.current.length > 0 })
 
     await waitForNextPaint()
 
     try {
-      const [[{ extractFloorMeshes }, { detectFixtures }, { detectKitchens }], api] = await Promise.all([
+      const [
+        [{ extractFloorMeshes }, { detectFixtures }, { detectKitchens }, { resolveModelOriginDecision }],
+        api,
+      ] = await Promise.all([
         loadFloorSelectionModules(),
         getIfcApi(),
       ])
 
-      const meshes = await extractFloorMeshes(api, modelId, id)
+      const knownFrame = modelFrameRef.current
+      let meshes =
+        knownFrame !== null && !isIdentityModelFrame(knownFrame)
+          ? await extractFloorMeshes(api, modelId, id, knownFrame)
+          : await extractFloorMeshes(api, modelId, id)
+
+      if (knownFrame === null) {
+        // First storey with geometry decides the model origin (once per model).
+        // Null decision = no usable bounds on this floor; retry on the next one.
+        // The declared unit (when known) replaces the placement probe's
+        // magnitude heuristic for the far-from-origin verdict.
+        const decision = await resolveModelOriginDecision(
+          api,
+          modelId,
+          readSourcePlanBounds(meshes),
+          modelLengthUnitRef.current,
+        )
+        if (decision !== null) {
+          const frame: ModelFrame = { origin: decision.origin }
+          modelFrameRef.current = frame
+          dispatch({ type: 'model-origin-resolved', decision })
+          if (!isIdentityModelFrame(frame)) {
+            // Re-extract so the Float32 geometry is baked in the local frame.
+            meshes = await extractFloorMeshes(api, modelId, id, frame)
+          }
+        }
+      }
+
       startTransition(() => {
-        setFloorMeshes(meshes)
-        setIsExtractingGeometry(false)
+        dispatch({ type: 'floor-geometry-loaded', floorMeshes: meshes })
       })
 
+      // --- W4: architecture underlay + cross-file detection targets ---
+      // Linked storeys aligned to this host storey (empty on single-file
+      // uploads, which keeps the whole block inert).
+      const linkedTargets = collectLinkedDetectionTargets(
+        storeyAlignmentsRef.current,
+        linkedModelsRef.current,
+        id,
+      )
+
+      const underlaySource = linkedTargets.find((target) => target.hasWalls) ?? null
+      if (underlaySource !== null) {
+        try {
+          // Only the aligned storey of the linked model is tessellated — a
+          // full-model pass over a large architecture file is minutes-level.
+          const { extractStoreyUnderlayMeshes } = await import('@/shared/ifc/extractFloorMeshes')
+          const underlayMeshes = await extractStoreyUnderlayMeshes(
+            api,
+            underlaySource.webIfcModelId,
+            underlaySource.storeyId,
+            // The HOST frame keeps the underlay in the host's local origin;
+            // both buildings share plan coordinates (checked by alignment).
+            modelFrameRef.current ?? IDENTITY_MODEL_FRAME,
+          )
+          startTransition(() => {
+            dispatch({
+              type: 'underlay-loaded',
+              underlay: { meshes: underlayMeshes, sourceFileName: underlaySource.fileName },
+            })
+          })
+        } catch (err) {
+          startTransition(() => {
+            dispatch({
+              type: 'underlay-failed',
+              message: `Architecture underlay from ${underlaySource.fileName} failed: ${
+                err instanceof Error ? err.message : 'unknown error'
+              }`,
+            })
+          })
+        }
+      }
+
       try {
-        const [detectedFixtures, detectedKitchens] = await Promise.allSettled([
-          detectFixtures(api, modelId, id),
-          detectKitchens(api, modelId, id),
-        ])
+        if (linkedTargets.length > 0) {
+          // Merged detection across host + aligned linked storeys, with the
+          // cross-file dedupe accounting surfaced in Decisions / debug JSON.
+          const { detectMergedStoreyFixtures } = await import('@/shared/ifc/detectMergedStoreyFixtures')
+          const merged = await detectMergedStoreyFixtures(
+            api,
+            {
+              webIfcModelId: modelId,
+              storeyId: id,
+              fileName: hostFileNameRef.current ?? 'host.ifc',
+            },
+            linkedTargets,
+          )
+          startTransition(() => {
+            dispatch({
+              type: 'floor-fixtures-detected',
+              fixtures: merged.fixtures,
+              kitchens: merged.kitchens,
+              hasRisers: risersRef.current.length > 0,
+              crossFileMerge: merged,
+            })
+          })
+        } else {
+          const [detectedFixtures, detectedKitchens] = await Promise.allSettled([
+            detectFixtures(api, modelId, id),
+            detectKitchens(api, modelId, id),
+          ])
 
-        const fixturesResult =
-          detectedFixtures.status === 'fulfilled' ? detectedFixtures.value : []
-        const kitchensResult =
-          detectedKitchens.status === 'fulfilled' ? detectedKitchens.value : []
-        const toiletFixtures = fixturesResult.filter((fixture) => fixture.kind === 'TOILETPAN')
+          const fixturesResult =
+            detectedFixtures.status === 'fulfilled' ? detectedFixtures.value : []
+          const kitchensResult =
+            detectedKitchens.status === 'fulfilled' ? detectedKitchens.value : []
 
-        startTransition(() => {
-          setFixtures(toiletFixtures)
-          setKitchens(kitchensResult)
-          // Detection and placement are split into two distinct phases.
-          // Risers are placed only when the user explicitly clicks Suggest.
-          if (risersRef.current.length === 0) {
-            setActiveTab('fixtures')
-          }
-        })
+          startTransition(() => {
+            dispatch({
+              type: 'floor-fixtures-detected',
+              fixtures: fixturesResult,
+              kitchens: kitchensResult,
+              hasRisers: risersRef.current.length > 0,
+            })
+          })
+        }
       } catch {
         // Detection failure is non-fatal — floor plan stays visible, fixtures stay empty.
       } finally {
-        startTransition(() => setIsDetectingFixtures(false))
+        startTransition(() => dispatch({ type: 'fixture-detection-finished' }))
       }
     } catch (err) {
       startTransition(() => {
-        setGeometryError(
-          err instanceof Error ? err.message : 'Failed to extract floor geometry.',
-        )
-        setIsExtractingGeometry(false)
-        setIsDetectingFixtures(false)
+        dispatch({
+          type: 'floor-open-failed',
+          message: err instanceof Error ? err.message : 'Failed to extract floor geometry.',
+        })
       })
     }
   }
@@ -299,40 +488,230 @@ export function WorkspacePage({
     await openStorey(id)
   }
 
-  // --- riser handlers ---
+  // Stable callback identities: these replace setState functions that were
+  // previously passed straight as props (FloorViewer re-runs effects when
+  // onObjectHover/onObjectSelect change identity), so they must not churn.
+  const handleObjectHover = useCallback((expressId: number | null) => {
+    dispatch({ type: 'object-hovered', expressId })
+  }, [])
 
-  function handleAddRiser(pos: { x: number; y: number; z: number }) {
+  const handleObjectSelect = useCallback((expressId: number | null) => {
+    dispatch({ type: 'object-selected', expressId })
+  }, [])
+
+  const handleTabChange = useCallback((tab: SidebarTab) => {
+    dispatch({ type: 'active-tab-set', tab })
+  }, [])
+
+  // --- riser handlers ---
+  // The viewer works in the local frame, so click/drag positions arrive local
+  // and are converted back to source coordinates (local + origin) before they
+  // touch domain state. Export therefore keeps writing source coordinates.
+
+  function handleAddRiser(localPos: { x: number; y: number; z: number }) {
     if (!selectedStoreyId) return
+    const pos = toSourcePoint(modelFrame, localPos)
     startTransition(() =>
-      setRisers((prev) => [
-        ...prev,
-        ...buildRiserStack(storeys, selectedStoreyId, pos, takeNextRiserLabel(nextRiserLabelRef), 'manual'),
-      ]),
+      dispatch({
+        type: 'riser-stack-added',
+        stackRisers: buildRiserStack(storeys, selectedStoreyId, pos, takeNextRiserLabel(nextRiserLabelRef), 'manual'),
+        ts: new Date().toISOString(),
+      }),
     )
   }
 
   function handleRemoveRiser(id: RiserId) {
     // Deleting a riser removes the whole vertical stack across all floors immediately.
-    setRisers((prev) => removeRiserStack(prev, id))
+    dispatch({ type: 'riser-removed', riserId: id, ts: new Date().toISOString() })
   }
 
-  function handleMoveRiser(id: RiserId, pos: { x: number; y: number; z: number }) {
+  function handleMoveRiser(id: RiserId, localPos: { x: number; y: number; z: number }) {
     // Propagate X/Z to every floor in the same stack; preserve each floor's Y.
-    setRisers((prev) => {
-      const movedRiser = prev.find((r) => r.id === id)
-      if (!movedRiser) return prev
-      return prev.map((r) =>
-        r.stackId === movedRiser.stackId
-          ? { ...r, position: { x: pos.x, y: r.position.y, z: pos.z } }
-          : r,
-      )
+    dispatch({ type: 'riser-moved', riserId: id, position: toSourcePoint(modelFrame, localPos) })
+  }
+
+  function handleMoveRiserCommit(
+    id: RiserId,
+    localFrom: { x: number; y: number; z: number },
+    localTo: { x: number; y: number; z: number },
+  ) {
+    // Adjust-log entries are recorded in SOURCE coordinates (local + origin),
+    // the same frame riser positions are stored and exported in.
+    dispatch({
+      type: 'riser-move-committed',
+      riserId: id,
+      from: toSourcePoint(modelFrame, localFrom),
+      to: toSourcePoint(modelFrame, localTo),
+      ts: new Date().toISOString(),
     })
   }
 
   function handleToggleAddRiser() {
     startTransition(() => {
-      setIsAddingRiser((v) => !v)
+      dispatch({ type: 'add-riser-toggled' })
     })
+  }
+
+  function handleToggleBranchRoutes() {
+    if (selectedStoreyId === null) return
+    dispatch({ type: 'branch-routes-toggled', storeyId: selectedStoreyId })
+  }
+
+  function handleToggleEngineerOverlay() {
+    if (selectedStoreyId === null) return
+    dispatch({ type: 'engineer-overlay-toggled', storeyId: selectedStoreyId })
+  }
+
+  /**
+   * Loads the engineer plumbing baseline (W7) on demand: extracts the
+   * prefix-filtered pipe network from the host file, falling back to each
+   * linked file in upload order — the first file with matching systems wins.
+   */
+  async function handleLoadEngineerBaseline() {
+    if (webIfcModelId === null || modelFileName === null || isExtractingEngineerBaseline) return
+    dispatch({ type: 'engineer-extraction-started' })
+    try {
+      const [api, { extractEngineerPipeNetwork }, engineerPipes] = await Promise.all([
+        getIfcApi(),
+        import('@/shared/ifc/extractEngineerPipeNetwork'),
+        import('@/domain/engineerPipes'),
+      ])
+      const systemPrefixes = engineerPipes.ENGINEER_RISER_SYSTEM_PREFIXES
+      const candidates = [
+        { fileName: modelFileName, webIfcModelId },
+        ...linkedModels.map((model) => ({
+          fileName: model.fileName,
+          webIfcModelId: model.webIfcModelId,
+        })),
+      ]
+      for (const candidate of candidates) {
+        const network = await extractEngineerPipeNetwork(api, candidate.webIfcModelId, {
+          systemPrefixes,
+        })
+        if (network.segments.length === 0) continue
+        dispatch({
+          type: 'engineer-baseline-loaded',
+          baseline: {
+            sourceFileName: candidate.fileName,
+            systemPrefixes,
+            network,
+            stacks: engineerPipes.groupEngineerRiserStacks(network),
+          },
+        })
+        return
+      }
+      dispatch({
+        type: 'engineer-extraction-failed',
+        message: `No systems matching ${systemPrefixes.join(' / ')} found in any loaded file.`,
+      })
+    } catch (err) {
+      dispatch({
+        type: 'engineer-extraction-failed',
+        message: err instanceof Error ? err.message : 'Engineer network extraction failed.',
+      })
+    }
+  }
+
+  function handleToggleContinuityOverlay() {
+    if (selectedStoreyId === null) return
+    dispatch({ type: 'continuity-overlay-toggled', storeyId: selectedStoreyId })
+  }
+
+  const handleToggleContinuitySnap = useCallback(() => {
+    dispatch({ type: 'continuity-snap-toggled' })
+  }, [])
+
+  /**
+   * Builds the continuity map (W5) on demand from the loaded file with the
+   * most walls (host wins ties) — the host's own walls on single-file uploads,
+   * the linked architecture file on e.g. the 096 podium. Full-model build: on
+   * the largest real model (096-A, 13 storeys) extraction measures ~0.65 s, so
+   * no storey scoping is needed; progress still repaints between storeys.
+   */
+  async function handleBuildContinuityMap() {
+    if (webIfcModelId === null || modelFileName === null || isBuildingContinuityMap) return
+    dispatch({ type: 'continuity-build-started' })
+    try {
+      const [api, { buildContinuityMapForModel }, { IFCWALL, IFCWALLSTANDARDCASE }] =
+        await Promise.all([
+          getIfcApi(),
+          import('@/shared/ifc/buildContinuityMapForModel'),
+          import('web-ifc'),
+        ])
+
+      const candidates = [
+        { fileName: modelFileName, webIfcModelId, lengthUnit: modelLengthUnit, isHost: true },
+        ...linkedModels.map((model) => ({
+          fileName: model.fileName,
+          webIfcModelId: model.webIfcModelId,
+          lengthUnit: model.lengthUnit,
+          isHost: false,
+        })),
+      ]
+      let source: (typeof candidates)[number] | null = null
+      let sourceWallCount = 0
+      for (const candidate of candidates) {
+        const wallCount =
+          api.GetLineIDsWithType(candidate.webIfcModelId, IFCWALL).size() +
+          api.GetLineIDsWithType(candidate.webIfcModelId, IFCWALLSTANDARDCASE).size()
+        if (wallCount > sourceWallCount) {
+          source = candidate
+          sourceWallCount = wallCount
+        }
+      }
+      if (source === null) {
+        dispatch({
+          type: 'continuity-build-failed',
+          message: 'No walls found in any loaded file — the continuity map needs architecture geometry.',
+        })
+        return
+      }
+      if (source.lengthUnit === null) {
+        dispatch({
+          type: 'continuity-build-failed',
+          message: `${source.fileName} declares no supported length unit; storey elevations cannot be converted, so the continuity map was not built.`,
+        })
+        return
+      }
+
+      const sourceToHostStoreyId = source.isHost
+        ? null
+        : buildLinkedToHostStoreyIdMap(storeyAlignments, source.fileName)
+      if (sourceToHostStoreyId !== null && sourceToHostStoreyId.size === 0) {
+        dispatch({
+          type: 'continuity-build-failed',
+          message: `${source.fileName} has the walls but none of its storeys align to the host — the continuity map cannot be mapped onto host floors.`,
+        })
+        return
+      }
+
+      const result = await buildContinuityMapForModel({
+        api,
+        webIfcModelId: source.webIfcModelId,
+        lengthUnit: source.lengthUnit,
+        sourceToHostStoreyId,
+        onStoreyProgress: async (processed, total) => {
+          dispatch({ type: 'continuity-build-progress', processed, total })
+          await waitForNextPaint()
+        },
+      })
+      dispatch({
+        type: 'continuity-map-loaded',
+        continuityMap: {
+          sourceFileName: source.fileName,
+          map: result.map,
+          diagnostics: [...result.diagnostics, ...result.map.diagnostics],
+          extractMs: Math.round(result.extractMs),
+          buildMs: Math.round(result.buildMs),
+          processedStoreyCount: result.processedStoreyCount,
+        },
+      })
+    } catch (err) {
+      dispatch({
+        type: 'continuity-build-failed',
+        message: err instanceof Error ? err.message : 'Continuity map build failed.',
+      })
+    }
   }
 
   function handleSuggestRisers() {
@@ -345,14 +724,15 @@ export function WorkspacePage({
       const excludedFixtureCount = fixtures.filter((fixture) => !scopedStoreyIds.has(fixture.storeyId)).length
       const excludedKitchenCount = kitchens.filter((kitchen) => !scopedStoreyIds.has(kitchen.storeyId)).length
       if (excludedFixtureCount > 0 || excludedKitchenCount > 0) {
-        setDemoAssetError(
-          `Demo scope excluded ${excludedFixtureCount} fixture(s) and ${excludedKitchenCount} kitchen area(s) outside included floors.`,
-        )
+        dispatch({
+          type: 'demo-asset-error-set',
+          message: `Demo scope excluded ${excludedFixtureCount} fixture(s) and ${excludedKitchenCount} kitchen area(s) outside included floors.`,
+        })
       } else {
-        setDemoAssetError(null)
+        dispatch({ type: 'demo-asset-error-set', message: null })
       }
     } else {
-      setDemoAssetError(null)
+      dispatch({ type: 'demo-asset-error-set', message: null })
     }
 
     const modelId = webIfcModelIdRef.current
@@ -369,21 +749,30 @@ export function WorkspacePage({
           // Keep suggest flow non-fatal even when full-building detection aggregation fails.
         })
     }
+    // W5 advanced flag: only when it is ON and a map exists does the suggest
+    // flow snap to shafts/free cells. Off (the default) keeps suggestions
+    // byte-identical to the flag-free path.
+    const continuitySnap =
+      continuitySnapEnabled && continuityMap !== null ? { map: continuityMap.map } : undefined
     startTransition(() => {
       nextRiserLabelRef.current = 1
-      setRisers(
-        buildSuggestedRisers(
-          storeys,
-          selectedStoreyId,
-          fixtures,
-          kitchens,
-          floorMeshes,
-          () => takeNextRiserLabel(nextRiserLabelRef),
-          demoRuntime,
-        ),
+      const suggestion = buildSuggestedRisersWithSnap(
+        storeys,
+        selectedStoreyId,
+        fixtures,
+        kitchens,
+        // Suggestion mixes plan bounds with source-frame fixture positions,
+        // so it must see the source-frame bounding box, not the local one.
+        floorMeshes ? { ...floorMeshes, boundingBox: pickSourceBoundingBox(floorMeshes) } : null,
+        () => takeNextRiserLabel(nextRiserLabelRef),
+        demoRuntime,
+        continuitySnap,
       )
-      setIsAddingRiser(false)
-      setActiveTab('risers')
+      dispatch({
+        type: 'risers-suggested',
+        risers: suggestion.risers,
+        snapOutcomes: continuitySnap === undefined ? null : suggestion.snapOutcomes,
+      })
     })
   }
 
@@ -397,8 +786,7 @@ export function WorkspacePage({
       return
     }
 
-    setDownloadMode('full')
-    setDownloadError(null)
+    dispatch({ type: 'download-started' })
 
     try {
       const api = await getIfcApi()
@@ -410,14 +798,7 @@ export function WorkspacePage({
         sourceIfcBytesRef.current,
         selectedStoreyId,
         risers,
-        floorMeshes
-          ? {
-              minX: floorMeshes.boundingBox.min.x,
-              maxX: floorMeshes.boundingBox.max.x,
-              minZ: floorMeshes.boundingBox.min.z,
-              maxZ: floorMeshes.boundingBox.max.z,
-            }
-          : null,
+        floorMeshes ? readSourcePlanBounds(floorMeshes) : null,
         {
           exportRunId,
           timestamp,
@@ -440,6 +821,43 @@ export function WorkspacePage({
         {
           ...fullExport.debugMapping,
           placementRuleProfile: DEFAULT_RISER_PLACEMENT_RULE_PROFILE,
+          initialStoreyDecision,
+          // Multi-IFC ingest (W4): storey mapping per linked file plus the
+          // cross-file fixture merge accounting for the exported floor.
+          linkedModels: linkedModels.map((model) => ({
+            fileName: model.fileName,
+            lengthUnit: model.lengthUnit,
+            storeyCount: model.storeyCount,
+            hasWalls: model.hasWalls,
+          })),
+          storeyAlignments,
+          crossFileMerge,
+          // Engineer baseline comparison (W7); null until the engineer network
+          // is loaded from the Decisions tab.
+          engineerBaseline:
+            engineerBaseline === null
+              ? null
+              : {
+                  sourceFileName: engineerBaseline.sourceFileName,
+                  systemPrefixes: engineerBaseline.systemPrefixes,
+                  segmentCount: engineerBaseline.network.segments.length,
+                  stackCount: engineerBaseline.stacks.length,
+                },
+          engineerComparison,
+          // Continuity map (W5); null until built from the Decisions tab.
+          continuityMap:
+            continuityMap === null
+              ? null
+              : {
+                  sourceFileName: continuityMap.sourceFileName,
+                  processedStoreyCount: continuityMap.processedStoreyCount,
+                  shaftCandidateCount: continuityMap.map.shaftCandidates.length,
+                  extractMs: continuityMap.extractMs,
+                  buildMs: continuityMap.buildMs,
+                  diagnostics: continuityMap.diagnostics,
+                },
+          continuitySnapEnabled,
+          riserSnapOutcomes,
           floorClassification,
           validationReport: buildRiserValidationReport({
             exportRunId,
@@ -455,26 +873,55 @@ export function WorkspacePage({
         },
         buildExportDebugFileName(modelFileName, selectedStorey?.name ?? null),
       )
+      if (adjustLog.entries.length > 0) {
+        // Manual adjustments travel with the IFC as a JSON artifact so the
+        // engineer's decisions survive outside the session.
+        downloadBinary(
+          serializeAdjustLog(adjustLog),
+          buildAdjustmentsFileName(modelFileName),
+          'application/json',
+        )
+      }
     } catch (err) {
-      setDownloadError(
-        err instanceof Error
-          ? err.message
-          : 'Failed to generate the IFC.',
-      )
+      dispatch({
+        type: 'download-failed',
+        message: err instanceof Error ? err.message : 'Failed to generate the IFC.',
+      })
     } finally {
-      setDownloadMode(null)
+      dispatch({ type: 'download-finished' })
     }
   }
 
   // ---------------------------------------------------------------------------
 
 
+  // Fixture-to-riser assignment for the active floor (toilets anchor risers,
+  // everything else attaches to the nearest in-range riser). Only computed once
+  // risers exist on the floor — before placement the panel shows detection state
+  // without misleading "unassigned" flags.
+  const fixtureAssignments = useMemo(() => {
+    if (selectedStoreyId === null) return []
+    if (!risers.some((riser) => riser.storeyId === selectedStoreyId)) return []
+    return assignFixturesToRisers(fixtures, risers)
+  }, [fixtures, risers, selectedStoreyId])
+
+  // Branch routes (T3): pure derivation from the T2 assignments above. The
+  // adapter drops unassigned entries — those stay visible in the fixtures panel
+  // with an explicit reason and have no riser to route toward.
+  const branchRouteFloors = useMemo(
+    () => buildBranchRoutesFromAssignments(fixtureAssignments),
+    [fixtureAssignments],
+  )
+
   const sanitaryRoutingPreview = useMemo(() => {
-    if (!demoRuntime.enabled || selectedStoreyId === null) return { routes: [], limitations: [], debugGroups: [] }
+    if (selectedStoreyId === null) return { routes: [], limitations: [], debugGroups: [] }
     const floorFixtures = fixtures.filter((fixture) => fixture.storeyId === selectedStoreyId)
     const floorRisers = risers.filter((riser) => riser.storeyId === selectedStoreyId)
-    return buildSanitaryRoutingDemoPlan(floorFixtures, floorRisers, demoRuntime.config)
-  }, [demoRuntime, fixtures, risers, selectedStoreyId])
+    if (demoRuntime.enabled) {
+      return buildSanitaryRoutingDemoPlan(floorFixtures, floorRisers, demoRuntime.config)
+    }
+    return buildSanitaryRoutingPlan(floorFixtures, floorRisers, modelFileName)
+  }, [demoRuntime, fixtures, modelFileName, risers, selectedStoreyId])
 
   // Export the same selected-floor route plan currently shown in the viewer. Download IFC is scoped
   // to the active included demo floor (`selectedStoreyId`); `buildSanitaryRoutingDemoPlan` can still
@@ -491,15 +938,118 @@ export function WorkspacePage({
   const shouldLoadViewer =
     isExtractingGeometry || geometryError !== null || floorMeshes !== null
 
-  // Risers for the currently-viewed floor only (viewer + panel display).
+  // Risers for the currently-viewed floor only (panel display, source frame).
   // The full `risers` array spans all floors and is used for export.
   const currentFloorRisers =
     selectedStoreyId !== null
       ? risers.filter((r) => r.storeyId === selectedStoreyId)
       : []
-  const viewerFixtures = isExtractingGeometry ? [] : fixtures
-  const viewerKitchens = isExtractingGeometry ? [] : kitchens
-  const viewerRisers = isExtractingGeometry ? [] : currentFloorRisers
+  const sidebarRisers = isExtractingGeometry ? [] : currentFloorRisers
+
+  // --- viewer boundary: convert to the local rendering frame ---
+  // Everything the viewers consume gets the model origin subtracted; domain
+  // state stays in source coordinates. With the identity frame these helpers
+  // return the original references, so near-origin models are untouched.
+  const localViewerFixtures = useMemo(
+    () => (isExtractingGeometry ? [] : localizeFixtures(fixtures, modelFrame)),
+    [isExtractingGeometry, fixtures, modelFrame],
+  )
+  const localViewerKitchens = useMemo(
+    () => (isExtractingGeometry ? [] : localizeKitchens(kitchens, modelFrame)),
+    [isExtractingGeometry, kitchens, modelFrame],
+  )
+  const localViewerRisers = useMemo(() => {
+    if (isExtractingGeometry || selectedStoreyId === null) return []
+    return localizeRisers(
+      risers.filter((riser) => riser.storeyId === selectedStoreyId),
+      modelFrame,
+    )
+  }, [isExtractingGeometry, risers, selectedStoreyId, modelFrame])
+  const localAllRisers = useMemo(() => localizeRisers(risers, modelFrame), [risers, modelFrame])
+  const localSanitaryRoutes = useMemo(
+    () => localizeSanitaryRoutes(sanitaryRoutingPreview.routes, modelFrame),
+    [sanitaryRoutingPreview.routes, modelFrame],
+  )
+  const localViewerBranchRouteSegments = useMemo(() => {
+    if (isExtractingGeometry || selectedStoreyId === null) return []
+    const segments =
+      branchRouteFloors.find((floor) => floor.storeyId === selectedStoreyId)?.segments ?? []
+    return localizeBranchSegments(segments, modelFrame)
+  }, [isExtractingGeometry, branchRouteFloors, selectedStoreyId, modelFrame])
+  const localBranchRouteFloors = useMemo(
+    () => localizeBranchRouteFloors(branchRouteFloors, modelFrame),
+    [branchRouteFloors, modelFrame],
+  )
+  const branchRoutesVisibleOnSelectedFloor =
+    selectedStoreyId === null || (branchRoutesVisibleByStorey.get(selectedStoreyId) ?? true)
+
+  // --- engineer baseline overlay (W7) ---
+  const engineerOverlayVisibleOnSelectedFloor =
+    selectedStoreyId === null || (engineerOverlayVisibleByStorey.get(selectedStoreyId) ?? true)
+  const engineerStoreyId = useMemo(() => {
+    if (engineerBaseline === null) return null
+    return resolveEngineerStoreyId({
+      engineerSourceFileName: engineerBaseline.sourceFileName,
+      hostFileName: modelFileName,
+      selectedStoreyId,
+      alignments: storeyAlignments,
+    })
+  }, [engineerBaseline, modelFileName, selectedStoreyId, storeyAlignments])
+  const engineerOverlay = useMemo(() => {
+    if (engineerBaseline === null || engineerStoreyId === null || isExtractingGeometry) return null
+    return getEngineerOverlayPresentation({
+      network: engineerBaseline.network,
+      stacks: engineerBaseline.stacks,
+      engineerStoreyId,
+      frameOrigin: modelFrame.origin,
+      visible: engineerOverlayVisibleOnSelectedFloor,
+    })
+  }, [
+    engineerBaseline,
+    engineerStoreyId,
+    isExtractingGeometry,
+    modelFrame,
+    engineerOverlayVisibleOnSelectedFloor,
+  ])
+  // W7 metrics: our proposal vs the engineer baseline, in a shared plan frame.
+  // Both sides are source metres: state risers are source plan metres (viewer
+  // x/z), engineer stacks are aligned into that frame via z = -IFC Y. Branch
+  // totals compare our plan-projected runs on the open floor against the
+  // engineer's non-vertical segments' Pset lengths (model-wide).
+  const engineerComparison = useMemo(() => {
+    if (engineerBaseline === null || risers.length === 0) return null
+    return computeEngineerComparison({
+      ourRisers: risers,
+      ourRiserUnits: 'm',
+      ourBranchRoutes: branchRouteFloors,
+      ourAssignments: fixtureAssignments,
+      engineerRisers: alignEngineerStacksToViewerPlan(engineerBaseline.stacks),
+      engineerSegments: engineerBaseline.network.segments.filter(
+        (segment) => !isVerticalEngineerSegment(segment),
+      ),
+    })
+  }, [engineerBaseline, risers, branchRouteFloors, fixtureAssignments])
+
+  // --- continuity map overlay (W5) ---
+  // Map storeys are HOST storey IDs (linked models remapped at build time), so
+  // the open floor's grid is looked up directly by selectedStoreyId.
+  const continuityOverlayVisibleOnSelectedFloor =
+    selectedStoreyId === null || (continuityOverlayVisibleByStorey.get(selectedStoreyId) ?? true)
+  const continuityOverlay = useMemo(() => {
+    if (continuityMap === null || selectedStoreyId === null || isExtractingGeometry) return null
+    return getContinuityOverlayPresentation({
+      map: continuityMap.map,
+      storeyId: selectedStoreyId,
+      frameOrigin: modelFrame.origin,
+      visible: continuityOverlayVisibleOnSelectedFloor,
+    })
+  }, [
+    continuityMap,
+    selectedStoreyId,
+    isExtractingGeometry,
+    modelFrame,
+    continuityOverlayVisibleOnSelectedFloor,
+  ])
 
 
   const validationReport =
@@ -536,14 +1086,24 @@ export function WorkspacePage({
     <>
       <IfcUpload
         onFileAccepted={handleFileAccepted}
+        onFilesAccepted={(files) => void handleFilesAccepted(files)}
         isLoading={isParsingStoreys}
         error={uploadError ?? demoUploadError ?? demoRuntimeConfigError}
         fileName={modelFileName}
+        linkedFileNames={linkedModels.map((model) => model.fileName)}
         storeyCount={storeys.length}
+        // Demo mode only accepts the configured demo model, so the bundled
+        // sample would always be rejected — hide the affordance instead.
+        showSampleModel={!demoRuntime.enabled}
       />
       {demoAssetError ? (
         <p style={{ marginTop: 8, color: 'var(--color-warning, #f59e0b)', fontSize: 13 }} role="status">
           {demoAssetError}
+        </p>
+      ) : null}
+      {underlayError ? (
+        <p style={{ marginTop: 8, color: 'var(--color-warning, #f59e0b)', fontSize: 13 }} role="status">
+          {underlayError}
         </p>
       ) : null}
       <StoreyList
@@ -551,13 +1111,14 @@ export function WorkspacePage({
         selectedId={selectedStoreyId}
         isLoading={isExtractingGeometry}
         onSelect={handleStoreySelect}
+        modelLengthUnit={modelLengthUnit}
       />
     </>
   )
 
   function handleSwitch3D() {
     void loadModel3DViewerModule()
-    setViewMode('3d')
+    dispatch({ type: 'view-mode-set', viewMode: '3d' })
   }
 
   const centerPanel = viewMode === '3d' && webIfcModelId !== null ? (
@@ -565,9 +1126,12 @@ export function WorkspacePage({
       <Model3DViewer
         webIfcModelId={webIfcModelId}
         storeys={storeys}
-        risers={risers}
+        risers={localAllRisers}
         theme={theme}
-        onSwitch2D={() => setViewMode('2d')}
+        onSwitch2D={() => dispatch({ type: 'view-mode-set', viewMode: '2d' })}
+        branchRouteFloors={localBranchRouteFloors}
+        branchRouteVisibility={branchRoutesVisibleByStorey}
+        modelFrame={modelFrame}
       />
     </Suspense>
   ) : shouldLoadViewer ? (
@@ -581,25 +1145,44 @@ export function WorkspacePage({
       <ViewTransition enter="slide-up" default="none">
         <FloorViewer
           floorMeshes={floorMeshes}
+          underlayMeshes={underlay?.meshes ?? null}
+          underlaySourceFileName={underlay?.sourceFileName ?? null}
           isLoading={isExtractingGeometry}
           error={geometryError}
           theme={theme}
-          onObjectHover={setHoveredExpressId}
-          onObjectSelect={setSelectedExpressId}
+          onObjectHover={handleObjectHover}
+          onObjectSelect={handleObjectSelect}
           modelFileName={modelFileName}
           selectedStoreyElevation={selectedStorey?.elevation ?? null}
+          modelLengthUnit={modelLengthUnit}
           storeyCount={storeys.length}
           hoveredExpressId={hoveredExpressId}
           selectedExpressId={selectedExpressId}
-          fixtures={viewerFixtures}
-          kitchens={viewerKitchens}
-          risers={viewerRisers}
+          fixtures={localViewerFixtures}
+          kitchens={localViewerKitchens}
+          risers={localViewerRisers}
           isAddingRiser={isAddingRiser}
           onRiserAdd={handleAddRiser}
           onRiserMove={handleMoveRiser}
+          onRiserMoveCommit={handleMoveRiserCommit}
           onSwitch3D={storeys.length > 0 ? handleSwitch3D : undefined}
-          sanitaryRoutes={sanitaryRoutingPreview.routes}
+          sanitaryRoutes={localSanitaryRoutes}
           demoFlowEnabled={demoRuntime.enabled}
+          branchRouteSegments={localViewerBranchRouteSegments}
+          branchRoutesVisible={branchRoutesVisibleOnSelectedFloor}
+          onToggleBranchRoutes={handleToggleBranchRoutes}
+          engineerSegments={engineerOverlay?.visibleSegments ?? []}
+          engineerStackMarkers={engineerOverlay?.visibleStackMarkers ?? []}
+          engineerOverlayAvailable={engineerOverlay?.hasNetwork ?? false}
+          engineerOverlayVisible={engineerOverlayVisibleOnSelectedFloor}
+          onToggleEngineerOverlay={handleToggleEngineerOverlay}
+          engineerExcludedSegmentCount={engineerOverlay?.excludedSegmentCount ?? 0}
+          continuityBlockedRects={continuityOverlay?.blockedRects ?? []}
+          continuityShaftMarkers={continuityOverlay?.shaftMarkers ?? []}
+          continuityBlockedCellCount={continuityOverlay?.blockedCellCount ?? 0}
+          continuityOverlayAvailable={continuityOverlay?.gridAvailable ?? false}
+          continuityOverlayVisible={continuityOverlayVisibleOnSelectedFloor}
+          onToggleContinuityOverlay={handleToggleContinuityOverlay}
         />
       </ViewTransition>
     </Suspense>
@@ -610,14 +1193,15 @@ export function WorkspacePage({
   const rightPanel = (
     <Sidebar
       activeTab={activeTab}
-      onTabChange={setActiveTab}
+      onTabChange={handleTabChange}
       selectedStoreyName={selectedStorey?.name ?? null}
       storeyCount={storeys.length}
       hasModel={modelFileName !== null}
       fixtures={fixtures}
       kitchens={kitchens}
+      fixtureAssignments={fixtureAssignments}
       isDetectingFixtures={isDetectingFixtures}
-      risers={viewerRisers}
+      risers={sidebarRisers}
       isAddingRiser={isAddingRiser}
       onToggleAddRiser={handleToggleAddRiser}
       onSuggestRisers={handleSuggestRisers}
@@ -628,10 +1212,51 @@ export function WorkspacePage({
       onDownloadFullIfc={() => void handleDownloadIfc()}
       validationReport={validationReport}
       detectionAggregation={detectionDebugRef.current}
+      initialStoreyDecision={initialStoreyDecision}
+      storeyAlignments={storeyAlignments}
+      crossFileMerge={crossFileMerge}
       sanitaryRouteLimitations={sanitaryRoutingPreview.limitations}
       demoFlowEnabled={demoRuntime.enabled}
       demoFloorOpened={demoFloorOpened}
       sanitaryRouteCount={sanitaryRoutesForExport.length}
+      modelLengthUnit={modelLengthUnit}
+      engineerBaseline={
+        engineerBaseline === null
+          ? null
+          : {
+              sourceFileName: engineerBaseline.sourceFileName,
+              systemPrefixes: engineerBaseline.systemPrefixes,
+              segmentCount: engineerBaseline.network.segments.length,
+              stackCount: engineerBaseline.stacks.length,
+            }
+      }
+      isExtractingEngineerBaseline={isExtractingEngineerBaseline}
+      engineerBaselineError={engineerBaselineError}
+      onLoadEngineerBaseline={
+        webIfcModelId !== null ? () => void handleLoadEngineerBaseline() : undefined
+      }
+      engineerComparison={engineerComparison}
+      continuityMap={
+        continuityMap === null
+          ? null
+          : {
+              sourceFileName: continuityMap.sourceFileName,
+              storeyCount: continuityMap.map.grids.length,
+              shaftCandidateCount: continuityMap.map.shaftCandidates.length,
+              extractMs: continuityMap.extractMs,
+              buildMs: continuityMap.buildMs,
+              diagnosticsCount: continuityMap.diagnostics.length,
+            }
+      }
+      isBuildingContinuityMap={isBuildingContinuityMap}
+      continuityBuildProgress={continuityBuildProgress}
+      continuityBuildError={continuityBuildError}
+      onBuildContinuityMap={
+        webIfcModelId !== null ? () => void handleBuildContinuityMap() : undefined
+      }
+      continuitySnapEnabled={continuitySnapEnabled}
+      onToggleContinuitySnap={handleToggleContinuitySnap}
+      riserSnapOutcomes={riserSnapOutcomes}
     />
   )
 
@@ -650,6 +1275,147 @@ export function WorkspacePage({
       rightPanel={rightPanel}
     />
   )
+}
+
+interface HostModelInfo {
+  fileName: string
+  webIfcModelId: number
+  lengthUnit: LengthUnit | null
+  storeys: Storey[]
+}
+
+/**
+ * Opens each linked (non-host) file of a multi-file upload and aligns its
+ * storeys against the host by absolute elevation. A linked file that fails to
+ * open or parse becomes an explicitly blocked alignment entry (visible in the
+ * Decisions tab) instead of silently disappearing.
+ */
+async function loadLinkedModels(
+  api: Awaited<ReturnType<typeof getIfcApi>>,
+  host: HostModelInfo,
+  linkedFiles: File[],
+): Promise<{ linkedModels: LinkedModelState[]; alignments: StoreyAlignment[] }> {
+  const [{ readBuildingPlacementSourcePoint }, { IFCWALL, IFCWALLSTANDARDCASE }] =
+    await Promise.all([import('@/shared/ifc/readBuildingPlacement'), import('web-ifc')])
+
+  const hostInput: AlignmentModelInput = {
+    fileName: host.fileName,
+    lengthUnit: host.lengthUnit,
+    storeys: host.storeys.map((storey) => ({
+      id: storey.id,
+      name: storey.name,
+      elevation: storey.elevation,
+    })),
+    buildingPlacement: await readBuildingPlacementSourcePoint(api, host.webIfcModelId),
+  }
+
+  const linkedModels: LinkedModelState[] = []
+  const alignments: StoreyAlignment[] = []
+
+  for (const file of linkedFiles) {
+    let openedModelId: number | null = null
+    try {
+      const buffer = new Uint8Array(await file.arrayBuffer())
+      openedModelId = api.OpenModel(buffer)
+      const storeys = await parseStoreys(api, openedModelId, crypto.randomUUID())
+      const lengthUnit = await resolveModelLengthUnit(api, openedModelId)
+      const buildingPlacement = await readBuildingPlacementSourcePoint(api, openedModelId)
+      const hasWalls =
+        api.GetLineIDsWithType(openedModelId, IFCWALL).size() > 0 ||
+        api.GetLineIDsWithType(openedModelId, IFCWALLSTANDARDCASE).size() > 0
+
+      linkedModels.push({
+        fileName: file.name,
+        webIfcModelId: openedModelId,
+        lengthUnit,
+        storeyCount: storeys.length,
+        hasWalls,
+      })
+      alignments.push(
+        alignStoreysByElevation(hostInput, {
+          fileName: file.name,
+          lengthUnit,
+          storeys: storeys.map((storey) => ({
+            id: storey.id,
+            name: storey.name,
+            elevation: storey.elevation,
+          })),
+          buildingPlacement,
+        }),
+      )
+    } catch (err) {
+      if (openedModelId !== null) {
+        try {
+          api.CloseModel(openedModelId)
+        } catch {
+          // The model handle may already be invalid; the blocked entry below is the signal.
+        }
+      }
+      alignments.push({
+        hostFileName: host.fileName,
+        linkedFileName: file.name,
+        status: 'blocked',
+        blockedReason: `Failed to open or parse: ${err instanceof Error ? err.message : 'unknown error'}`,
+        toleranceMm: STOREY_ALIGNMENT_TOLERANCE_MM,
+        pairs: [],
+        unmappedHost: [],
+        unmappedLinked: [],
+        originAgreement: { status: 'unknown', distanceMm: null, warning: null },
+      })
+    }
+  }
+
+  return { linkedModels, alignments }
+}
+
+interface LinkedStoreyDetectionTarget {
+  webIfcModelId: number
+  /** The linked file's OWN storey express ID from the alignment pair. */
+  storeyId: StoreyId
+  fileName: string
+  hasWalls: boolean
+}
+
+/** Linked storeys aligned to the given host storey, in linked-model order. */
+function collectLinkedDetectionTargets(
+  alignments: StoreyAlignment[],
+  linkedModels: LinkedModelState[],
+  hostStoreyId: StoreyId,
+): LinkedStoreyDetectionTarget[] {
+  const targets: LinkedStoreyDetectionTarget[] = []
+  for (const alignment of alignments) {
+    if (alignment.status !== 'aligned') continue
+    const pair = alignment.pairs.find((candidate) => candidate.host.storeyId === hostStoreyId)
+    if (!pair) continue
+    const model = linkedModels.find((candidate) => candidate.fileName === alignment.linkedFileName)
+    if (!model) continue
+    targets.push({
+      webIfcModelId: model.webIfcModelId,
+      storeyId: pair.linked.storeyId,
+      fileName: model.fileName,
+      hasWalls: model.hasWalls,
+    })
+  }
+  return targets
+}
+
+/**
+ * Linked-model storey ID → host storey ID from the W4 alignment, for remapping
+ * a linked architecture model's continuity storeys onto host floors. Empty
+ * when the linked file has no aligned storeys.
+ */
+function buildLinkedToHostStoreyIdMap(
+  alignments: StoreyAlignment[],
+  linkedFileName: string,
+): Map<StoreyId, StoreyId> {
+  const map = new Map<StoreyId, StoreyId>()
+  for (const alignment of alignments) {
+    if (alignment.linkedFileName !== linkedFileName || alignment.status !== 'aligned') continue
+    for (const pair of alignment.pairs) {
+      map.set(pair.linked.storeyId, pair.host.storeyId)
+    }
+  }
+  return map
 }
 
 function takeNextRiserLabel(nextRiserLabelRef: MutableRefObject<number>): string {
@@ -723,14 +1489,18 @@ function buildExportDebugFileName(
   return buildExportFileName(fileName, storeyName).replace(/\.ifc$/i, '-riser-mapping.json')
 }
 
+function buildAdjustmentsFileName(fileName: string): string {
+  return `${fileName.replace(/\.ifc$/i, '')}.adjustments.json`
+}
+
 function createExportRunId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `riser-export-${Date.now().toString(36)}`
 }
 
-function downloadBinary(bytes: Uint8Array, fileName: string) {
+function downloadBinary(bytes: Uint8Array, fileName: string, mimeType = 'application/octet-stream') {
   const buffer = new ArrayBuffer(bytes.byteLength)
   new Uint8Array(buffer).set(bytes)
-  const blob = new Blob([buffer], { type: 'application/octet-stream' })
+  const blob = new Blob([buffer], { type: mimeType })
   downloadBlob(blob, fileName)
 }
 
@@ -751,6 +1521,32 @@ function downloadBlob(blob: Blob, fileName: string) {
   window.setTimeout(() => {
     URL.revokeObjectURL(url)
   }, 1000)
+}
+
+/**
+ * Plain-mode initial floor decision: geometry-free per-storey fixture scan +
+ * pure chooser. If the scan fails (malformed relations, engine error) the
+ * legacy name-based heuristic still opens a floor, and the failure reason is
+ * recorded instead of silently swallowed.
+ */
+async function resolveInitialStoreyDecision(
+  api: Awaited<ReturnType<typeof getIfcApi>>,
+  webIfcModelId: number,
+  storeys: Storey[],
+): Promise<InitialStoreyDecision> {
+  try {
+    const { chooseInitialStoreyByFixtures } = await import('@/shared/ifc/scanStoreyFixtures')
+    return await chooseInitialStoreyByFixtures(api, webIfcModelId, storeys)
+  } catch (err) {
+    const fallbackStoreyId = findDefaultStoreyId(storeys)
+    const fallbackStorey = storeys.find((storey) => storey.id === fallbackStoreyId) ?? null
+    return {
+      storeyId: fallbackStoreyId,
+      storeyName: fallbackStorey?.name ?? null,
+      reason: `Fixture scan failed (${err instanceof Error ? err.message : 'unknown error'}); fell back to name-based floor selection.`,
+      scanMs: null,
+    }
+  }
 }
 
 function findDefaultStoreyId(storeys: Storey[]): StoreyId | null {
@@ -795,4 +1591,90 @@ function extractSignedNumericTokens(name: string): number[] {
   return (name.match(/[-−]?\s*\d+/g) ?? [])
     .map((token) => Number(token.replace(/\s+/g, '').replace('−', '-')))
     .filter((value) => Number.isFinite(value))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Local-frame helpers (viewer boundary)
+//
+// Domain state is kept in source coordinates; the viewers render in a local
+// frame (source minus model origin). These pure helpers convert viewer-bound
+// props. With the identity frame they return the input reference unchanged,
+// so near-origin models keep referential equality and skip re-renders.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function pickSourceBoundingBox(meshes: FloorMeshes): FloorMeshes['sourceBoundingBox'] {
+  // Fallback covers FloorMeshes stubs (tests) created before sourceBoundingBox
+  // existed; for real extractions both boxes are always present.
+  return meshes.sourceBoundingBox ?? meshes.boundingBox
+}
+
+function readSourcePlanBounds(meshes: FloorMeshes): PlanBounds | null {
+  const box = pickSourceBoundingBox(meshes)
+  const bounds = { minX: box.min.x, maxX: box.max.x, minZ: box.min.z, maxZ: box.max.z }
+  if (![bounds.minX, bounds.maxX, bounds.minZ, bounds.maxZ].every(Number.isFinite)) return null
+  return bounds
+}
+
+function localizeFixtures(fixtures: Fixture[], frame: ModelFrame): Fixture[] {
+  if (isIdentityModelFrame(frame)) return fixtures
+  return fixtures.map((fixture) =>
+    fixture.position === null ? fixture : { ...fixture, position: toLocalPoint(frame, fixture.position) },
+  )
+}
+
+function localizeKitchens(kitchens: KitchenArea[], frame: ModelFrame): KitchenArea[] {
+  if (isIdentityModelFrame(frame)) return kitchens
+  return kitchens.map((kitchen) => ({
+    ...kitchen,
+    position: kitchen.position === null ? null : toLocalPoint(frame, kitchen.position),
+    planBounds: kitchen.planBounds && {
+      minX: kitchen.planBounds.minX - frame.origin.x,
+      maxX: kitchen.planBounds.maxX - frame.origin.x,
+      minZ: kitchen.planBounds.minZ - frame.origin.z,
+      maxZ: kitchen.planBounds.maxZ - frame.origin.z,
+    },
+    planCorners: kitchen.planCorners?.map((corner) => ({
+      x: corner.x - frame.origin.x,
+      z: corner.z - frame.origin.z,
+    })),
+  }))
+}
+
+function localizeRisers(risers: Riser[], frame: ModelFrame): Riser[] {
+  if (isIdentityModelFrame(frame)) return risers
+  return risers.map((riser) => ({ ...riser, position: toLocalPoint(frame, riser.position) }))
+}
+
+function localizeSanitaryRoutes(
+  routes: SanitaryFixtureRoute[],
+  frame: ModelFrame,
+): SanitaryFixtureRoute[] {
+  if (isIdentityModelFrame(frame)) return routes
+  return routes.map((route) => ({
+    ...route,
+    segments: route.segments.map((segment) => ({
+      ...segment,
+      from: toLocalPoint(frame, segment.from),
+      to: toLocalPoint(frame, segment.to),
+    })),
+  }))
+}
+
+function localizeBranchSegments(segments: RouteSegment[], frame: ModelFrame): RouteSegment[] {
+  if (isIdentityModelFrame(frame)) return segments
+  return segments.map((segment) => ({
+    ...segment,
+    // Endpoint elevations are relative to the riser junction on the storey,
+    // so only the plan axes shift between frames.
+    start: { ...segment.start, x: segment.start.x - frame.origin.x, z: segment.start.z - frame.origin.z },
+    end: { ...segment.end, x: segment.end.x - frame.origin.x, z: segment.end.z - frame.origin.z },
+  }))
+}
+
+function localizeBranchRouteFloors(floors: FloorRoutes[], frame: ModelFrame): FloorRoutes[] {
+  if (isIdentityModelFrame(frame)) return floors
+  return floors.map((floor) => ({
+    ...floor,
+    segments: localizeBranchSegments(floor.segments, frame),
+  }))
 }

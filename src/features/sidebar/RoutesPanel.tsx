@@ -1,15 +1,16 @@
 import type { Route, RiserId } from '@/domain/types'
+import { formatLengthMm, type LengthUnit } from '@/shared/lengthUnits'
 import './RoutesPanel.css'
 
 interface RoutesPanelProps {
   routes: Route[]
-  /** Human-readable unit label derived from model scale ('mm' | 'm') */
-  unitLabel: string
+  /** Unit of the route drop/length values ('m' for web-ifc-normalized geometry). */
+  unit: LengthUnit
   /** Maps riserId → display label (e.g. "R1") */
   riserLabels: Map<RiserId, string>
 }
 
-export function RoutesPanel({ routes, unitLabel, riserLabels }: RoutesPanelProps) {
+export function RoutesPanel({ routes, unit, riserLabels }: RoutesPanelProps) {
   if (routes.length === 0) {
     return (
       <div className="routes-panel__empty">
@@ -64,15 +65,11 @@ export function RoutesPanel({ routes, unitLabel, riserLabels }: RoutesPanelProps
               {riserLabels.get(route.riserId) ?? '—'}
             </span>
             <span className="routes-panel__item-drop">
-              {fmtDrop(route.drop)} {unitLabel}
+              {formatLengthMm(route.drop, unit)}
             </span>
           </li>
         ))}
       </ul>
     </div>
   )
-}
-
-function fmtDrop(v: number): string {
-  return v < 10 ? v.toFixed(2) : Math.round(v).toLocaleString()
 }

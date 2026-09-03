@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Fixture, FixtureKind, KitchenArea, PlanBounds } from '@/domain/types'
+import { buildContinuityMap, type ContinuityMapInput } from '@/domain/continuityMap'
 import { suggestRiserPositions } from './suggestRisers'
 
 function fixture(
@@ -101,49 +102,32 @@ describe('suggestRiserPositions', () => {
     expect(result[1].y).toBe(50)
   })
 
-  it('does not split a wet core just because fixture Y values differ when no WC exists', () => {
-    const result = suggestRiserPositions([
-      fixture(1, 0, 50, 0, 'SINK'),
-      fixture(2, 0.2, 9999, 0.2, 'BATH'),
-    ])
-
-    expect(result).toHaveLength(1)
-  })
-
-  it('splits fixtures that are distant on Z even when Y is the same when no WC exists', () => {
-    const result = suggestRiserPositions([
-      fixture(1, 0, 50, 0, 'SINK'),
-      fixture(2, 0, 50, 10000, 'BATH'),
-    ])
-
-    expect(result).toHaveLength(2)
-  })
-
-  it('does not merge a long chain of nearby fixtures into one riser when no WC exists', () => {
+  it('returns no risers when only non-toilet fixtures exist (they attach to risers instead)', () => {
+    // T2: non-toilet fixtures never spawn risers; they are assigned to the nearest
+    // riser by src/domain/assignFixturesToRisers.ts.
     const result = suggestRiserPositions([
       fixture(1, 0, 50, 0, 'SINK'),
       fixture(2, 0, 50, 1000, 'BATH'),
-      fixture(3, 0, 50, 2000, 'BATH'),
-      fixture(4, 0, 50, 3000, 'WASHHANDBASIN'),
-      fixture(5, 0, 50, 4000, 'URINAL'),
+      fixture(3, 0, 50, 2000, 'WASHHANDBASIN'),
+      fixture(4, 0, 50, 3000, 'URINAL'),
+      fixture(5, 0, 50, 4000, 'BIDET'),
     ])
 
-    expect(result.length).toBeGreaterThan(1)
+    expect(result).toEqual([])
   })
 
-  it('uses roughly four fixtures per riser when one non-WC cluster is too dense', () => {
-    const result = suggestRiserPositions([
-      fixture(1, 10000, 50, 0, 'SINK'),
-      fixture(2, 10100, 50, 0, 'BATH'),
-      fixture(3, 10200, 50, 0, 'BATH'),
-      fixture(4, 10300, 50, 0, 'WASHHANDBASIN'),
-      fixture(5, 10400, 50, 0, 'URINAL'),
-      fixture(6, 10500, 50, 0, 'SINK'),
-      fixture(7, 10600, 50, 0, 'BIDET'),
-      fixture(8, 10700, 50, 0, 'BATH'),
-    ])
+  it('keeps dedicated kitchen risers when only non-toilet fixtures accompany a kitchen', () => {
+    const result = suggestRiserPositions(
+      [
+        fixture(1, 500, 50, 500, 'BATH'),
+        fixture(2, 700, 50, 700, 'WASHHANDBASIN'),
+      ],
+      [kitchen(11, 3000, 50, 3000)],
+      { minX: 0, maxX: 10000, minZ: 0, maxZ: 10000 },
+    )
 
-    expect(result).toHaveLength(2)
+    // Only the kitchen corner riser is suggested; the bath and basin add nothing.
+    expect(result).toEqual([{ x: 1800, y: 50, z: 1800 }])
   })
 
   it('ignores non-toilet fixtures when toilets exist', () => {
@@ -216,17 +200,18 @@ describe('suggestRiserPositions', () => {
     ])
   })
 
-  it('falls back to clustered centroids when no WC exists in the fixture set', () => {
+  it('suggests nothing when no WC and no kitchen exists, even in metre models', () => {
+    // T2: the old clustered-centroid fallback is removed; non-toilet fixtures wait
+    // for a riser to attach to instead of spawning one.
     const result = suggestRiserPositions([
       fixture(1, 0, 50, 0, 'SINK'),
       fixture(2, 0.4, 50, 0, 'BATH'),
     ])
 
-    expect(result).toHaveLength(1)
-    expect(result[0]).toMatchObject({ x: 0.2, y: 50, z: 0 })
+    expect(result).toEqual([])
   })
 
-  it('does not let kitchen sinks create extra clustered risers when kitchens already drive the count', () => {
+  it('does not let kitchen sinks create extra risers when kitchens already drive the count', () => {
     const result = suggestRiserPositions(
       [
         { ...fixture(1, 205, 50, 205, 'SINK'), isKitchenSink: true },
@@ -262,5 +247,174 @@ describe('suggestRiserPositions', () => {
     )
 
     expect(result).toEqual([{ x: 1800, y: 50, z: 1800 }])
+  })
+})
+
+// --- W5 additions: continuity snapping flag (default OFF) --------------------
+
+const bboxFootprint = (minX: number, maxX: number, minZ: number, maxZ: number) =>
+  ({ shape: 'bbox', bounds: { minX, maxX, minZ, maxZ } }) as const
+
+/** Storey 10 (matching the fixture helper) with two perimeter walls. */
+function continuityInputMm(
+  extra: Partial<ContinuityMapInput['storeys'][number]> = {},
+): ContinuityMapInput {
+  return {
+    units: 'mm',
+    storeys: [
+      {
+        storeyId: 10,
+        storeyName: 'Storey 10',
+        elevation: 0,
+        obstructions: [
+          { id: 'wall:1', kind: 'wall', footprint: bboxFootprint(0, 2000, 0, 250) },
+          { id: 'wall:2', kind: 'wall', footprint: bboxFootprint(0, 250, 2000, 2250) },
+        ],
+        voids: [],
+        spaces: [],
+        ...extra,
+      },
+    ],
+  }
+}
+
+describe('suggestRiserPositions with continuitySnap', () => {
+  it('is byte-identical to the default path when the flag is off', () => {
+    const fixtures = [
+      fixture(1, 0, 50, 0),
+      fixture(2, 400, 50, 300),
+      fixture(3, 10000, 50, 0, 'BATH'),
+    ]
+    const kitchens = [kitchen(11, 3000, 50, 3000)]
+    const floorPlanBounds: PlanBounds = { minX: 0, maxX: 12000, minZ: 0, maxZ: 12000 }
+
+    const withoutOptions = suggestRiserPositions(fixtures, kitchens, floorPlanBounds)
+    const withEmptyOptions = suggestRiserPositions(fixtures, kitchens, floorPlanBounds, null, {})
+
+    expect(withEmptyOptions).toEqual(withoutOptions)
+    expect(JSON.stringify(withEmptyOptions)).toBe(JSON.stringify(withoutOptions))
+  })
+
+  it('snaps a toilet suggestion to the nearest free grid cell within MAX_SNAP', () => {
+    const map = buildContinuityMap(continuityInputMm())
+    const result = suggestRiserPositions([fixture(1, 1010, 50, 600)], [], null, null, {
+      continuitySnap: { map },
+    })
+
+    expect(result).toHaveLength(1)
+    expect(result[0].x).toBe(1125)
+    expect(result[0].y).toBe(50)
+    expect(result[0].z).toBe(625)
+    expect(result[0].snap).toMatchObject({
+      status: 'snapped',
+      target: 'free-cell',
+      cell: { col: 5, row: 3 },
+      original: { x: 1010, y: 50, z: 600 },
+    })
+  })
+
+  it('prefers a shaft candidate over a closer free cell', () => {
+    const map = buildContinuityMap(
+      continuityInputMm({
+        spaces: [{ id: 'space:9', name: 'פיר', footprint: bboxFootprint(1500, 1800, 500, 800) }],
+      }),
+    )
+    const result = suggestRiserPositions([fixture(1, 1010, 50, 600)], [], null, null, {
+      continuitySnap: { map },
+    })
+
+    expect(result).toHaveLength(1)
+    expect(result[0].x).toBe(1650)
+    expect(result[0].y).toBe(50)
+    expect(result[0].z).toBe(650)
+    expect(result[0].snap).toMatchObject({
+      status: 'snapped',
+      target: 'shaft',
+      shaftId: 'shaft-space:10:space:9',
+    })
+  })
+
+  it('keeps the original position and reports snapMiss beyond MAX_SNAP', () => {
+    const map = buildContinuityMap(continuityInputMm())
+    const result = suggestRiserPositions([fixture(1, 1010, 50, 600)], [], null, null, {
+      continuitySnap: { map, maxSnapMm: 50 },
+    })
+
+    expect(result).toHaveLength(1)
+    expect(result[0].x).toBe(1010)
+    expect(result[0].y).toBe(50)
+    expect(result[0].z).toBe(600)
+    expect(result[0].snap).toEqual({
+      status: 'snapMiss',
+      reason: 'no shaft candidate or free grid cell within 50 mm on storey 10',
+    })
+  })
+
+  it('reports snapMiss when the map has no grid for the fixture storey', () => {
+    const map = buildContinuityMap({
+      units: 'mm',
+      storeys: [
+        {
+          storeyId: 99,
+          storeyName: 'Other storey',
+          elevation: 0,
+          obstructions: [
+            { id: 'wall:1', kind: 'wall', footprint: bboxFootprint(0, 2000, 0, 250) },
+          ],
+          voids: [],
+          spaces: [],
+        },
+      ],
+    })
+    const result = suggestRiserPositions([fixture(1, 1010, 50, 600)], [], null, null, {
+      continuitySnap: { map },
+    })
+
+    expect(result[0].snap).toEqual({
+      status: 'snapMiss',
+      reason: 'no obstruction grid for storey 10',
+    })
+  })
+
+  it('converts MAX_SNAP to metres for metre-unit maps', () => {
+    const map = buildContinuityMap({
+      units: 'm',
+      storeys: [
+        {
+          storeyId: 10,
+          storeyName: 'Storey 10',
+          elevation: 0,
+          obstructions: [
+            { id: 'wall:1', kind: 'wall', footprint: bboxFootprint(0, 2, 0, 0.25) },
+            { id: 'wall:2', kind: 'wall', footprint: bboxFootprint(0, 0.25, 2, 2.25) },
+          ],
+          voids: [],
+          spaces: [],
+        },
+      ],
+    })
+    const result = suggestRiserPositions([fixture(1, 1.01, 50, 0.6)], [], null, null, {
+      continuitySnap: { map },
+    })
+
+    expect(result).toHaveLength(1)
+    expect(result[0].x).toBeCloseTo(1.125, 6)
+    expect(result[0].z).toBeCloseTo(0.625, 6)
+    expect(result[0].snap).toMatchObject({ status: 'snapped', target: 'free-cell' })
+  })
+
+  it('keeps ordering identical to the default path when snapping misses', () => {
+    const fixtures = [fixture(1, 400, 50, 300), fixture(2, 0, 50, 0)]
+    const map = buildContinuityMap(continuityInputMm())
+
+    const defaults = suggestRiserPositions(fixtures)
+    const snapped = suggestRiserPositions(fixtures, [], null, null, {
+      continuitySnap: { map, maxSnapMm: 1 },
+    })
+
+    expect(snapped.map(({ x, y, z }) => ({ x, y, z }))).toEqual(
+      defaults.map(({ x, y, z }) => ({ x, y, z })),
+    )
+    expect(snapped.every((entry) => entry.snap?.status === 'snapMiss')).toBe(true)
   })
 })
