@@ -197,7 +197,15 @@ function CrossFileMergeSection({ merge }: { merge: MergedStoreyDetection }) {
 }
 
 function EngineerComparisonList({ comparison }: { comparison: EngineerComparisonReport }) {
-  const { riserCounts, meanNearestEngineerRiserDistanceM, branchLengths, fixtures } = comparison
+  const {
+    riserCounts,
+    engineerStackDefinition,
+    storeyScope,
+    storeyScopeReason,
+    meanNearestEngineerRiserDistanceM,
+    branchLengths,
+    fixtures,
+  } = comparison
   return (
     <>
       <p className="sidebar__panel-copy">
@@ -205,13 +213,23 @@ function EngineerComparisonList({ comparison }: { comparison: EngineerComparison
       </p>
       <ul className="risers-panel__legend-list" data-testid="engineer-comparison">
         <li>
-          <strong>Riser stacks:</strong> ours {riserCounts.oursStacks} ({riserCounts.oursPerFloorEntries}{' '}
-          per-floor entries) vs engineer {riserCounts.engineerStacks}
+          <strong>Riser stacks on this floor:</strong>{' '}
+          {storeyScope === null
+            ? `n/a (${storeyScopeReason ?? 'no storey scope'})`
+            : `ours ${riserCounts.oursStacksOnStorey} vs engineer ${riserCounts.engineerStacksIntersectingStorey}` +
+              ` (${riserCounts.engineerVentStacksIntersectingStorey} vent stack(s) counted separately)`}
+        </li>
+        <li>
+          <strong>Riser stacks model-wide:</strong> ours {riserCounts.oursStacksTotal} (
+          {riserCounts.oursPerFloorEntries} per-floor entries) vs engineer {riserCounts.engineerStacksTotal}{' '}
+          sanitary, {riserCounts.engineerVentStacksTotal} vent, {riserCounts.engineerStubs} stub(s); stack =
+          vertical run ≥ {formatLengthM(engineerStackDefinition.minStackExtentM, 'm')} (
+          {engineerStackDefinition.minStackExtentSource})
         </li>
         <li>
           <strong>Mean distance to nearest engineer riser:</strong>{' '}
           {meanNearestEngineerRiserDistanceM === null
-            ? 'n/a (one side has no stacks)'
+            ? 'n/a (no storey scope or one side has no stacks on this floor)'
             : formatLengthM(meanNearestEngineerRiserDistanceM, 'm')}
         </li>
         <li>

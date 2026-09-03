@@ -35,9 +35,14 @@ function network(segments: EngineerPipeSegment[]): EngineerPipeNetwork {
 const stacks: EngineerRiserStack[] = [
   {
     id: 'engineer-riser-1',
+    systemClass: 'sanitary',
     xM: 20,
     yM: 30,
+    zMinM: 30.15,
+    zMaxM: 33.35,
+    extentM: 3.2,
     storeys: [{ id: 10, name: '01' }],
+    spannedStoreyIds: [10],
     diameterMm: 110,
     segmentExpressIds: [1],
   },

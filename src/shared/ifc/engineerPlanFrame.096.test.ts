@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { IfcAPI } from 'web-ifc'
 import type { Fixture } from '@/domain/types'
 import {
-  groupEngineerRiserStacks,
+  classifyEngineerRiserStacks,
   type EngineerPipeNetwork,
   type EngineerRiserStack,
 } from '@/domain/engineerPipes'
@@ -82,11 +82,11 @@ describe.skipIf(!has096)('engineer plan frame on 096-P (gated: requires local cl
     network = await extractEngineerPipeNetwork(api, modelId, {
       systemPrefixes: ['SW-GRV', 'VNT'],
     })
-    // Stacks are compared model-wide: 096 models several risers as single
-    // full-height pipes, so per-storey containment understates which stacks
-    // pass through storey 01 (documented W7 caveat). Risers are vertical
+    // Sanitary stacks are compared model-wide: 096 models several risers as
+    // single full-height pipes, so per-storey containment understates which
+    // stacks pass through storey 01 (documented W7 caveat). Risers are vertical
     // shafts — their plan positions are valid on every storey they serve.
-    stacks = groupEngineerRiserStacks(network)
+    stacks = classifyEngineerRiserStacks(network).sanitaryStacks
   }, PARSE_TIMEOUT_MS)
 
   afterAll(() => {

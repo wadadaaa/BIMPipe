@@ -32,7 +32,7 @@ import {
 } from '@/shared/frame/modelFrame'
 import { serializeAdjustLog } from '@/domain/adjustLog'
 import { computeEngineerComparison } from '@/domain/engineerComparisonMetrics'
-import { isVerticalEngineerSegment } from '@/domain/engineerPipes'
+import { isVerticalEngineerSegment, storeySlabBandM } from '@/domain/engineerPipes'
 import { alignEngineerStacksToViewerPlan } from '@/shared/frame/ifcSourceFrame'
 import {
   getEngineerOverlayPresentation,
@@ -595,7 +595,7 @@ export function WorkspacePage({
             sourceFileName: candidate.fileName,
             systemPrefixes,
             network,
-            stacks: engineerPipes.groupEngineerRiserStacks(network),
+            riserClassification: engineerPipes.classifyEngineerRiserStacks(network),
           },
         })
         return
@@ -842,7 +842,7 @@ export function WorkspacePage({
                   sourceFileName: engineerBaseline.sourceFileName,
                   systemPrefixes: engineerBaseline.systemPrefixes,
                   segmentCount: engineerBaseline.network.segments.length,
-                  stackCount: engineerBaseline.stacks.length,
+                  stackCount: engineerBaseline.riserClassification.sanitaryStacks.length,
                 },
           engineerComparison,
           // Continuity map (W5); null until built from the Decisions tab.
@@ -1000,7 +1000,7 @@ export function WorkspacePage({
     if (engineerBaseline === null || engineerStoreyId === null || isExtractingGeometry) return null
     return getEngineerOverlayPresentation({
       network: engineerBaseline.network,
-      stacks: engineerBaseline.stacks,
+      stacks: engineerBaseline.riserClassification.sanitaryStacks,
       engineerStoreyId,
       frameOrigin: modelFrame.origin,
       visible: engineerOverlayVisibleOnSelectedFloor,
@@ -1014,22 +1014,35 @@ export function WorkspacePage({
   ])
   // W7 metrics: our proposal vs the engineer baseline, in a shared plan frame.
   // Both sides are source metres: state risers are source plan metres (viewer
-  // x/z), engineer stacks are aligned into that frame via z = -IFC Y. Branch
-  // totals compare our plan-projected runs on the open floor against the
-  // engineer's non-vertical segments' Pset lengths (model-wide).
+  // x/z), engineer stacks are aligned into that frame via z = -IFC Y. Riser
+  // counts and the nearest-riser distance are scoped to the open floor (our
+  // entries on the host storey vs engineer stacks intersecting the matching
+  // engineer storey's slab band). Branch totals compare our plan-projected
+  // runs against the engineer's non-vertical segments' Pset lengths (model-wide).
   const engineerComparison = useMemo(() => {
     if (engineerBaseline === null || risers.length === 0) return null
+    const { riserClassification, network } = engineerBaseline
     return computeEngineerComparison({
       ourRisers: risers,
       ourRiserUnits: 'm',
       ourBranchRoutes: branchRouteFloors,
       ourAssignments: fixtureAssignments,
-      engineerRisers: alignEngineerStacksToViewerPlan(engineerBaseline.stacks),
-      engineerSegments: engineerBaseline.network.segments.filter(
-        (segment) => !isVerticalEngineerSegment(segment),
-      ),
+      engineerRisers: {
+        ...riserClassification,
+        sanitaryStacks: alignEngineerStacksToViewerPlan(riserClassification.sanitaryStacks),
+        ventStacks: alignEngineerStacksToViewerPlan(riserClassification.ventStacks),
+        stubs: alignEngineerStacksToViewerPlan(riserClassification.stubs),
+      },
+      storeyScope:
+        selectedStoreyId === null
+          ? null
+          : {
+              ourStoreyId: selectedStoreyId,
+              engineerBandM: engineerStoreyId === null ? null : storeySlabBandM(network, engineerStoreyId),
+            },
+      engineerSegments: network.segments.filter((segment) => !isVerticalEngineerSegment(segment)),
     })
-  }, [engineerBaseline, risers, branchRouteFloors, fixtureAssignments])
+  }, [engineerBaseline, risers, branchRouteFloors, fixtureAssignments, selectedStoreyId, engineerStoreyId])
 
   // --- continuity map overlay (W5) ---
   // Map storeys are HOST storey IDs (linked models remapped at build time), so
@@ -1228,7 +1241,7 @@ export function WorkspacePage({
               sourceFileName: engineerBaseline.sourceFileName,
               systemPrefixes: engineerBaseline.systemPrefixes,
               segmentCount: engineerBaseline.network.segments.length,
-              stackCount: engineerBaseline.stacks.length,
+              stackCount: engineerBaseline.riserClassification.sanitaryStacks.length,
             }
       }
       isExtractingEngineerBaseline={isExtractingEngineerBaseline}

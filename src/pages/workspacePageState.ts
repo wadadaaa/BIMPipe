@@ -5,7 +5,7 @@ import type { ModelOriginDecision } from '@/shared/frame/modelFrame'
 import type { LengthUnit } from '@/shared/lengthUnits'
 import type { StoreyAlignment } from '@/domain/alignStoreys'
 import type { MergedStoreyDetection } from '@/domain/mergeFixturesAcrossFiles'
-import type { EngineerPipeNetwork, EngineerRiserStack } from '@/domain/engineerPipes'
+import type { EngineerPipeNetwork, EngineerRiserClassification } from '@/domain/engineerPipes'
 import type { ContinuityMap } from '@/domain/continuityMap'
 import type { SuggestedRiserSnapOutcome } from '@/shared/routes/buildSuggestedRisers'
 import { appendAdjustment, createAdjustLog, type AdjustLog } from '@/domain/adjustLog'
@@ -30,15 +30,16 @@ export interface StoreyUnderlayState {
 
 /**
  * Engineer plumbing baseline extracted on demand (W7): the prefix-filtered
- * pipe network of one loaded model plus its grouped vertical riser stacks.
- * Endpoints stay in IFC SOURCE coordinates; the viewer boundary converts them
- * through `src/shared/frame/ifcSourceFrame.ts`.
+ * pipe network of one loaded model plus its classified vertical runs
+ * (sanitary stacks / vent stacks / stubs, V1). Endpoints stay in IFC SOURCE
+ * coordinates; the viewer boundary converts them through
+ * `src/shared/frame/ifcSourceFrame.ts`.
  */
 export interface EngineerBaselineState {
   sourceFileName: string
   systemPrefixes: readonly string[]
   network: EngineerPipeNetwork
-  stacks: EngineerRiserStack[]
+  riserClassification: EngineerRiserClassification
 }
 
 /**

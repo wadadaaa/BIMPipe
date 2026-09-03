@@ -31,6 +31,7 @@ export interface EngineerOverlayStackMarker {
   x: number
   z: number
   diameterMm: number
+  /** Storeys whose slab band the stack's Z-range intersects (geometric span). */
   storeyCount: number
 }
 
@@ -38,8 +39,9 @@ export interface EngineerOverlayPresentation {
   hasNetwork: boolean
   visibleSegments: EngineerOverlaySegment[]
   /**
-   * Engineer riser stacks are shown model-wide, not storey-filtered: risers
-   * are vertical shafts whose plan position is valid on every storey, and 096
+   * Engineer SANITARY riser stacks (extent ≥ one storey pitch; vents and stubs
+   * are not drawn), shown model-wide rather than storey-filtered: risers are
+   * vertical shafts whose plan position is valid on every storey, and 096
    * models several of them as single full-height pipes contained in one
    * storey only (per-storey containment understates the span).
    */
@@ -88,6 +90,7 @@ export function getEngineerOverlayPresentation({
   visible,
 }: {
   network: EngineerPipeNetwork
+  /** Sanitary stacks from `classifyEngineerRiserStacks(...).sanitaryStacks`. */
   stacks: EngineerRiserStack[]
   /** Storey of the engineer model matching the open floor (see resolver). */
   engineerStoreyId: StoreyId
@@ -128,7 +131,7 @@ export function getEngineerOverlayPresentation({
     x: stack.xM - frameOrigin.x,
     z: stack.yM - frameOrigin.z,
     diameterMm: stack.diameterMm,
-    storeyCount: stack.storeys.length,
+    storeyCount: stack.spannedStoreyIds.length,
   }))
 
   return { hasNetwork, visibleSegments, visibleStackMarkers, excludedSegmentCount }

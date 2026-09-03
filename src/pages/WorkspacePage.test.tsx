@@ -542,7 +542,8 @@ describe('WorkspacePage', () => {
   it('loads the engineer network on demand and the per-floor toggle hides and re-shows the layer', async () => {
     mocks.getDemoRuntimeConfig.mockReturnValue({ enabled: false as const })
     // One vertical SW-GRV segment on the auto-opened storey (id 2): drawable as
-    // a floor segment and eligible as a riser stack (Ø110, vertical).
+    // a floor segment and eligible as a riser stack (Ø110, vertical, 3 m ≥ the
+    // 2.5 m single-storey fallback threshold, Z-range inside the storey band).
     mocks.extractEngineerPipeNetwork.mockResolvedValue({
       metersPerSourceUnit: 1,
       storeys: [{ id: 2, name: 'קומה 2', elevationSource: 612 }],
@@ -553,8 +554,8 @@ describe('WorkspacePage', () => {
           systemName: 'SW-GRV 1',
           storeyId: 2,
           storeyName: 'קומה 2',
-          start: { x: 100, y: -50, z: 0 },
-          end: { x: 100, y: -50, z: 3 },
+          start: { x: 100, y: -50, z: 612 },
+          end: { x: 100, y: -50, z: 615 },
           endpointSource: 'extrusion-axis',
           outerDiameterMm: 110,
           lengthM: 3,

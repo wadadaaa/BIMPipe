@@ -4,7 +4,7 @@ import {
   filterOriginArtifacts,
   resolveMetersPerSourceUnit,
 } from './extractEngineerPipeNetwork'
-import { groupEngineerRiserStacks } from '@/domain/engineerPipes'
+import { classifyEngineerRiserStacks } from '@/domain/engineerPipes'
 import type { IfcAPI } from 'web-ifc'
 
 /**
@@ -339,7 +339,7 @@ describe('extractEngineerPipeNetwork on a synthetic centimetre model (real web-i
     }
   })
 
-  it('groups vertical Ø110 runs of the riser systems into 2 stacks', async () => {
+  it('classifies vertical Ø110 runs into 2 sanitary stacks and 1 separate vent stack', async () => {
     const { api, modelId } = await openModel(buildSyntheticPlumbingIfc().text)
     try {
       const networkResult = await extractEngineerPipeNetwork(api, modelId, {
@@ -347,22 +347,37 @@ describe('extractEngineerPipeNetwork on a synthetic centimetre model (real web-i
       })
       expect(networkResult.segments).toHaveLength(6)
 
-      const stacks = groupEngineerRiserStacks(networkResult, {
-        systemPrefixes: ['XX-GRV', 'XX-VNT'],
+      const classification = classifyEngineerRiserStacks(networkResult, {
+        sanitarySystemPrefixes: ['XX-GRV'],
+        ventSystemPrefixes: ['XX-VNT'],
       })
+      // Two storeys 3 m apart -> the stack extent threshold is the 3 m pitch.
+      expect(classification.minStackExtentM).toBeCloseTo(3, 9)
+      expect(classification.minStackExtentSource).toBe('storey-pitch-median')
 
+      const stacks = classification.sanitaryStacks
       expect(stacks).toHaveLength(2)
       expect(stacks.map((stack) => stack.id)).toEqual(['engineer-riser-1', 'engineer-riser-2'])
 
-      // Stack 1 near x = 1.05 m spans both storeys.
+      // Stack 1 near x = 1.05 m spans both storeys: z 0..6.2 m.
       expect(stacks[0].xM).toBeCloseTo((100 + 110) / 2 / CM_PER_M, 6)
       expect(stacks[0].storeys.map((storey) => storey.name)).toEqual(['Level A', 'Level B'])
+      expect(stacks[0].zMinM).toBeCloseTo(0, 6)
+      expect(stacks[0].zMaxM).toBeCloseTo(6.2, 6)
+      expect(stacks[0].spannedStoreyIds).toHaveLength(2)
       expect(stacks[0].diameterMm).toBeCloseTo(110, 9)
 
-      // Stack 2 near x = 5 m groups the gravity run with the nearby vent.
-      expect(stacks[1].xM).toBeCloseTo((500 + 505) / 2 / CM_PER_M, 6)
+      // Stack 2 near x = 5 m: the gravity run alone (exactly one storey tall).
+      expect(stacks[1].xM).toBeCloseTo(500 / CM_PER_M, 6)
       expect(stacks[1].storeys.map((storey) => storey.name)).toEqual(['Level A'])
-      expect(stacks[1].segmentExpressIds).toHaveLength(2)
+      expect(stacks[1].segmentExpressIds).toHaveLength(1)
+      expect(stacks[1].extentM).toBeCloseTo(3, 6)
+
+      // The nearby vent is a vent stack of its own, never merged into stack 2.
+      expect(classification.ventStacks).toHaveLength(1)
+      expect(classification.ventStacks[0].id).toBe('engineer-vent-1')
+      expect(classification.ventStacks[0].xM).toBeCloseTo(505 / CM_PER_M, 6)
+      expect(classification.stubs).toHaveLength(0)
     } finally {
       api.CloseModel(modelId)
     }

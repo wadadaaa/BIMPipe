@@ -338,7 +338,14 @@ describe('workspacePageReducer engineer baseline (W7)', () => {
     sourceFileName: 'plumbing.ifc',
     systemPrefixes: ['SW-GRV', 'VNT'],
     network: { metersPerSourceUnit: 0.01, storeys: [], segments: [] },
-    stacks: [],
+    riserClassification: {
+      sanitaryStacks: [],
+      ventStacks: [],
+      stubs: [],
+      minStackExtentM: 2.5,
+      minStackExtentSource: 'fallback-constant' as const,
+      storeyPitchM: null,
+    },
   }
 
   it('extraction lifecycle: started sets the flag, loaded stores the baseline, failed keeps the reason', () => {
