@@ -1397,6 +1397,7 @@ export function WorkspacePage({
           onRiserMoveCommit={handleMoveRiserCommit}
           onSwitch3D={storeys.length > 0 ? handleSwitch3D : undefined}
           sanitaryRoutes={localSanitaryRoutes}
+          chainLegendVisible={routingModel === 'demo-chains'}
           demoFlowEnabled={demoRuntime.enabled}
           branchRouteSegments={localViewerBranchRouteSegments}
           branchRoutesVisible={branchRoutesVisibleOnSelectedFloor}
