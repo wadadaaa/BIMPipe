@@ -3,13 +3,12 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { IfcAPI } from 'web-ifc'
-import { extractEngineerPipeNetwork } from './extractEngineerPipeNetwork'
+import { extractEngineerPipeNetwork, type ExtractedEngineerPipeNetwork } from './extractEngineerPipeNetwork'
 import {
   classifyEngineerRiserStacks,
   isVerticalEngineerSegment,
   stacksIntersectingBand,
   storeySlabBandM,
-  type EngineerPipeNetwork,
   type EngineerRiserClassification,
   type EngineerRiserStack,
 } from '@/domain/engineerPipes'
@@ -43,7 +42,7 @@ const EXPECTED_SANITARY_STACK_DIAMETERS_MM = new Set([110, 160, 200])
 describe.skipIf(!has096)('extractEngineerPipeNetwork on 096-P.ifc (gated)', () => {
   let api: IfcAPI
   let modelId: number
-  let network: EngineerPipeNetwork
+  let network: ExtractedEngineerPipeNetwork
   let classification: EngineerRiserClassification
   let stacks: EngineerRiserStack[]
 
@@ -200,5 +199,34 @@ describe.skipIf(!has096)('extractEngineerPipeNetwork on 096-P.ifc (gated)', () =
     expect(storey01SwGrv.every((segment) => segment.start !== null && segment.end !== null)).toBe(
       true,
     )
+    expect(bySource.get('extrusion-axis')).toBe(EXPECTED_STOREY_01_SW_GRV_SEGMENTS)
+  })
+
+  it('reports a geometry summary consistent with the segments (V1b)', () => {
+    const { endpointSourceCounts, unresolvedSegments } = network.geometrySummary
+    console.info(
+      `[096 gated] model-wide endpoint sources: ${JSON.stringify(endpointSourceCounts)}, unresolved: ${JSON.stringify(unresolvedSegments)}`,
+    )
+    const total = Object.values(endpointSourceCounts).reduce((sum, count) => sum + count, 0)
+    expect(total).toBe(network.segments.length)
+    // Every SW-GRV / VNT pipe of this model is a swept solid.
+    expect(endpointSourceCounts).toEqual({
+      'extrusion-axis': network.segments.length,
+      'distribution-ports': 0,
+      'mesh-bounds': 0,
+      unresolved: 0,
+    })
+    expect(endpointSourceCounts.unresolved).toBe(unresolvedSegments.length)
+    expect(unresolvedSegments.map((entry) => entry.expressId)).toEqual(
+      network.segments.filter((segment) => segment.start === null).map((segment) => segment.expressId),
+    )
+    // No segment of this model degenerates to a zero-length centreline.
+    for (const segment of network.segments) {
+      if (segment.start === null || segment.end === null) continue
+      expect(
+        segment.start.x === segment.end.x && segment.start.y === segment.end.y && segment.start.z === segment.end.z,
+        `segment #${segment.expressId} zero length`,
+      ).toBe(false)
+    }
   })
 })

@@ -5,6 +5,7 @@ import type { IfcAPI } from 'web-ifc'
 import { alignStoreysByElevation, type AlignmentModelInput } from '@/domain/alignStoreys'
 import { mergeStoreyDetections } from '@/domain/mergeFixturesAcrossFiles'
 import type { Fixture, FixtureKind } from '@/domain/types'
+import { ifcSourceToViewerPoint } from '@/shared/frame/ifcSourceFrame'
 import { dropIsolatedOriginVertices } from '@/shared/frame/originArtifacts'
 import { collectSpatialTreeElements } from './collectSpatialTreeElements'
 import { detectFixtures } from './detectFixtures'
@@ -282,26 +283,30 @@ gated('shbj SA + AR storey alignment, cross-file merge and pipe footprint (gated
         // The profiled fact: these meshes carry no world-origin artifacts.
         expect(droppedVertices).toBe(0)
 
-        // Centreline extraction. The engineer model declares three SI length
-        // units (project centimetres plus decimetre / metre measure units), which
-        // the extractor's unit resolver currently rejects; when that is fixed the
-        // endpoint assertion below runs, until then the gap is reported, not hidden.
-        let network: Awaited<ReturnType<typeof extractEngineerPipeNetwork>> | null = null
-        try {
-          network = await extractEngineerPipeNetwork(api, hostModelId, { systemPrefixes: ['SW-GRV', 'VNT'] })
-        } catch (error) {
-          expect(String(error)).toMatch(/Ambiguous length unit/)
-          console.warn(`[shbj pipes] extractEngineerPipeNetwork blocked: ${String(error)}`)
-        }
-        if (network !== null) {
-          const l04Segments = network.segments.filter((segment) => segment.storeyId === hostL04.id)
-          expect(l04Segments.length).toBeGreaterThan(0)
-          for (const segment of l04Segments) {
-            expect(segment.start).not.toBeNull()
-            expect(segment.end).not.toBeNull()
-            expect(containsPlan(allowed, segment.start!), `segment #${segment.expressId} start`).toBe(true)
-            expect(containsPlan(allowed, segment.end!), `segment #${segment.expressId} end`).toBe(true)
-          }
+        // Centreline extraction (V1b). The engineer model declares three SI
+        // length units (project centimetres plus decimetre / metre units used
+        // only inside derived units); the extractor follows the project unit
+        // assignment, so the extraction runs and every resolved centreline
+        // endpoint must lie inside the architect wall footprint. Endpoints are
+        // in the IFC source frame (cm, Z-up) and are mapped to the viewer plan
+        // frame before containment. Six vertical cut-face pipes have no usable
+        // port pair and stay unresolved (reported, never placed at the origin).
+        const network = await extractEngineerPipeNetwork(api, hostModelId, { systemPrefixes: ['SW-GRV', 'VNT'] })
+        expect(network.metersPerSourceUnit).toBe(0.01)
+        const l04Segments = network.segments.filter((segment) => segment.storeyId === hostL04.id)
+        expect(l04Segments).toHaveLength(87)
+        console.info(
+          `[shbj pipes] extractor endpoint sources: ${JSON.stringify(network.geometrySummary.endpointSourceCounts)}`,
+        )
+        expect(network.geometrySummary.endpointSourceCounts.unresolved).toBeLessThanOrEqual(6)
+        const resolvedSegments = l04Segments.filter((segment) => segment.start !== null && segment.end !== null)
+        expect(resolvedSegments).toHaveLength(l04Segments.length - network.geometrySummary.endpointSourceCounts.unresolved)
+        for (const segment of resolvedSegments) {
+          const start = ifcSourceToViewerPoint(segment.start!, network.metersPerSourceUnit)
+          const end = ifcSourceToViewerPoint(segment.end!, network.metersPerSourceUnit)
+          expect(containsPlan(allowed, start), `segment #${segment.expressId} start`).toBe(true)
+          expect(containsPlan(allowed, end), `segment #${segment.expressId} end`).toBe(true)
+          expect(start.x === end.x && start.y === end.y && start.z === end.z, `segment #${segment.expressId} zero length`).toBe(false)
         }
       } finally {
         api.CloseModel(hostModelId)

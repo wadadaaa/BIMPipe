@@ -75,7 +75,39 @@ interface SyntheticModel {
   text: string
 }
 
-function buildSyntheticPlumbingIfc(options: { includeLengthUnit?: boolean } = {}): SyntheticModel {
+interface SyntheticModelOptions {
+  /** Put the CENTI-metre LENGTHUNIT into the project unit assignment (default true). */
+  includeLengthUnit?: boolean
+  /**
+   * Declare DECI-metre and plain metre IfcSIUnit LENGTHUNITs that are only
+   * elements of an IfcDerivedUnit (volumetric flow rate) in the assignment —
+   * the Revit pattern that must not make the model's length unit ambiguous.
+   */
+  derivedUnitLengthUnits?: boolean
+  /** SI prefixes of stray LENGTHUNIT lines referenced by nothing (fallback-scan cases). */
+  strayLengthUnitPrefixes?: Array<'MILLI' | 'CENTI' | 'DECI' | null>
+  /**
+   * Revit "vertical pipe" export: a Ø110 cut face (IfcFaceBasedSurfaceModel,
+   * 16-gon disc) with two IfcDistributionPorts spanning 100..450 cm.
+   */
+  withCutFaceStack?: boolean
+  /** A 300 × 11 cm flat rectangle (surface model, no ports): mesh-bounds fallback. */
+  withSurfaceBar?: boolean
+  /** A Ø110 cut face without any port: unresolved geometry. */
+  withOrphanCutFace?: boolean
+}
+
+/** Local XY (cm) of a regular polygon inscribed in a circle, even count so opposite vertices span the diameter. */
+function discPointsCm(centreX: number, centreY: number, radiusCm: number, count: number): Array<[number, number, number]> {
+  const points: Array<[number, number, number]> = []
+  for (let i = 0; i < count; i++) {
+    const angle = (2 * Math.PI * i) / count
+    points.push([centreX + radiusCm * Math.cos(angle), centreY + radiusCm * Math.sin(angle), 0])
+  }
+  return points
+}
+
+function buildSyntheticPlumbingIfc(options: SyntheticModelOptions = {}): SyntheticModel {
   const includeLengthUnit = options.includeLengthUnit ?? true
   const b = new StepBuilder()
 
@@ -88,6 +120,27 @@ function buildSyntheticPlumbingIfc(options: { includeLengthUnit?: boolean } = {}
   const units: number[] = []
   if (includeLengthUnit) units.push(b.add('IFCSIUNIT(*,.LENGTHUNIT.,.CENTI.,.METRE.)'))
   units.push(b.add('IFCSIUNIT(*,.PLANEANGLEUNIT.,$,.RADIAN.)'))
+  if (options.derivedUnitLengthUnits) {
+    const decimetre = b.add('IFCSIUNIT(*,.LENGTHUNIT.,.DECI.,.METRE.)')
+    const metre = b.add('IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.)')
+    const second = b.add('IFCSIUNIT(*,.TIMEUNIT.,$,.SECOND.)')
+    const flowElements = [
+      b.add(`IFCDERIVEDUNITELEMENT(#${decimetre},3)`),
+      b.add(`IFCDERIVEDUNITELEMENT(#${second},-1)`),
+    ]
+    units.push(b.add(`IFCDERIVEDUNIT((${flowElements.map((id) => `#${id}`).join(',')}),.VOLUMETRICFLOWRATEUNIT.,$)`))
+    const milligram = b.add('IFCSIUNIT(*,.MASSUNIT.,.MILLI.,.GRAM.)')
+    const concentrationElements = [
+      b.add(`IFCDERIVEDUNITELEMENT(#${milligram},1)`),
+      b.add(`IFCDERIVEDUNITELEMENT(#${metre},-3)`),
+    ]
+    units.push(
+      b.add(`IFCDERIVEDUNIT((${concentrationElements.map((id) => `#${id}`).join(',')}),.IONCONCENTRATIONUNIT.,$)`),
+    )
+  }
+  for (const prefix of options.strayLengthUnitPrefixes ?? []) {
+    b.add(`IFCSIUNIT(*,.LENGTHUNIT.,${prefix === null ? '$' : `.${prefix}.`},.METRE.)`)
+  }
   const unitAssignment = b.add(`IFCUNITASSIGNMENT((${units.map((id) => `#${id}`).join(',')}))`)
 
   const worldOrigin = b.add('IFCCARTESIANPOINT((0.,0.,0.))')
@@ -180,6 +233,108 @@ function buildSyntheticPlumbingIfc(options: { includeLengthUnit?: boolean } = {}
     pipesByStorey.set(spec.storey, [...(pipesByStorey.get(spec.storey) ?? []), pipe])
     pipesBySystem.set(spec.system, [...(pipesBySystem.get(spec.system) ?? []), pipe])
     return pipe
+  }
+
+  /**
+   * A pipe whose only body is a planar face (IfcFaceBasedSurfaceModel) in the
+   * pipe's local frame, optionally with IfcDistributionPorts at local points —
+   * the shape Revit exports for vertical pipes cut by the view range.
+   */
+  const addSurfacePipe = (spec: {
+    name: string
+    /** Pipe placement location in cm relative to the building. */
+    locationCm: [number, number, number]
+    facePointsCm: Array<[number, number, number]>
+    /** Port locations in cm relative to the pipe placement. */
+    portsCm?: Array<[number, number, number]>
+    pset?: { lengthCm: number; invertElevationCm: number }
+    system: string
+    storey: string
+  }): number => {
+    const pointIds = spec.facePointsCm.map((point) =>
+      b.add(`IFCCARTESIANPOINT((${point.map(formatStepNumber).join(',')}))`),
+    )
+    const loop = b.add(`IFCPOLYLOOP((${pointIds.map((id) => `#${id}`).join(',')}))`)
+    const bound = b.add(`IFCFACEOUTERBOUND(#${loop},.T.)`)
+    const face = b.add(`IFCFACE((#${bound}))`)
+    const faceSet = b.add(`IFCCONNECTEDFACESET((#${face}))`)
+    const surfaceModel = b.add(`IFCFACEBASEDSURFACEMODEL((#${faceSet}))`)
+    const shapeRep = b.add(`IFCSHAPEREPRESENTATION(#${context},'Body','SurfaceModel',(#${surfaceModel}))`)
+    const productShape = b.add(`IFCPRODUCTDEFINITIONSHAPE($,$,(#${shapeRep}))`)
+
+    const location = b.add(`IFCCARTESIANPOINT((${spec.locationCm.map(formatStepNumber).join(',')}))`)
+    const placementAxis = b.add(`IFCAXIS2PLACEMENT3D(#${location},$,$)`)
+    const placement = b.add(`IFCLOCALPLACEMENT(#${buildingPlacement},#${placementAxis})`)
+    const pipe = b.add(
+      `IFCFLOWSEGMENT('${b.guid()}',#${ownerHistory},'${spec.name}',$,$,#${placement},#${productShape},$)`,
+    )
+
+    for (const [index, portCm] of (spec.portsCm ?? []).entries()) {
+      const portPoint = b.add(`IFCCARTESIANPOINT((${portCm.map(formatStepNumber).join(',')}))`)
+      const portAxis = b.add(`IFCAXIS2PLACEMENT3D(#${portPoint},$,$)`)
+      const portPlacement = b.add(`IFCLOCALPLACEMENT(#${placement},#${portAxis})`)
+      const port = b.add(
+        `IFCDISTRIBUTIONPORT('${b.guid()}',#${ownerHistory},'Port ${index}',$,$,#${portPlacement},$,.SOURCEANDSINK.)`,
+      )
+      b.add(`IFCRELCONNECTSPORTTOELEMENT('${b.guid()}',#${ownerHistory},$,$,#${port},#${pipe})`)
+    }
+
+    if (spec.pset !== undefined) {
+      const lengthProperty = b.add(
+        `IFCPROPERTYSINGLEVALUE('Length',$,IFCPOSITIVELENGTHMEASURE(${formatStepNumber(spec.pset.lengthCm)}),$)`,
+      )
+      const invertProperty = b.add(
+        `IFCPROPERTYSINGLEVALUE('InvertElevation',$,IFCLENGTHMEASURE(${formatStepNumber(spec.pset.invertElevationCm)}),$)`,
+      )
+      const pset = b.add(
+        `IFCPROPERTYSET('${b.guid()}',#${ownerHistory},'Pset_FlowSegmentPipeSegment',$,(#${lengthProperty},#${invertProperty}))`,
+      )
+      b.add(`IFCRELDEFINESBYPROPERTIES('${b.guid()}',#${ownerHistory},$,$,(#${pipe}),#${pset})`)
+    }
+
+    pipesByStorey.set(spec.storey, [...(pipesByStorey.get(spec.storey) ?? []), pipe])
+    pipesBySystem.set(spec.system, [...(pipesBySystem.get(spec.system) ?? []), pipe])
+    return pipe
+  }
+
+  if (options.withCutFaceStack) {
+    // Disc centred at local (5.5, 5.5), radius 5.5 cm -> Ø110; cut at 200 cm
+    // above Level A; ports 100 cm below and 250 cm above the cut.
+    addSurfacePipe({
+      name: 'XX-GRV Vertical Cut Face',
+      locationCm: [300, 400, 200],
+      facePointsCm: discPointsCm(5.5, 5.5, 5.5, 16),
+      portsCm: [
+        [5.5, 5.5, -100],
+        [5.5, 5.5, 250],
+      ],
+      pset: { lengthCm: 350, invertElevationCm: 100 },
+      system: 'XX-GRV 3',
+      storey: 'Level A',
+    })
+  }
+  if (options.withSurfaceBar) {
+    addSurfacePipe({
+      name: 'XX-GRV Surface Bar',
+      locationCm: [1000, 1000, 50],
+      facePointsCm: [
+        [0, 0, 0],
+        [300, 0, 0],
+        [300, 11, 0],
+        [0, 11, 0],
+      ],
+      system: 'XX-GRV 3',
+      storey: 'Level A',
+    })
+  }
+  if (options.withOrphanCutFace) {
+    addSurfacePipe({
+      name: 'XX-GRV Orphan Cut Face',
+      locationCm: [700, 700, 200],
+      facePointsCm: discPointsCm(5.5, 5.5, 5.5, 16),
+      system: 'XX-GRV 3',
+      storey: 'Level A',
+    })
   }
 
   // Stack 1: vertical Ø110 runs on both storeys, XY within grouping tolerance.
@@ -401,6 +556,160 @@ describe('extractEngineerPipeNetwork on a synthetic centimetre model (real web-i
     )
     try {
       await expect(resolveMetersPerSourceUnit(api, modelId)).rejects.toThrow(/length unit/i)
+    } finally {
+      api.CloseModel(modelId)
+    }
+  })
+
+  it('reports a geometry summary: every extrusion pipe counted, nothing unresolved', async () => {
+    const { api, modelId } = await openModel(buildSyntheticPlumbingIfc().text)
+    try {
+      const networkResult = await extractEngineerPipeNetwork(api, modelId, { systemPrefixes: ['XX-GRV'] })
+      expect(networkResult.geometrySummary).toEqual({
+        endpointSourceCounts: { 'extrusion-axis': 5, 'distribution-ports': 0, 'mesh-bounds': 0, unresolved: 0 },
+        unresolvedSegments: [],
+      })
+    } finally {
+      api.CloseModel(modelId)
+    }
+  })
+})
+
+describe('resolveMetersPerSourceUnit: project unit assignment first', () => {
+  it('ignores SI length units that only serve derived units when the assignment declares centimetres', async () => {
+    const { api, modelId } = await openModel(buildSyntheticPlumbingIfc({ derivedUnitLengthUnits: true }).text)
+    try {
+      // Three distinct LENGTHUNIT factors exist in the file (cm, dm, m) …
+      const { IFCSIUNIT } = await import('web-ifc')
+      const lengthUnitPrefixes = new Set<string>()
+      const ids = api.GetLineIDsWithType(modelId, IFCSIUNIT)
+      for (let i = 0; i < ids.size(); i++) {
+        const line = api.GetLine(modelId, ids.get(i), false) as { UnitType?: { value?: string }; Prefix?: { value?: string } | null }
+        if (line.UnitType?.value === 'LENGTHUNIT') lengthUnitPrefixes.add(line.Prefix?.value ?? 'none')
+      }
+      expect(lengthUnitPrefixes).toEqual(new Set(['CENTI', 'DECI', 'none']))
+
+      // … but the project assignment names exactly one, and that one wins.
+      await expect(resolveMetersPerSourceUnit(api, modelId)).resolves.toBe(0.01)
+      const networkResult = await extractEngineerPipeNetwork(api, modelId, { systemPrefixes: ['XX-GRV'] })
+      expect(networkResult.metersPerSourceUnit).toBe(0.01)
+      expect(networkResult.segments).toHaveLength(5)
+    } finally {
+      api.CloseModel(modelId)
+    }
+  })
+
+  it('falls back to the single stray SI length unit when the assignment has none', async () => {
+    const { api, modelId } = await openModel(
+      buildSyntheticPlumbingIfc({ includeLengthUnit: false, strayLengthUnitPrefixes: ['MILLI'] }).text,
+    )
+    try {
+      await expect(resolveMetersPerSourceUnit(api, modelId)).resolves.toBe(0.001)
+    } finally {
+      api.CloseModel(modelId)
+    }
+  })
+
+  it('throws "ambiguous" only when the assignment has no length unit AND the scan finds several', async () => {
+    const { api, modelId } = await openModel(
+      buildSyntheticPlumbingIfc({ includeLengthUnit: false, strayLengthUnitPrefixes: ['MILLI', 'CENTI'] }).text,
+    )
+    try {
+      await expect(resolveMetersPerSourceUnit(api, modelId)).rejects.toThrow(/ambiguous length unit/i)
+    } finally {
+      api.CloseModel(modelId)
+    }
+  })
+})
+
+describe('extractEngineerPipeNetwork: surface-model pipes (no extrusion solid)', () => {
+  it('derives a vertical cut-face pipe from its two IfcDistributionPorts, diameter from the face', async () => {
+    const { api, modelId } = await openModel(buildSyntheticPlumbingIfc({ withCutFaceStack: true }).text)
+    try {
+      const networkResult = await extractEngineerPipeNetwork(api, modelId, { systemPrefixes: ['XX-GRV 3'] })
+      expect(networkResult.segments).toHaveLength(1)
+      const [stack] = networkResult.segments
+      expect(stack.endpointSource).toBe('distribution-ports')
+      // Ports at local z -100 / +250 relative to the placement at (300, 400, 200) cm.
+      expect(stack.start!.x).toBeCloseTo(305.5, 6)
+      expect(stack.start!.y).toBeCloseTo(405.5, 6)
+      expect(stack.start!.z).toBeCloseTo(100, 6)
+      expect(stack.end!.x).toBeCloseTo(305.5, 6)
+      expect(stack.end!.y).toBeCloseTo(405.5, 6)
+      expect(stack.end!.z).toBeCloseTo(450, 6)
+      // Ø110 from the 16-gon cut face (exact: opposite vertices span the diameter).
+      expect(stack.outerDiameterMm).toBe(110)
+      expect(stack.lengthM).toBeCloseTo(3.5, 9)
+      expect(stack.invertElevationM).toBeCloseTo(1, 9)
+      expect(networkResult.geometrySummary.endpointSourceCounts).toEqual({
+        'extrusion-axis': 0,
+        'distribution-ports': 1,
+        'mesh-bounds': 0,
+        unresolved: 0,
+      })
+
+      // The 3.5 m vertical Ø110 run is a sanitary stack (storey pitch 3 m).
+      const classification = classifyEngineerRiserStacks(networkResult, {
+        sanitarySystemPrefixes: ['XX-GRV'],
+        ventSystemPrefixes: ['XX-VNT'],
+      })
+      expect(classification.sanitaryStacks).toHaveLength(1)
+      expect(classification.sanitaryStacks[0].xM).toBeCloseTo(3.055, 6)
+      expect(classification.sanitaryStacks[0].yM).toBeCloseTo(4.055, 6)
+      expect(classification.sanitaryStacks[0].zMinM).toBeCloseTo(1, 6)
+      expect(classification.sanitaryStacks[0].zMaxM).toBeCloseTo(4.5, 6)
+      expect(classification.sanitaryStacks[0].diameterMm).toBe(110)
+    } finally {
+      api.CloseModel(modelId)
+    }
+  })
+
+  it('returns mesh-bounds centrelines in SOURCE coordinates (cm, Z-up), not the viewer frame', async () => {
+    const { api, modelId } = await openModel(buildSyntheticPlumbingIfc({ withSurfaceBar: true }).text)
+    try {
+      const networkResult = await extractEngineerPipeNetwork(api, modelId, { systemPrefixes: ['XX-GRV 3'] })
+      expect(networkResult.segments).toHaveLength(1)
+      const [bar] = networkResult.segments
+      expect(bar.endpointSource).toBe('mesh-bounds')
+      expect(bar.outerDiameterMm).toBeNull()
+      // 300 × 11 cm face at (1000, 1000, 50): centreline along X through the face centre.
+      // Tolerance 0.01 cm: web-ifc vertices are float32 in metres.
+      expect(bar.start!.x).toBeCloseTo(1000, 2)
+      expect(bar.start!.y).toBeCloseTo(1005.5, 2)
+      expect(bar.start!.z).toBeCloseTo(50, 2)
+      expect(bar.end!.x).toBeCloseTo(1300, 2)
+      expect(bar.end!.y).toBeCloseTo(1005.5, 2)
+      expect(bar.end!.z).toBeCloseTo(50, 2)
+      expect(networkResult.geometrySummary.endpointSourceCounts['mesh-bounds']).toBe(1)
+    } finally {
+      api.CloseModel(modelId)
+    }
+  })
+
+  it('leaves a port-less cut face unresolved with a reason instead of a zero-length segment', async () => {
+    const { api, modelId } = await openModel(buildSyntheticPlumbingIfc({ withOrphanCutFace: true }).text)
+    try {
+      const networkResult = await extractEngineerPipeNetwork(api, modelId, { systemPrefixes: ['XX-GRV 3'] })
+      expect(networkResult.segments).toHaveLength(1)
+      const [orphan] = networkResult.segments
+      expect(orphan.start).toBeNull()
+      expect(orphan.end).toBeNull()
+      expect(orphan.endpointSource).toBeNull()
+      expect(orphan.outerDiameterMm).toBeNull()
+      expect(networkResult.geometrySummary.endpointSourceCounts.unresolved).toBe(1)
+      expect(networkResult.geometrySummary.unresolvedSegments).toEqual([
+        {
+          expressId: orphan.expressId,
+          reason: expect.stringMatching(/no extrusion solid; no ports; degenerate mesh/),
+        },
+      ])
+      // Still counted as a segment; never a riser candidate.
+      const classification = classifyEngineerRiserStacks(networkResult, {
+        sanitarySystemPrefixes: ['XX-GRV'],
+        ventSystemPrefixes: ['XX-VNT'],
+      })
+      expect(classification.sanitaryStacks).toHaveLength(0)
+      expect(classification.stubs).toHaveLength(0)
     } finally {
       api.CloseModel(modelId)
     }

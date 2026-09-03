@@ -1,6 +1,7 @@
 import { Matrix4, Vector3 } from 'three'
 import type { IfcAPI } from 'web-ifc'
 import type {
+  EngineerEndpointSource,
   EngineerPipeNetwork,
   EngineerPipeSegment,
   EngineerPoint3,
@@ -8,36 +9,77 @@ import type {
 } from '@/domain/engineerPipes'
 import type { StoreyId } from '@/domain/types'
 import { dropIsolatedOriginVertices } from '@/shared/frame/originArtifacts'
+import { toMeters } from '@/shared/lengthUnits'
 import {
   readCoordinates,
   readDirection,
   resolveLocalPlacementWorldMatrix,
 } from './localPlacementMatrix'
+import { resolveModelLengthUnit } from './resolveModelLengthUnit'
 
 /**
  * Extraction of the engineer plumbing baseline from a plumbing IFC.
  *
  * Collects IfcFlowSegment/IfcPipeSegment occurrences whose owning IfcSystem
  * name starts with one of the requested prefixes, with:
- * - centreline endpoints in SOURCE model coordinates from the extrusion axis
- *   (IfcExtrudedAreaSolid position + direction + depth through the local
- *   placement chain), falling back to filtered mesh bounds,
- * - outer diameter from IfcCircleProfileDef (explicitly converted to mm),
+ * - centreline endpoints in SOURCE model coordinates (Z-up, source length
+ *   unit), derived in this order:
+ *   1. `extrusion-axis`: IfcExtrudedAreaSolid position + direction + depth
+ *      through the local placement chain;
+ *   2. `distribution-ports`: the two IfcDistributionPort placements of the
+ *      segment (Revit exports vertical pipes crossing the view range as a
+ *      single cut face — no solid — but keeps full-length ports);
+ *   3. `mesh-bounds`: bounding-box centreline of the tessellated mesh,
+ *      mapped back from web-ifc's viewer frame (metres, Y-up) to the source
+ *      frame; degenerate meshes (a flat face, no discernible axis) are left
+ *      unresolved instead of becoming zero-length segments;
+ * - outer diameter from IfcCircleProfileDef (explicitly converted to mm) or,
+ *   for port-derived centrelines, estimated from the mesh cross-section
+ *   perpendicular to the axis (rounded to 0.1 mm; null when no mesh exists),
  * - `Length` / `InvertElevation` from Pset_FlowSegmentPipeSegment (converted
  *   to metres; absent values surface as null, never fabricated),
- * - containing storey and owning IfcSystem name.
+ * - containing storey and owning IfcSystem name,
+ * - a `geometrySummary` with segment counts per endpoint source and the
+ *   express IDs of segments whose centreline could not be resolved.
  *
  * Known approximations (documented, not silent):
  * - IfcMappedItem representations are resolved one level deep with the
  *   composition `MappingTarget × MappingOrigin`; nested maps fall back to
- *   mesh bounds.
+ *   ports / mesh bounds.
  * - The mesh-bounds fallback returns the bounding-box centreline along the
  *   longest box axis, after dropping isolated world-origin vertices (shared
  *   guard in `src/shared/frame/originArtifacts.ts`); diameters are not
- *   inferred from meshes (null).
+ *   inferred for it (null).
  */
 
 const PSET_FLOW_SEGMENT_PIPE_SEGMENT = 'Pset_FlowSegmentPipeSegment'
+
+/** Mesh-bounds centrelines shorter than this (in metres) are treated as unresolved. */
+const MIN_MESH_BOUNDS_LENGTH_M = 0.001
+/** The dominant mesh extent must exceed the second-largest by this factor to define an axis. */
+const MIN_MESH_BOUNDS_ELONGATION = 1.5
+/** Estimated mesh-cross-section diameters are rounded to this step (float32 vertex noise). */
+const MESH_DIAMETER_ROUNDING_MM = 0.1
+/** Above this vertex count the diameter estimate uses projected extents instead of pairwise distances. */
+const MAX_PAIRWISE_DIAMETER_POINTS = 4096
+
+/** Per-endpoint-source segment counts plus the unresolved set, for UI/debug output. */
+export interface EngineerGeometrySummary {
+  /** Number of segments per centreline source; `unresolved` = start/end are null. */
+  endpointSourceCounts: Record<EngineerEndpointSource | 'unresolved', number>
+  /**
+   * Segments (expressId ascending) whose centreline could not be resolved,
+   * each with a one-line reason (why ports and mesh bounds both failed).
+   */
+  unresolvedSegments: Array<{ expressId: number; reason: string }>
+}
+
+/** Outcome of one centreline strategy: geometry, or a one-line reason it did not apply. */
+type GeometryAttempt = { geometry: SegmentGeometry; reason: null } | { geometry: null; reason: string }
+
+export interface ExtractedEngineerPipeNetwork extends EngineerPipeNetwork {
+  geometrySummary: EngineerGeometrySummary
+}
 
 export interface ExtractEngineerPipeNetworkOptions {
   /**
@@ -72,37 +114,87 @@ const SI_PREFIX_FACTORS: Record<string, number> = {
   NANO: 1e-9,
 }
 
+/** Metres per unit for an IfcSIUnit LENGTHUNIT line; throws for non-metre bases and unknown prefixes. */
+function siLengthUnitFactor(line: IfcLine): number {
+  if (line?.Name?.value !== 'METRE') {
+    throw new Error(`Unsupported SI length unit base "${line?.Name?.value}" (expected METRE).`)
+  }
+  const prefix: string | null = line?.Prefix?.value ?? null
+  const factor = prefix === null ? 1 : SI_PREFIX_FACTORS[prefix]
+  if (factor === undefined) {
+    throw new Error(`Unsupported SI length unit prefix "${prefix}".`)
+  }
+  return factor
+}
+
 /**
- * Resolves the model length unit as metres-per-source-unit from IfcSIUnit.
- * Throws an explicit error for missing, ambiguous, or non-SI length units —
- * per the repo unknown-unit policy, units are never assumed.
+ * Express ID of the LENGTHUNIT entry of `IfcProject.UnitsInContext`, or null
+ * when the project has no unit assignment / no length unit in it.
+ */
+async function findAssignedLengthUnitId(api: IfcAPI, webIfcModelId: number): Promise<number | null> {
+  const { IFCPROJECT } = await import('web-ifc')
+  const projectIds = api.GetLineIDsWithType(webIfcModelId, IFCPROJECT)
+  if (projectIds.size() === 0) return null
+
+  const project = api.GetLine(webIfcModelId, projectIds.get(0), false) as IfcLine
+  const assignmentId = (project?.UnitsInContext as IfcHandle)?.value
+  if (typeof assignmentId !== 'number') return null
+
+  const assignment = api.GetLine(webIfcModelId, assignmentId, false) as IfcLine
+  for (const unitId of readHandleIds(assignment?.Units)) {
+    const unit = api.GetLine(webIfcModelId, unitId, false) as IfcLine
+    if (unit?.UnitType?.value === 'LENGTHUNIT') return unitId
+  }
+  return null
+}
+
+/**
+ * Resolves the model length unit as metres-per-source-unit.
+ *
+ * Order (units are never assumed, per the repo unknown-unit policy):
+ * 1. The project's unit assignment (`IfcProject.UnitsInContext` LENGTHUNIT)
+ *    via the app's single unit reader `resolveModelLengthUnit`, converted
+ *    with `lengthUnits.toMeters`. Files routinely declare further IfcSIUnit
+ *    LENGTHUNIT lines that only serve as elements of derived units (flow
+ *    rate, concentration); those must not make the model ambiguous.
+ * 2. An assigned length unit the reader does not support (e.g. a DECI prefix)
+ *    is resolved from the SI prefix table, or rejected explicitly when it is
+ *    conversion-based (feet, inches).
+ * 3. Only when the project declares no length unit at all: a global scan of
+ *    IfcSIUnit LENGTHUNIT lines, which throws when THAT is ambiguous.
  */
 export async function resolveMetersPerSourceUnit(
   api: IfcAPI,
   webIfcModelId: number,
 ): Promise<number> {
+  const assignedUnit = await resolveModelLengthUnit(api, webIfcModelId)
+  if (assignedUnit !== null) return toMeters(1, assignedUnit)
+
   const { IFCSIUNIT, IFCCONVERSIONBASEDUNIT } = await import('web-ifc')
+
+  const assignedUnitId = await findAssignedLengthUnitId(api, webIfcModelId)
+  if (assignedUnitId !== null) {
+    const line = api.GetLine(webIfcModelId, assignedUnitId, false) as IfcLine
+    if (api.GetLineType(webIfcModelId, assignedUnitId) === IFCSIUNIT) {
+      return siLengthUnitFactor(line)
+    }
+    throw new Error(
+      `Unsupported conversion-based length unit "${line?.Name?.value ?? 'unknown'}" in the project unit assignment; only SI metre-based units are handled.`,
+    )
+  }
 
   const factors = new Set<number>()
   const siUnitIds = api.GetLineIDsWithType(webIfcModelId, IFCSIUNIT)
   for (let i = 0; i < siUnitIds.size(); i++) {
     const line = api.GetLine(webIfcModelId, siUnitIds.get(i), false) as IfcLine
     if (line?.UnitType?.value !== 'LENGTHUNIT') continue
-    if (line?.Name?.value !== 'METRE') {
-      throw new Error(`Unsupported SI length unit base "${line?.Name?.value}" (expected METRE).`)
-    }
-    const prefix: string | null = line?.Prefix?.value ?? null
-    const factor = prefix === null ? 1 : SI_PREFIX_FACTORS[prefix]
-    if (factor === undefined) {
-      throw new Error(`Unsupported SI length unit prefix "${prefix}".`)
-    }
-    factors.add(factor)
+    factors.add(siLengthUnitFactor(line))
   }
 
   if (factors.size === 1) return [...factors][0]
   if (factors.size > 1) {
     throw new Error(
-      `Ambiguous length unit: found ${factors.size} distinct SI length factors in the model.`,
+      `Ambiguous length unit: the project declares no length unit and the model has ${factors.size} distinct SI length factors.`,
     )
   }
 
@@ -397,8 +489,202 @@ function cartesianTransformationOperatorMatrix(
 interface SegmentGeometry {
   start: EngineerPoint3
   end: EngineerPoint3
-  endpointSource: 'extrusion-axis' | 'mesh-bounds'
+  endpointSource: EngineerEndpointSource
   outerDiameterMm: number | null
+}
+
+/**
+ * Maps each candidate element to its IfcDistributionPort express IDs (sorted
+ * ascending for determinism). Reads both IFC2X3 `IfcRelConnectsPortToElement`
+ * and IFC4 `IfcRelNests` (element nests its ports).
+ */
+async function buildElementPortsMap(
+  api: IfcAPI,
+  webIfcModelId: number,
+  candidateIds: Set<number>,
+): Promise<Map<number, number[]>> {
+  const { IFCRELCONNECTSPORTTOELEMENT, IFCRELNESTS, IFCDISTRIBUTIONPORT } = await import('web-ifc')
+  const ports = new Map<number, Set<number>>()
+  const addPort = (elementId: number, portId: number): void => {
+    const set = ports.get(elementId) ?? new Set<number>()
+    set.add(portId)
+    ports.set(elementId, set)
+  }
+
+  const connectIds = api.GetLineIDsWithType(webIfcModelId, IFCRELCONNECTSPORTTOELEMENT)
+  for (let i = 0; i < connectIds.size(); i++) {
+    const line = api.GetLine(webIfcModelId, connectIds.get(i), false) as IfcLine
+    const elementId = (line?.RelatedElement as IfcHandle)?.value
+    const portId = (line?.RelatingPort as IfcHandle)?.value
+    if (typeof elementId !== 'number' || typeof portId !== 'number') continue
+    if (candidateIds.has(elementId)) addPort(elementId, portId)
+  }
+
+  const nestIds = api.GetLineIDsWithType(webIfcModelId, IFCRELNESTS)
+  for (let i = 0; i < nestIds.size(); i++) {
+    const line = api.GetLine(webIfcModelId, nestIds.get(i), false) as IfcLine
+    const elementId = (line?.RelatingObject as IfcHandle)?.value
+    if (typeof elementId !== 'number' || !candidateIds.has(elementId)) continue
+    for (const relatedId of readHandleIds(line?.RelatedObjects)) {
+      let isPort = false
+      try {
+        isPort = api.GetLineType(webIfcModelId, relatedId) === IFCDISTRIBUTIONPORT
+      } catch {
+        isPort = false
+      }
+      if (isPort) addPort(elementId, relatedId)
+    }
+  }
+
+  const result = new Map<number, number[]>()
+  for (const [elementId, portIds] of ports) result.set(elementId, [...portIds].sort((a, b) => a - b))
+  return result
+}
+
+/**
+ * Maps a web-ifc mesh vertex (viewer frame: metres, Y-up, z = −IFC Y) back to
+ * the IFC source frame (source units, Z-up). Inverse of
+ * `ifcSourceToViewerPoint` in `src/shared/frame/ifcSourceFrame.ts`.
+ */
+function viewerToSourcePoint(x: number, y: number, z: number, metersPerSourceUnit: number): EngineerPoint3 {
+  return { x: x / metersPerSourceUnit, y: -z / metersPerSourceUnit, z: y / metersPerSourceUnit }
+}
+
+/**
+ * All mesh vertices of an element in SOURCE coordinates, after the shared
+ * origin-artifact guard. Null when the element has no tessellated geometry.
+ */
+function readMeshSourcePoints(
+  api: IfcAPI,
+  webIfcModelId: number,
+  expressId: number,
+  metersPerSourceUnit: number,
+): EngineerPoint3[] | null {
+  try {
+    const flatMesh = api.GetFlatMesh(webIfcModelId, expressId)
+    if (flatMesh.geometries.size() === 0) return null
+
+    const points: EngineerPoint3[] = []
+    for (let gi = 0; gi < flatMesh.geometries.size(); gi++) {
+      const placed = flatMesh.geometries.get(gi)
+      const t = placed.flatTransformation
+      const geomData = api.GetGeometry(webIfcModelId, placed.geometryExpressID)
+      const rawVerts = api.GetVertexArray(geomData.GetVertexData(), geomData.GetVertexDataSize())
+      geomData.delete()
+
+      // Vertex stride is 6: [x, y, z, nx, ny, nz]; transform is column-major 4x4.
+      for (let j = 0; j < rawVerts.length / 6; j++) {
+        const lx = rawVerts[j * 6]
+        const ly = rawVerts[j * 6 + 1]
+        const lz = rawVerts[j * 6 + 2]
+        points.push(
+          viewerToSourcePoint(
+            t[0] * lx + t[4] * ly + t[8] * lz + t[12],
+            t[1] * lx + t[5] * ly + t[9] * lz + t[13],
+            t[2] * lx + t[6] * ly + t[10] * lz + t[14],
+            metersPerSourceUnit,
+          ),
+        )
+      }
+    }
+    if (points.length === 0) return null
+    return filterOriginArtifacts(points)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Estimates the outer diameter (mm) of a pipe from its mesh vertices projected
+ * onto the plane perpendicular to the centreline axis: the largest projected
+ * extent. Exact for circles tessellated with an even vertex count (opposite
+ * vertices span the diameter); rounded to 0.1 mm to absorb float32 vertex
+ * noise. Null when the mesh has too few points or the extent is below 1 mm.
+ */
+function estimateDiameterFromMeshCrossSection(
+  points: readonly EngineerPoint3[],
+  axis: Vector3,
+  metersPerSourceUnit: number,
+): number | null {
+  if (points.length < 3 || axis.lengthSq() < 1e-12) return null
+  const zAxis = axis.clone().normalize()
+  const hint = Math.abs(zAxis.z) < 0.9 ? new Vector3(0, 0, 1) : new Vector3(1, 0, 0)
+  const u = new Vector3().crossVectors(zAxis, hint).normalize()
+  const v = new Vector3().crossVectors(zAxis, u).normalize()
+
+  const projected: Array<[number, number]> = points.map((point) => {
+    const p = new Vector3(point.x, point.y, point.z)
+    return [p.dot(u), p.dot(v)]
+  })
+
+  let extentSource = 0
+  if (projected.length <= MAX_PAIRWISE_DIAMETER_POINTS) {
+    for (let i = 0; i < projected.length; i++) {
+      for (let j = i + 1; j < projected.length; j++) {
+        const du = projected[i][0] - projected[j][0]
+        const dv = projected[i][1] - projected[j][1]
+        const distance = Math.sqrt(du * du + dv * dv)
+        if (distance > extentSource) extentSource = distance
+      }
+    }
+  } else {
+    let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity
+    for (const [pu, pv] of projected) {
+      if (pu < minU) minU = pu
+      if (pu > maxU) maxU = pu
+      if (pv < minV) minV = pv
+      if (pv > maxV) maxV = pv
+    }
+    extentSource = Math.max(maxU - minU, maxV - minV)
+  }
+
+  const diameterMm = extentSource * metersPerSourceUnit * 1000
+  if (!(diameterMm >= 1)) return null
+  return Math.round(diameterMm / MESH_DIAMETER_ROUNDING_MM) * MESH_DIAMETER_ROUNDING_MM
+}
+
+/**
+ * Centreline from the segment's two IfcDistributionPorts: each port placement
+ * is resolved through the local placement chain to SOURCE coordinates. Start
+ * is the lower express ID port. Requires exactly two distinct port positions
+ * (Revit omits the port of an open pipe end, which is reported as a reason).
+ * The diameter is estimated from the mesh cross-section.
+ */
+function extractPortGeometry(
+  api: IfcAPI,
+  webIfcModelId: number,
+  expressId: number,
+  portIds: readonly number[] | undefined,
+  metersPerSourceUnit: number,
+): GeometryAttempt {
+  if (portIds === undefined || portIds.length === 0) return { geometry: null, reason: 'no ports' }
+  if (portIds.length === 1) return { geometry: null, reason: 'single port' }
+  if (portIds.length > 2) return { geometry: null, reason: `${portIds.length} ports` }
+
+  const positions: EngineerPoint3[] = []
+  for (const portId of portIds) {
+    const port = api.GetLine(webIfcModelId, portId, false) as IfcLine
+    const placementId = (port?.ObjectPlacement as IfcHandle)?.value
+    if (typeof placementId !== 'number') return { geometry: null, reason: 'port without placement' }
+    const elements = resolveLocalPlacementWorldMatrix(api, webIfcModelId, placementId).elements
+    const position = { x: elements[12], y: elements[13], z: elements[14] }
+    if (![position.x, position.y, position.z].every(Number.isFinite)) {
+      return { geometry: null, reason: 'port placement not finite' }
+    }
+    positions.push(position)
+  }
+
+  const [start, end] = positions
+  const axis = new Vector3(end.x - start.x, end.y - start.y, end.z - start.z)
+  if (axis.length() * metersPerSourceUnit < MIN_MESH_BOUNDS_LENGTH_M) {
+    return { geometry: null, reason: 'coincident ports' }
+  }
+
+  const meshPoints = readMeshSourcePoints(api, webIfcModelId, expressId, metersPerSourceUnit)
+  const outerDiameterMm =
+    meshPoints === null ? null : estimateDiameterFromMeshCrossSection(meshPoints, axis, metersPerSourceUnit)
+
+  return { geometry: { start, end, endpointSource: 'distribution-ports', outerDiameterMm }, reason: null }
 }
 
 function extractExtrusionAxisGeometry(
@@ -460,63 +746,52 @@ export function filterOriginArtifacts(points: EngineerPoint3[]): EngineerPoint3[
   return dropIsolatedOriginVertices(points)
 }
 
+/**
+ * Bounding-box centreline of the mesh in SOURCE coordinates along the longest
+ * box axis. Unresolved (null) when the mesh has no discernible axis: the
+ * dominant extent is shorter than `MIN_MESH_BOUNDS_LENGTH_M` or not at least
+ * `MIN_MESH_BOUNDS_ELONGATION` times the second-largest extent (e.g. a
+ * single cut face, whose "longest axis" would be its own diameter).
+ */
 function extractMeshBoundsGeometry(
   api: IfcAPI,
   webIfcModelId: number,
   expressId: number,
-): SegmentGeometry | null {
-  try {
-    const flatMesh = api.GetFlatMesh(webIfcModelId, expressId)
-    if (flatMesh.geometries.size() === 0) return null
+  metersPerSourceUnit: number,
+): GeometryAttempt {
+  const points = readMeshSourcePoints(api, webIfcModelId, expressId, metersPerSourceUnit)
+  if (points === null) return { geometry: null, reason: 'no mesh' }
 
-    const worldPoints: EngineerPoint3[] = []
-    for (let gi = 0; gi < flatMesh.geometries.size(); gi++) {
-      const placed = flatMesh.geometries.get(gi)
-      const t = placed.flatTransformation
-      const geomData = api.GetGeometry(webIfcModelId, placed.geometryExpressID)
-      const rawVerts = api.GetVertexArray(geomData.GetVertexData(), geomData.GetVertexDataSize())
-      geomData.delete()
-
-      // Vertex stride is 6: [x, y, z, nx, ny, nz]; transform is column-major 4x4.
-      for (let j = 0; j < rawVerts.length / 6; j++) {
-        const lx = rawVerts[j * 6]
-        const ly = rawVerts[j * 6 + 1]
-        const lz = rawVerts[j * 6 + 2]
-        worldPoints.push({
-          x: t[0] * lx + t[4] * ly + t[8] * lz + t[12],
-          y: t[1] * lx + t[5] * ly + t[9] * lz + t[13],
-          z: t[2] * lx + t[6] * ly + t[10] * lz + t[14],
-        })
-      }
-    }
-    if (worldPoints.length === 0) return null
-
-    const points = filterOriginArtifacts(worldPoints)
-    let minX = Infinity, minY = Infinity, minZ = Infinity
-    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
-    for (const point of points) {
-      if (point.x < minX) minX = point.x
-      if (point.x > maxX) maxX = point.x
-      if (point.y < minY) minY = point.y
-      if (point.y > maxY) maxY = point.y
-      if (point.z < minZ) minZ = point.z
-      if (point.z > maxZ) maxZ = point.z
-    }
-
-    const centre = { x: (minX + maxX) / 2, y: (minY + maxY) / 2, z: (minZ + maxZ) / 2 }
-    const extents: Array<{ axis: 'x' | 'y' | 'z'; size: number; min: number; max: number }> = [
-      { axis: 'x', size: maxX - minX, min: minX, max: maxX },
-      { axis: 'y', size: maxY - minY, min: minY, max: maxY },
-      { axis: 'z', size: maxZ - minZ, min: minZ, max: maxZ },
-    ]
-    const dominant = extents.reduce((best, entry) => (entry.size > best.size ? entry : best))
-
-    const start = { ...centre, [dominant.axis]: dominant.min }
-    const end = { ...centre, [dominant.axis]: dominant.max }
-    return { start, end, endpointSource: 'mesh-bounds', outerDiameterMm: null }
-  } catch {
-    return null
+  let minX = Infinity, minY = Infinity, minZ = Infinity
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
+  for (const point of points) {
+    if (point.x < minX) minX = point.x
+    if (point.x > maxX) maxX = point.x
+    if (point.y < minY) minY = point.y
+    if (point.y > maxY) maxY = point.y
+    if (point.z < minZ) minZ = point.z
+    if (point.z > maxZ) maxZ = point.z
   }
+
+  const centre = { x: (minX + maxX) / 2, y: (minY + maxY) / 2, z: (minZ + maxZ) / 2 }
+  const extents: Array<{ axis: 'x' | 'y' | 'z'; size: number; min: number; max: number }> = [
+    { axis: 'x', size: maxX - minX, min: minX, max: maxX },
+    { axis: 'y', size: maxY - minY, min: minY, max: maxY },
+    { axis: 'z', size: maxZ - minZ, min: minZ, max: maxZ },
+  ]
+  const sorted = [...extents].sort((a, b) => b.size - a.size)
+  const dominant = sorted[0]
+  const second = sorted[1]
+  if (dominant.size * metersPerSourceUnit < MIN_MESH_BOUNDS_LENGTH_M) {
+    return { geometry: null, reason: 'mesh extent below 1 mm' }
+  }
+  if (dominant.size < MIN_MESH_BOUNDS_ELONGATION * second.size) {
+    return { geometry: null, reason: 'degenerate mesh (no discernible axis, e.g. a single cut face)' }
+  }
+
+  const start = { ...centre, [dominant.axis]: dominant.min }
+  const end = { ...centre, [dominant.axis]: dominant.max }
+  return { geometry: { start, end, endpointSource: 'mesh-bounds', outerDiameterMm: null }, reason: null }
 }
 
 /**
@@ -528,7 +803,7 @@ export async function extractEngineerPipeNetwork(
   api: IfcAPI,
   webIfcModelId: number,
   options: ExtractEngineerPipeNetworkOptions,
-): Promise<EngineerPipeNetwork> {
+): Promise<ExtractedEngineerPipeNetwork> {
   const { IFCFLOWSEGMENT, IFCPIPESEGMENT, IFCEXTRUDEDAREASOLID, IFCMAPPEDITEM, IFCCIRCLEPROFILEDEF } =
     await import('web-ifc')
 
@@ -561,13 +836,19 @@ export async function extractEngineerPipeNetwork(
   }
   candidates.sort((a, b) => a.expressId - b.expressId)
 
-  const psetMap = await buildPipePsetMap(
-    api,
-    webIfcModelId,
-    new Set(candidates.map((candidate) => candidate.expressId)),
-  )
+  const candidateIdSet = new Set(candidates.map((candidate) => candidate.expressId))
+  const psetMap = await buildPipePsetMap(api, webIfcModelId, candidateIdSet)
+  const portsMap = await buildElementPortsMap(api, webIfcModelId, candidateIdSet)
 
   const geometryTypeIds = { IFCEXTRUDEDAREASOLID, IFCMAPPEDITEM, IFCCIRCLEPROFILEDEF }
+  const endpointSourceCounts: EngineerGeometrySummary['endpointSourceCounts'] = {
+    'extrusion-axis': 0,
+    'distribution-ports': 0,
+    'mesh-bounds': 0,
+    unresolved: 0,
+  }
+  const unresolvedSegments: EngineerGeometrySummary['unresolvedSegments'] = []
+
   const segments: EngineerPipeSegment[] = candidates.map(({ expressId, systemName }) => {
     const line = api.GetLine(webIfcModelId, expressId, false) as IfcLine
     const name: string | null = line?.Name?.value ?? null
@@ -584,7 +865,29 @@ export async function extractEngineerPipeNetwork(
     } catch {
       geometry = null
     }
-    if (geometry === null) geometry = extractMeshBoundsGeometry(api, webIfcModelId, expressId)
+    const reasons: string[] = []
+    if (geometry === null) {
+      let attempt: GeometryAttempt
+      try {
+        attempt = extractPortGeometry(api, webIfcModelId, expressId, portsMap.get(expressId), metersPerSourceUnit)
+      } catch (error) {
+        attempt = { geometry: null, reason: `port placement unreadable (${error instanceof Error ? error.message : String(error)})` }
+      }
+      geometry = attempt.geometry
+      if (attempt.reason !== null) reasons.push(attempt.reason)
+    }
+    if (geometry === null) {
+      const attempt = extractMeshBoundsGeometry(api, webIfcModelId, expressId, metersPerSourceUnit)
+      geometry = attempt.geometry
+      if (attempt.reason !== null) reasons.push(attempt.reason)
+    }
+
+    if (geometry === null) {
+      endpointSourceCounts.unresolved += 1
+      unresolvedSegments.push({ expressId, reason: `no extrusion solid; ${reasons.join('; ')}` })
+    } else {
+      endpointSourceCounts[geometry.endpointSource] += 1
+    }
 
     const psetValues = psetMap.get(expressId) ?? { lengthSource: null, invertElevationSource: null }
     const storeyId = elementToStorey.get(expressId) ?? null
@@ -607,5 +910,10 @@ export async function extractEngineerPipeNetwork(
     }
   })
 
-  return { metersPerSourceUnit, storeys, segments }
+  return {
+    metersPerSourceUnit,
+    storeys,
+    segments,
+    geometrySummary: { endpointSourceCounts, unresolvedSegments },
+  }
 }
