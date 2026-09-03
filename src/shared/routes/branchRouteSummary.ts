@@ -16,8 +16,14 @@ export interface BranchRunStackGroup {
   stackLabel: string
   riserId: string
   segmentCount: number
-  /** Distinct fixtures whose flow reaches this stack. */
+  /** Distinct fixtures whose flow reaches this stack (including those at the stack position). */
   fixtureExpressIds: number[]
+  /**
+   * Fixtures assigned to this stack that sit exactly at its plan position, so
+   * they drain into it with no horizontal run (typical for a one-toilet core
+   * whose stack was left at the core centroid). Listed, never dropped.
+   */
+  fixturesAtStackExpressIds: number[]
   /** Sum of the plan lengths of the group's segments, in metres. */
   totalLengthM: number
   /** Sorted distinct nominal diameters of the group's segments. */
@@ -64,39 +70,60 @@ export function segmentPlanLengthM(segment: RouteSegment, planUnits: FloorRoutes
 /**
  * Groups one floor's segments by target stack. Group order follows the stack
  * label (natural: R1, R2, …, R10) so the panel stays stable across re-suggests.
+ *
+ * `assignments` (the same floor's fixture→stack assignments) keeps stacks whose
+ * fixtures all sit at the stack position in the list: they yield no segments,
+ * but the fixtures are routed and must stay visible.
  */
 export function groupBranchRunsByStack(
   floor: FloorRoutes,
   stackLabelByRiserId: ReadonlyMap<string, string>,
+  assignments: readonly FixtureRiserAssignment[] = [],
 ): BranchRunStackGroup[] {
-  const groups = new Map<string, BranchRunStackGroup & { fixtureSet: Set<number>; diameterSet: Set<number> }>()
-  for (const segment of floor.segments) {
-    const stackId = segment.riserStackId ?? segment.riserId
+  type MutableGroup = BranchRunStackGroup & { fixtureSet: Set<number>; servedSet: Set<number>; diameterSet: Set<number> }
+  const groups = new Map<string, MutableGroup>()
+  const ensureGroup = (stackId: string, riserId: string): MutableGroup => {
     let group = groups.get(stackId)
     if (group === undefined) {
       group = {
         stackId,
-        stackLabel: stackLabelByRiserId.get(segment.riserId) ?? segment.riserId,
-        riserId: segment.riserId,
+        stackLabel: stackLabelByRiserId.get(riserId) ?? riserId,
+        riserId,
         segmentCount: 0,
         fixtureExpressIds: [],
+        fixturesAtStackExpressIds: [],
         totalLengthM: 0,
         diametersMm: [],
         slopePercent: BRANCH_SLOPE_PERCENT,
         fixtureSet: new Set<number>(),
+        servedSet: new Set<number>(),
         diameterSet: new Set<number>(),
       }
       groups.set(stackId, group)
     }
+    return group
+  }
+  for (const segment of floor.segments) {
+    const group = ensureGroup(segment.riserStackId ?? segment.riserId, segment.riserId)
     group.segmentCount += 1
     group.totalLengthM += segmentPlanLengthM(segment, floor.planUnits)
-    for (const expressId of segment.servedFixtureExpressIds) group.fixtureSet.add(expressId)
+    for (const expressId of segment.servedFixtureExpressIds) {
+      group.fixtureSet.add(expressId)
+      group.servedSet.add(expressId)
+    }
     group.diameterSet.add(segment.diameterMm)
   }
+  for (const assignment of assignments) {
+    if (assignment.unassigned || assignment.storeyId !== floor.storeyId) continue
+    ensureGroup(assignment.stackId, assignment.riserId).fixtureSet.add(assignment.fixtureExpressId)
+  }
   return [...groups.values()]
-    .map(({ fixtureSet, diameterSet, ...group }) => ({
+    .map(({ fixtureSet, servedSet, diameterSet, ...group }) => ({
       ...group,
       fixtureExpressIds: Array.from(fixtureSet).toSorted((a, b) => a - b),
+      fixturesAtStackExpressIds: Array.from(fixtureSet)
+        .filter((expressId) => !servedSet.has(expressId))
+        .toSorted((a, b) => a - b),
       diametersMm: Array.from(diameterSet).toSorted((a, b) => a - b),
     }))
     .sort((a, b) => compareStackLabels(a.stackLabel, b.stackLabel))
@@ -105,8 +132,9 @@ export function groupBranchRunsByStack(
 export function summarizeBranchRunFloor(
   floor: FloorRoutes,
   stackLabelByRiserId: ReadonlyMap<string, string>,
+  assignments: readonly FixtureRiserAssignment[] = [],
 ): BranchRunFloorSummary {
-  const groups = groupBranchRunsByStack(floor, stackLabelByRiserId)
+  const groups = groupBranchRunsByStack(floor, stackLabelByRiserId, assignments)
   return {
     storeyId: floor.storeyId,
     groups,
@@ -140,7 +168,7 @@ export function summarizeBranchRunsForDebug(
     }
   }
   return {
-    floors: floors.map((floor) => summarizeBranchRunFloor(floor, stackLabelByRiserId)),
+    floors: floors.map((floor) => summarizeBranchRunFloor(floor, stackLabelByRiserId, assignments)),
     unrouted,
     overlength,
     assignedBy,

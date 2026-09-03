@@ -1095,11 +1095,18 @@ export function WorkspacePage({
   // the nearest in-range riser. Only computed once risers exist on the floor —
   // before placement the panel shows detection state without misleading
   // "unassigned" flags.
+  // Viewer coordinates are metres whenever the model declares its length unit
+  // (web-ifc normalizes them); only an unknown unit falls back to the
+  // coordinate-magnitude heuristic. Same rule as RisersPanel's coordinateUnit —
+  // without it a georeferenced model (|x| > 1000 m) is mistaken for millimetres.
   const fixtureAssignments = useMemo(() => {
     if (selectedStoreyId === null) return []
     if (!risers.some((riser) => riser.storeyId === selectedStoreyId)) return []
-    return assignFixturesToRisers(fixtures, risers, { coreMembership: fixtureCoreMembership })
-  }, [fixtures, risers, selectedStoreyId, fixtureCoreMembership])
+    return assignFixturesToRisers(fixtures, risers, {
+      coreMembership: fixtureCoreMembership,
+      units: modelLengthUnit !== null ? 'm' : undefined,
+    })
+  }, [fixtures, risers, selectedStoreyId, fixtureCoreMembership, modelLengthUnit])
 
   // Branch runs: pure derivation from the assignments above. The adapter drops
   // unassigned entries — those stay visible in the fixtures panel with an

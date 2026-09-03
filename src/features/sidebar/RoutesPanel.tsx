@@ -32,7 +32,7 @@ const UNASSIGNED_REASON_COPY: Record<UnassignedReason, string> = {
  * here. Every fixture that could not be routed is a visible warning row.
  */
 export function RoutesPanel({ floor, assignments, stackLabelByRiserId, fixtureNameByExpressId }: RoutesPanelProps) {
-  const groups = floor === null ? [] : groupBranchRunsByStack(floor, stackLabelByRiserId)
+  const groups = floor === null ? [] : groupBranchRunsByStack(floor, stackLabelByRiserId, assignments)
   const unrouted = assignments.filter(
     (assignment): assignment is UnassignedFixtureRiser => assignment.unassigned,
   )
@@ -81,9 +81,12 @@ export function RoutesPanel({ floor, assignments, stackLabelByRiserId, fixtureNa
               <span className="routes-panel__group-detail">
                 {group.fixtureExpressIds.length} fixture{group.fixtureExpressIds.length === 1 ? '' : 's'} ·{' '}
                 {group.segmentCount} run{group.segmentCount === 1 ? '' : 's'}
+                {group.fixturesAtStackExpressIds.length > 0 &&
+                  ` · ${group.fixturesAtStackExpressIds.length} at the stack (no horizontal run)`}
               </span>
               <span className="routes-panel__group-spec">
-                {formatMetres(group.totalLengthM)} · Ø{group.diametersMm.join('/')} · {group.slopePercent.toFixed(1)} %
+                {formatMetres(group.totalLengthM)} · Ø{group.diametersMm.length > 0 ? group.diametersMm.join('/') : '—'} ·{' '}
+                {group.slopePercent.toFixed(1)} %
               </span>
             </li>
           ))}

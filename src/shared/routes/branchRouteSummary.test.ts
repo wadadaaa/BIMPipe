@@ -68,6 +68,7 @@ describe('groupBranchRunsByStack', () => {
         riserId: 'r2',
         segmentCount: 2,
         fixtureExpressIds: [2, 3],
+        fixturesAtStackExpressIds: [],
         totalLengthM: 3.5,
         diametersMm: [50, 63],
         slopePercent: 2,
@@ -78,6 +79,7 @@ describe('groupBranchRunsByStack', () => {
         riserId: 'r10',
         segmentCount: 1,
         fixtureExpressIds: [1],
+        fixturesAtStackExpressIds: [],
         totalLengthM: 1,
         diametersMm: [110],
         slopePercent: 2,
@@ -88,6 +90,39 @@ describe('groupBranchRunsByStack', () => {
   it('falls back to the riser id when no label is known', () => {
     const groups = groupBranchRunsByStack(floor, new Map())
     expect(groups.map((group) => group.stackLabel)).toEqual(['r10', 'r2'])
+  })
+
+  it('keeps a stack whose only fixture sits at the stack position (no segments) and flags it', () => {
+    const atStack: FixtureRiserAssignment = {
+      fixtureExpressId: 5,
+      kind: 'TOILETPAN',
+      storeyId: 7,
+      unassigned: false,
+      riserId: 'r1',
+      stackId: 'stack-1',
+      fixturePosition: { x: 40, y: 0, z: 40 },
+      riserPosition: { x: 40, y: 0, z: 40 },
+      planDistance: 0,
+      units: 'mm',
+      assignedBy: 'wet-core',
+      exceedsMaxBranchLength: false,
+    }
+    const otherStorey: FixtureRiserAssignment = { ...atStack, fixtureExpressId: 6, storeyId: 8 }
+    const groups = groupBranchRunsByStack(floor, new Map([['r1', 'R1'], ['r2', 'R2'], ['r10', 'R10']]), [atStack, otherStorey])
+
+    expect(groups.map((group) => group.stackLabel)).toEqual(['R1', 'R2', 'R10'])
+    expect(groups[0]).toEqual({
+      stackId: 'stack-1',
+      stackLabel: 'R1',
+      riserId: 'r1',
+      segmentCount: 0,
+      fixtureExpressIds: [5],
+      fixturesAtStackExpressIds: [5],
+      totalLengthM: 0,
+      diametersMm: [],
+      slopePercent: 2,
+    })
+    expect(groups[1].fixturesAtStackExpressIds).toEqual([])
   })
 })
 

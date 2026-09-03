@@ -473,15 +473,21 @@ describe('WorkspacePage', () => {
     expect(screen.getAllByTestId('branch-run-group')[0]).toHaveTextContent('Ø110 · 2.0 %')
     expect(screen.queryByTestId('branch-run-warnings')).not.toBeInTheDocument()
 
-    // Removing R2 rebinds WC-12 to the nearest remaining stack (its core stack
-    // is gone): the straight offset run becomes an L-run (one extra segment).
+    // Removing R2 leaves WC-12 without its core stack. The model declares a
+    // length unit, so the plan coordinates are metres and the nearest remaining
+    // stack is hundreds of metres away — far beyond the 4 m branch limit. The
+    // fixture is NOT silently rerouted: its run disappears and the routes panel
+    // shows a visible warning instead.
     await user.click(screen.getByLabelText('Remove riser R2'))
 
     await waitFor(() => {
       expect(screen.getByTestId('floor-viewer')).toHaveTextContent('risers:3')
     })
     expect(screen.getByTestId('floor-viewer')).toHaveTextContent('routes:0')
-    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('branchSegments:4')
+    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('branchSegments:2')
+    expect(screen.getByTestId('branch-run-warnings')).toHaveTextContent(
+      'WC-12 not routed: no stack within the 4 m branch limit.',
+    )
 
     // Demo-only chrome and the chain "preview notes" never appear in plain mode.
     expect(screen.queryByLabelText('Sanitary demo flow')).not.toBeInTheDocument()
@@ -490,7 +496,10 @@ describe('WorkspacePage', () => {
     // The Decisions tab states the routing model explicitly.
     await user.click(screen.getByRole('tab', { name: 'Decisions' }))
     expect(await screen.findByText('Routing model: branch runs (fixture → stack)')).toBeInTheDocument()
-    expect(screen.getByTestId('routing-model-section')).toHaveTextContent('Fixtures routed: 3')
+    expect(screen.getByTestId('routing-model-section')).toHaveTextContent('Fixtures routed: 2')
+    expect(screen.getByTestId('routing-model-section')).toHaveTextContent(
+      'Not routed: 1 fixture(s) without a reachable stack',
+    )
 
     // Export in plain mode passes branch runs and NO chains to the exporter.
     await user.click(screen.getByRole('tab', { name: 'Risers' }))
@@ -501,7 +510,7 @@ describe('WorkspacePage', () => {
     const exportArgs = mocks.exportFullIfcWithRisersWithDebug.mock.calls[0]
     expect(exportArgs[6]).toEqual([])
     expect(exportArgs[7]).toHaveLength(1)
-    expect(exportArgs[7][0].segments).toHaveLength(4)
+    expect(exportArgs[7][0].segments).toHaveLength(2)
     const debugDownloadIndex = anchorClick.mock.contexts
       .map((link) => (link as HTMLAnchorElement).download)
       .findIndex((name) => name.endsWith('riser-mapping.json'))
@@ -513,7 +522,7 @@ describe('WorkspacePage', () => {
     }
     expect(debugJson.routingModel).toBe('branch-runs')
     expect(debugJson.sanitaryRouteDebugGroups).toEqual([])
-    expect(debugJson.branchRoutes.floors[0].segmentCount).toBe(4)
+    expect(debugJson.branchRoutes.floors[0].segmentCount).toBe(2)
   })
 
   it('loads the bundled sample model through the same upload path as a user-picked file', async () => {
