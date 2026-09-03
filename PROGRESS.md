@@ -7,20 +7,24 @@ Privacy rule: `external/` and `refs/` hold private client data and are never com
 | Task | Status | Notes |
 | --- | --- | --- |
 | V0a — Tower recovery from federated export (tools/) | 🔄 | worker running |
-| V0b — detectFixtures: SHBJ name patterns | 🔄 | worker running |
+| V0b — detectFixtures: SHBJ name patterns | ✅ | commit `f93e726`; SA L04 21→11 toilets + 10 basins; exposed a chooser tie-break gap → pulled V6 forward (details below) |
 | V0c — Frame: context WCS + TrueNorth, envelope 64, >500 MB message | 🔄 | worker running |
 | V1 — Engineer risers, honest definition | ⏳ | after V0 |
 | V2 — Cross-file dedupe + origin guard | ⏳ | after V0 |
 | V3 — Wet-core placement | ⏳ | UI lane, after V2 |
 | V4 — Stack extent | ⏳ | after V0 |
 | V5 — One routing model | ⏳ | UI lane, after V3 |
-| V6 — Auto-select weighting | ⏳ | UI lane, after V5 |
+| V6 — Auto-select weighting | 🔄 | pulled forward (domain-only, `chooseInitialStorey`) because V0b's corrected counts broke the 096 gated chooser test |
 | V7 — Tower-band acceptance | ⏳ | last, only if V0a recovered a band |
 | Push | ⏳ | when all green |
 
 ## Goal 3 milestones
 
 (entries are appended per task as they land)
+
+### V0b — Fixture classifier ✅ (2026-09-03, commit `f93e726`)
+
+Replaced the flat keyword list with ordered, explainable text rules (accessory exclusions → drains/traps → fire protection → basin/sink → toilet → others) in `classifyFixtureText`, shared by `detectFixtures` and the storey scan. Basin evidence now beats a bare `WC` token, Hebrew toilets match both absolute and construct forms, plural/multi-bowl sinks and slop sinks are counted (one fixture per IFC element), and cisterns/flushing tanks, P-traps, floor traps/drains and sprinkler/hydrant/fire-cabinet terminals are excluded with an explicit reason. On the SHBJ sanitary model's reference storey this corrected 21 false-positive-inflated toilets to 11 toilets + 10 basins + 1 slop sink (all 42 flow terminals accounted for: 22 fixtures, 11 accessories, 9 drains, 0 unmatched); the architecture model went from 18 to 17 toilets (flushing tank no longer counted) and gained 2 sinks. Duplex and 096-A counts are unchanged; one 096-P storey lost a false toilet, which exposed that the initial-storey chooser's fingerprint grouping on that project depended on the bug (all fixture-bearing storeys became singleton groups → fallback to the lowest storey). Gated SHBJ regression test added; skips cleanly without the client files. Follow-up owned by V6 (pulled forward).
 
 ---
 
