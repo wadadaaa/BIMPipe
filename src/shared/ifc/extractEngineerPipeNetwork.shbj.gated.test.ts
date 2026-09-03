@@ -6,6 +6,7 @@ import { collectSpatialTreeElements } from './collectSpatialTreeElements'
 import { extractFloorMeshes } from './extractFloorMeshes'
 import { resolveModelLengthUnit } from './resolveModelLengthUnit'
 import { ifcSourceToViewerPoint } from '@/shared/frame/ifcSourceFrame'
+import { getEngineerOverlayPresentation } from '@/viewer/engineerNetworkPresentation'
 import {
   classifyEngineerRiserStacks,
   isVerticalEngineerSegment,
@@ -197,6 +198,31 @@ describe.skipIf(!existsSync(SA_PATH))('engineer network extraction on shbj-SA (g
         expect(classification.ventStacks).toHaveLength(EXPECTED_CLASSIFICATION.ventStacks)
         expect(classification.stubs).toHaveLength(EXPECTED_CLASSIFICATION.stubs)
         expect(JSON.stringify(classification)).not.toContain('NaN')
+
+        // --- 2D engineer overlay (V5): port-derived centrelines are drawn too ---
+        // Before V5 the overlay drew extrusion-axis segments only (49 lines, 38
+        // excluded); now every resolved segment is a line and only the 6
+        // unresolved ones are counted as excluded. Stack markers are model-wide.
+        const overlay = getEngineerOverlayPresentation({
+          network,
+          stacks: classification.sanitaryStacks,
+          engineerStoreyId: storey!.id,
+          frameOrigin: { x: 0, y: 0, z: 0 },
+          visible: true,
+        })
+        console.info(
+          `[shbj-SA ${STOREY_NAME}] overlay`,
+          JSON.stringify({
+            visibleSegments: overlay.visibleSegments.length,
+            excludedSegments: overlay.excludedSegmentCount,
+            stackMarkers: overlay.visibleStackMarkers.length,
+          }),
+        )
+        expect(overlay.visibleSegments).toHaveLength(
+          EXPECTED_ENDPOINT_SOURCES['extrusion-axis'] + EXPECTED_ENDPOINT_SOURCES['distribution-ports'],
+        )
+        expect(overlay.excludedSegmentCount).toBe(EXPECTED_ENDPOINT_SOURCES.unresolved)
+        expect(overlay.visibleStackMarkers).toHaveLength(EXPECTED_CLASSIFICATION.sanitaryStacks)
       } finally {
         api.CloseModel(modelId)
       }

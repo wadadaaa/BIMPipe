@@ -1,5 +1,5 @@
 import type { StoreyAlignment } from '@/domain/alignStoreys'
-import type { EngineerPipeNetwork, EngineerRiserStack } from '@/domain/engineerPipes'
+import type { EngineerEndpointSource, EngineerPipeNetwork, EngineerRiserStack } from '@/domain/engineerPipes'
 import type { StoreyId } from '@/domain/types'
 import type { Point3D } from '@/shared/routes/planGeometry'
 import {
@@ -82,6 +82,16 @@ export function resolveEngineerStoreyId({
   return null
 }
 
+/** Endpoint sources whose coordinates live in the proven IFC source frame. */
+export const DRAWABLE_ENGINEER_ENDPOINT_SOURCES: ReadonlySet<EngineerEndpointSource> = new Set<EngineerEndpointSource>([
+  'extrusion-axis',
+  'distribution-ports',
+])
+
+function isDrawableEndpointSource(source: EngineerEndpointSource | null): boolean {
+  return source !== null && DRAWABLE_ENGINEER_ENDPOINT_SOURCES.has(source)
+}
+
 export function getEngineerOverlayPresentation({
   network,
   stacks,
@@ -108,10 +118,12 @@ export function getEngineerOverlayPresentation({
   const visibleSegments: EngineerOverlaySegment[] = []
   let excludedSegmentCount = 0
   for (const segment of floorSegments) {
-    // Only extrusion-axis endpoints are in the verified IFC source frame; the
-    // mesh-bounds fallback goes through web-ifc's viewer transform instead and
-    // has no proven frame here, so those segments are counted, not drawn.
-    if (segment.endpointSource !== 'extrusion-axis' || segment.start === null || segment.end === null) {
+    // Extrusion-axis and port-derived (V1b: Revit vertical pipes exported as a
+    // cut face with full-length IfcDistributionPorts) endpoints are both in the
+    // verified IFC source frame; the mesh-bounds fallback goes through web-ifc's
+    // viewer transform instead and has no proven frame here, so those segments
+    // are counted, not drawn.
+    if (!isDrawableEndpointSource(segment.endpointSource) || segment.start === null || segment.end === null) {
       excludedSegmentCount += 1
       continue
     }
