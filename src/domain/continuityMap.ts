@@ -626,6 +626,73 @@ export function buildContinuityMap(
 }
 
 // ---------------------------------------------------------------------------
+// Cell probe
+// ---------------------------------------------------------------------------
+
+export type ContinuityCellProbe =
+  | { status: 'blocked'; cell: { col: number; row: number } }
+  | { status: 'free'; cell: { col: number; row: number } }
+  /** No grid for the storey, an empty grid, or a point outside the grid. */
+  | { status: 'unknown'; reason: string }
+
+/**
+ * Obstruction state of the grid cell containing `point` on `storeyId`.
+ * Unknown is reported explicitly (never folded into free or blocked) so callers
+ * decide how to treat missing data; a point outside the grid is unknown, not
+ * blocked, unlike the out-of-range convention of {@link isCellBlocked} which
+ * exists for neighbour scans.
+ */
+export function probeContinuityCell(
+  map: ContinuityMap,
+  storeyId: StoreyId,
+  point: PlanPoint,
+): ContinuityCellProbe {
+  const grid = map.grids.find((candidate) => candidate.storeyId === storeyId)
+  if (grid === undefined) return { status: 'unknown', reason: `no obstruction grid for storey ${storeyId}` }
+  if (grid.columns === 0 || grid.rows === 0) {
+    return { status: 'unknown', reason: `obstruction grid for storey ${storeyId} is empty` }
+  }
+  const col = Math.floor((point.x - grid.origin.x) / grid.cellSize)
+  const row = Math.floor((point.z - grid.origin.z) / grid.cellSize)
+  if (col < 0 || row < 0 || col >= grid.columns || row >= grid.rows) {
+    return { status: 'unknown', reason: `point lies outside the obstruction grid of storey ${storeyId}` }
+  }
+  const cell = { col, row }
+  return grid.blocked[row * grid.columns + col] === 1 ? { status: 'blocked', cell } : { status: 'free', cell }
+}
+
+/**
+ * Nearest free cell (by centre distance to `point`) whose centre lies inside
+ * `bounds`, or null when every such cell is blocked. Row-major scan order
+ * breaks exact ties deterministically.
+ */
+export function findFreeCellWithinBounds(
+  grid: StoreyObstructionGrid,
+  bounds: PlanBounds,
+  point: PlanPoint,
+): { cell: { col: number; row: number }; position: PlanPoint; distance: number } | null {
+  if (grid.columns === 0 || grid.rows === 0) return null
+  const colFrom = Math.max(0, Math.floor((bounds.minX - grid.origin.x) / grid.cellSize))
+  const colTo = Math.min(grid.columns - 1, Math.floor((bounds.maxX - grid.origin.x) / grid.cellSize))
+  const rowFrom = Math.max(0, Math.floor((bounds.minZ - grid.origin.z) / grid.cellSize))
+  const rowTo = Math.min(grid.rows - 1, Math.floor((bounds.maxZ - grid.origin.z) / grid.cellSize))
+
+  let best: { cell: { col: number; row: number }; position: PlanPoint; distance: number } | null = null
+  for (let row = rowFrom; row <= rowTo; row++) {
+    for (let col = colFrom; col <= colTo; col++) {
+      if (grid.blocked[row * grid.columns + col] === 1) continue
+      const center = cellCenter(grid, col, row)
+      if (!pointInRect(center, bounds)) continue
+      const distance = planDistance2D(point, center)
+      if (best === null || distance < best.distance) {
+        best = { cell: { col, row }, position: center, distance }
+      }
+    }
+  }
+  return best
+}
+
+// ---------------------------------------------------------------------------
 // Snapping
 // ---------------------------------------------------------------------------
 

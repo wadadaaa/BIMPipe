@@ -3,8 +3,10 @@ import type { PlanBounds } from '@/domain/types'
 import {
   buildContinuityMap,
   cellCenter,
+  findFreeCellWithinBounds,
   isCellBlocked,
   isShaftLikeName,
+  probeContinuityCell,
   snapPointToContinuity,
   type ContinuityMapInput,
   type ContinuityStoreyInput,
@@ -393,5 +395,46 @@ describe('snapPointToContinuity', () => {
     const first = snapPointToContinuity(map, 10, { x: 1010, z: 600 }, 1500)
     const second = snapPointToContinuity(map, 10, { x: 1010, z: 600 }, 1500)
     expect(second).toEqual(first)
+  })
+})
+
+describe('probeContinuityCell / findFreeCellWithinBounds (V3 queries)', () => {
+  const walls = [{ id: 'wall:1', kind: 'wall' as const, footprint: bbox(0, 2000, 0, 250) }]
+
+  it('reports blocked, free, and unknown explicitly', () => {
+    const map = buildContinuityMap(mmInput([storey(10, { obstructions: walls })]))
+    expect(probeContinuityCell(map, 10, { x: 1000, z: 100 })).toEqual({
+      status: 'blocked',
+      cell: { col: 5, row: 1 },
+    })
+    // Padding row below the wall (grid spans z -250…500) is free.
+    expect(probeContinuityCell(map, 10, { x: 1000, z: 400 })).toEqual({
+      status: 'free',
+      cell: { col: 5, row: 2 },
+    })
+    // Outside the padded grid → unknown, never blocked.
+    expect(probeContinuityCell(map, 10, { x: 50_000, z: 0 })).toEqual({
+      status: 'unknown',
+      reason: 'point lies outside the obstruction grid of storey 10',
+    })
+    expect(probeContinuityCell(map, 99, { x: 0, z: 0 })).toEqual({
+      status: 'unknown',
+      reason: 'no obstruction grid for storey 99',
+    })
+    expect(probeContinuityCell(buildContinuityMap(mmInput([storey(10)])), 10, { x: 0, z: 0 })).toEqual({
+      status: 'unknown',
+      reason: 'obstruction grid for storey 10 is empty',
+    })
+  })
+
+  it('finds the nearest free cell whose centre lies inside the bounds, or null when all are blocked', () => {
+    const map = buildContinuityMap(mmInput([storey(10, { obstructions: walls })]))
+    const grid = map.grids[0]
+    // Bounds straddle the wall (z 0–250 blocked) and the free row below it.
+    const found = findFreeCellWithinBounds(grid, { minX: 500, maxX: 1000, minZ: 0, maxZ: 500 }, { x: 750, z: 100 })
+    expect(found).not.toBeNull()
+    expect(found!.position.z).toBeGreaterThan(250)
+    expect(isCellBlocked(grid, found!.cell.col, found!.cell.row)).toBe(false)
+    expect(findFreeCellWithinBounds(grid, { minX: 500, maxX: 1000, minZ: 0, maxZ: 200 }, { x: 750, z: 100 })).toBeNull()
   })
 })
