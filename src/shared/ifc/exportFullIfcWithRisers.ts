@@ -368,6 +368,7 @@ async function exportFullIfcWithRisersInternal(
     )
     const storeysById = buildRiserStoreysById(api, modelId, risers, debugStoreysById)
     const stackGroups = groupRisersByStackId(risers, storeysById)
+    const modelStoreyElevations = readModelStoreyElevations(api, modelId)
     const createdFlowSegmentHandles: IfcHandle[] = []
     let systemOwnerHistory: IfcHandle | null = null
 
@@ -388,7 +389,25 @@ async function exportFullIfcWithRisersInternal(
       )
       const bottomElevation = getStoreyElevation(stack.bottomRiser, storeysById)
       const topElevation = getStoreyElevation(stack.topRiser, storeysById)
-      const extrusionLengthSourceUnits = topElevation - bottomElevation
+      // Convention: a multi-storey stack is extruded from its bottom storey's
+      // elevation to its top storey's elevation. A stack confined to ONE storey
+      // (a V4 extent can bound it that way) has no such span, so it is given
+      // that storey's height instead — never a zero-length solid.
+      let extrusionLengthSourceUnits = topElevation - bottomElevation
+      let singleStoreyNote: string | null = null
+      if (stack.bottomRiser.storeyId === stack.topRiser.storeyId) {
+        const height = resolveSingleStoreyHeight(bottomElevation, modelStoreyElevations)
+        if (height === null) {
+          throw new Error(
+            `Riser stack ${stack.stackLabel} spans only storey ${formatStoreyName(requireStoreySpanInfo(storeysById, stack.bottomRiser.storeyId, stack.stackLabel, stack.stackId))} ` +
+              'and the model has no storey above it nor a derivable storey pitch, so the vertical extrusion cannot be sized.',
+          )
+        }
+        extrusionLengthSourceUnits = height.lengthSourceUnits
+        singleStoreyNote =
+          `Single-storey stack: extruded ${height.lengthSourceUnits} source units ` +
+          (height.source === 'next-storey-above' ? 'up to the next storey above.' : 'using the median storey pitch (top storey of the model).')
+      }
       if (!Number.isFinite(extrusionLengthSourceUnits) || extrusionLengthSourceUnits <= 0) {
         throw new Error(
           `Riser stack ${stack.stackLabel} resolved a non-positive extrusion length (${extrusionLengthSourceUnits}); ` +
@@ -433,6 +452,7 @@ async function exportFullIfcWithRisersInternal(
           )
         : null
       if (debugMapping && debugRecord) {
+        if (singleStoreyNote !== null) debugRecord.notes.push(singleStoreyNote)
         debugMapping.risers.push(debugRecord)
       }
 
@@ -687,6 +707,44 @@ function formatStoreyName(storey: StoreySpanInfo): string {
   return storey.name ?? `#${storey.id}`
 }
 
+/** Distinct, ascending `IfcBuildingStorey.Elevation` values of the model, in source units. */
+function readModelStoreyElevations(api: IfcAPI, modelId: number): number[] {
+  const storeyType = api.GetTypeCodeFromName('IFCBUILDINGSTOREY')
+  const storeyIds = api.GetLineIDsWithType(modelId, storeyType)
+  const elevations = new Set<number>()
+  for (let i = 0; i < storeyIds.size(); i += 1) {
+    const storey = api.GetLine(modelId, storeyIds.get(i), false) as {
+      Elevation?: { value?: number } | number | null
+    } | null
+    const elevation = readOptionalNumberValue(storey?.Elevation)
+    if (elevation !== null && Number.isFinite(elevation)) elevations.add(elevation)
+  }
+  return [...elevations].sort((a, b) => a - b)
+}
+
+/**
+ * Height of a single-storey stack: the distance to the next storey above the
+ * stack's storey; on the model's top storey, the median pitch of the model's
+ * storeys. Null when neither is derivable (single-storey model) — the caller
+ * fails explicitly rather than inventing a height.
+ */
+function resolveSingleStoreyHeight(
+  storeyElevation: number,
+  modelStoreyElevations: readonly number[],
+): { lengthSourceUnits: number; source: 'next-storey-above' | 'median-storey-pitch' } | null {
+  const above = modelStoreyElevations.find((elevation) => elevation > storeyElevation)
+  if (above !== undefined) return { lengthSourceUnits: above - storeyElevation, source: 'next-storey-above' }
+  const pitches: number[] = []
+  for (let i = 1; i < modelStoreyElevations.length; i += 1) {
+    pitches.push(modelStoreyElevations[i] - modelStoreyElevations[i - 1])
+  }
+  if (pitches.length === 0) return null
+  pitches.sort((a, b) => a - b)
+  const middle = Math.floor(pitches.length / 2)
+  const median = pitches.length % 2 === 1 ? pitches[middle] : (pitches[middle - 1] + pitches[middle]) / 2
+  return median > 0 ? { lengthSourceUnits: median, source: 'median-storey-pitch' } : null
+}
+
 function resolveLengthScaleToMillimetres(api: IfcAPI, modelId: number): number {
   const projectType = api.GetTypeCodeFromName('IFCPROJECT')
   const projectIds = api.GetLineIDsWithType(modelId, projectType)
@@ -731,10 +789,23 @@ function resolveLengthScaleToMillimetres(api: IfcAPI, modelId: number): number {
   return 1000
 }
 
+/**
+ * Representation context for the exported pipe bodies. Preferred: the model's
+ * `Body` sub-context (`IfcGeometricRepresentationSubContext` with
+ * ContextIdentifier 'Body'). Fallback: the context that the model's own
+ * `Body` shape representations reference — some exporters (e.g. the bundled
+ * Duplex MEP sample) attach Body shapes straight to the 'Model'
+ * `IfcGeometricRepresentationContext` without any sub-context. Fails
+ * explicitly when neither exists; the caller surfaces the message.
+ */
 function resolveBodyContext(api: IfcAPI, modelId: number): number {
-  const bodyContextId = 24
-  if (api.GetNameFromTypeCode(api.GetLineType(modelId, bodyContextId)) === 'IfcGeometricRepresentationSubContext') {
-    return bodyContextId
+  const subContextType = api.GetTypeCodeFromName('IFCGEOMETRICREPRESENTATIONSUBCONTEXT')
+  const subContextIds = api.GetLineIDsWithType(modelId, subContextType)
+  for (let i = 0; i < subContextIds.size(); i += 1) {
+    const subContext = api.GetLine(modelId, subContextIds.get(i), false) as {
+      ContextIdentifier?: { value?: string } | null
+    } | null
+    if (subContext?.ContextIdentifier?.value === 'Body') return subContextIds.get(i)
   }
 
   const shapeType = api.GetTypeCodeFromName('IFCSHAPEREPRESENTATION')
@@ -742,18 +813,15 @@ function resolveBodyContext(api: IfcAPI, modelId: number): number {
   for (let i = 0; i < shapeIds.size(); i += 1) {
     const shape = api.GetLine(modelId, shapeIds.get(i), false) as {
       ContextOfItems?: IfcHandle | null
+      RepresentationIdentifier?: { value?: string } | null
     } | null
     const contextId = shape?.ContextOfItems?.value ?? null
-    if (contextId === null) continue
-    const context = api.GetLine(modelId, contextId, false) as {
-      ContextIdentifier?: { value?: string } | null
-    } | null
-    if (context?.ContextIdentifier?.value === 'Body') {
-      return contextId
-    }
+    if (contextId !== null && shape?.RepresentationIdentifier?.value === 'Body') return contextId
   }
 
-  throw new Error('Could not resolve a Body representation context.')
+  throw new Error(
+    'Could not resolve a Body representation context: the model has neither a Body sub-context nor any Body shape representation.',
+  )
 }
 
 function toIfcWorldPlanPoint(

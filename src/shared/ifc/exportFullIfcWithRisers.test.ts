@@ -72,6 +72,8 @@ function makeMockApi(options: { storeyOrigin?: [number, number, number] } = {}) 
     ['IFCSHAPEREPRESENTATION', 102],
     ['IFCDIRECTION', 103],
     ['IFCBUILDING', 104],
+    ['IFCGEOMETRICREPRESENTATIONSUBCONTEXT', 401],
+    ['IFCBUILDINGSTOREY', 405],
     ['IFCLABEL', 8],
     ['IFCLENGTHMEASURE', 9],
     ['IFCIDENTIFIER', 7],
@@ -138,6 +140,8 @@ function makeMockApi(options: { storeyOrigin?: [number, number, number] } = {}) 
       if (type === 102) return makeIdVector([])
       if (type === 16) return makeIdVector([201])
       if (type === 104) return makeIdVector([51])
+      if (type === 401) return makeIdVector([24])
+      if (type === 405) return makeIdVector([66, 67, 68])
       return makeIdVector([])
     }),
     GetLineType: vi.fn((_modelId: number, expressId: number) => lineTypes.get(expressId) ?? -1),
@@ -180,6 +184,8 @@ function makeMockApi(options: { storeyOrigin?: [number, number, number] } = {}) 
       }
       if (expressId === 68) {
         return {
+          OwnerHistory: { type: 5, value: 18 },
+          ObjectPlacement: { type: 5, value: 65 },
           Name: { value: 'Level 3' },
           Elevation: { value: 700 },
         }
@@ -583,6 +589,30 @@ describe('exportFullIfcWithRisers', () => {
 
     expect(getFlowSegmentLines(writtenLines)).toHaveLength(2)
     expect(getExtrudedDepthValues(writtenLines)).toEqual([600, 600])
+  })
+
+  it('sizes a single-storey stack by the next storey above, or the median pitch on the top storey', async () => {
+    const { api, writtenLines } = makeMockApi()
+
+    const risers: Riser[] = [
+      { id: 'a-1', stackId: 'stack-a', stackLabel: 'R1', storeyId: 66, position: { x: 10, y: 100, z: 5 } },
+      { id: 'b-1', stackId: 'stack-b', stackLabel: 'R2', storeyId: 68, position: { x: 20, y: 700, z: 15 } },
+    ]
+
+    const result = await exportFullIfcWithRisersWithDebug(api, new Uint8Array([1, 2, 3]), 66, risers, null, {
+      storeys: [
+        { id: 66, name: 'Level 1', elevation: 100 },
+        { id: 67, name: 'Level 2', elevation: 400 },
+        { id: 68, name: 'Level 3', elevation: 700 },
+      ],
+    })
+
+    expect(getExtrudedDepthValues(writtenLines)).toEqual([300, 300])
+    const [r1, r2] = result.debugMapping.risers
+    expect(r1.extrusionLengthSourceUnits).toBe(300)
+    expect(r1.notes.some((note) => note.includes('next storey above'))).toBe(true)
+    expect(r2.extrusionLengthSourceUnits).toBe(300)
+    expect(r2.notes.some((note) => note.includes('median storey pitch'))).toBe(true)
   })
 
   it('throws on vertical-alignment violation', async () => {

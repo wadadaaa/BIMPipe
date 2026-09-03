@@ -147,12 +147,33 @@ function attachedDefinitionNames(
   return names
 }
 
+/**
+ * Same minimal model, but with no Body sub-context at all: its only Body shape
+ * representation (an empty swept-solid placeholder on the storey) points
+ * straight at the 'Model' context, the way the bundled Duplex MEP sample does.
+ */
+function buildIfcWithoutBodySubContext(schema: 'IFC2X3' | 'IFC4'): string {
+  return buildMinimalIfc(schema)
+    .replace(`#24=IFCGEOMETRICREPRESENTATIONSUBCONTEXT('Body','Model',*,*,*,*,#23,$,.MODEL_VIEW.,$);\n`, '')
+    .replace(
+      'ENDSEC;\nEND-ISO-10303-21;',
+      `#90=IFCCARTESIANPOINT((0.,0.));
+#91=IFCPOLYLINE((#90,#90));
+#92=IFCSHAPEREPRESENTATION(#23,'Body','Curve2D',(#91));
+#93=IFCPRODUCTDEFINITIONSHAPE($,$,(#92));
+#94=IFCBUILDINGELEMENTPROXY('0Proxy0000000000000000',#5,'Marker',$,$,#62,#93,$,$);
+ENDSEC;
+END-ISO-10303-21;`,
+    )
+}
+
 async function exportAndReopen(
   schema: 'IFC2X3' | 'IFC4',
   options: {
     risers?: ExportRiser[]
     branchRoutes?: FloorRoutes[]
     sanitaryRoutes?: SanitaryFixtureRoute[]
+    sourceIfc?: string
   } = {},
 ): Promise<{
   ifc: ImportedIfc
@@ -165,7 +186,7 @@ async function exportAndReopen(
   await exportApi.Init()
   const exportedBytes = await exportFullIfcWithRisers(
     exportApi,
-    new TextEncoder().encode(buildMinimalIfc(schema)),
+    new TextEncoder().encode(options.sourceIfc ?? buildMinimalIfc(schema)),
     70,
     options.risers ?? risers,
     null,
@@ -284,6 +305,31 @@ describe('exportFullIfcWithRisers round-trip (reopen exported bytes with web-ifc
 
       const systemNames = idsOfType(api, modelId, ifc.IFCSYSTEM).map((id) => readNameValue(api, modelId, id))
       expect(systemNames).toContain('BIMPipe Sanitary Stacks')
+    } finally {
+      api.CloseModel(modelId)
+    }
+  })
+
+  it('IFC2X3: a model without a Body sub-context exports into the context its Body shapes use', async () => {
+    const { ifc, api, modelId } = await exportAndReopen('IFC2X3', {
+      sourceIfc: buildIfcWithoutBodySubContext('IFC2X3'),
+      branchRoutes,
+    })
+    try {
+      expect(idsOfType(api, modelId, ifc.IFCGEOMETRICREPRESENTATIONSUBCONTEXT)).toHaveLength(0)
+      const flowSegmentIds = idsOfType(api, modelId, ifc.IFCFLOWSEGMENT)
+      expect(flowSegmentIds).toHaveLength(STACK_COUNT + BRANCH_SEGMENT_COUNT)
+      // Every exported pipe body sits in the model's 'Model' context (#23).
+      for (const id of flowSegmentIds) {
+        const element = api.GetLine(modelId, id, false) as { Representation?: { value: number } | null }
+        const shapeDef = api.GetLine(modelId, element.Representation!.value, false) as {
+          Representations: Array<{ value: number }>
+        }
+        for (const shapeRef of shapeDef.Representations) {
+          const shape = api.GetLine(modelId, shapeRef.value, false) as { ContextOfItems: { value: number } }
+          expect(shape.ContextOfItems.value).toBe(23)
+        }
+      }
     } finally {
       api.CloseModel(modelId)
     }
