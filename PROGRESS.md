@@ -1,3 +1,29 @@
+# Goal 3 — real floors: tower recovery, wet-core placement, routing (V0–V7)
+
+Branch: `goal/real-floors-v0-v7` (off `main` after the goal-2 merge) · Started: 2026-09-03 · Status legend: ⏳ pending · 🔄 in progress · ✅ done · ⛔ blocked
+
+Privacy rule: `external/` and `refs/` hold private client data and are never committed; committed content references projects only by neutral codes ("096", "SHBJ"; file codes like `shbj-SA.ifc` are acceptable). The 1.45 GB federated export is only ever streamed by scripts under `tools/`, never loaded in the browser.
+
+| Task | Status | Notes |
+| --- | --- | --- |
+| V0a — Tower recovery from federated export (tools/) | 🔄 | worker running |
+| V0b — detectFixtures: SHBJ name patterns | 🔄 | worker running |
+| V0c — Frame: context WCS + TrueNorth, envelope 64, >500 MB message | 🔄 | worker running |
+| V1 — Engineer risers, honest definition | ⏳ | after V0 |
+| V2 — Cross-file dedupe + origin guard | ⏳ | after V0 |
+| V3 — Wet-core placement | ⏳ | UI lane, after V2 |
+| V4 — Stack extent | ⏳ | after V0 |
+| V5 — One routing model | ⏳ | UI lane, after V3 |
+| V6 — Auto-select weighting | ⏳ | UI lane, after V5 |
+| V7 — Tower-band acceptance | ⏳ | last, only if V0a recovered a band |
+| Push | ⏳ | when all green |
+
+## Goal 3 milestones
+
+(entries are appended per task as they land)
+
+---
+
 # Goal 2 — real-project 096 hardening (W0–W7)
 
 Branch: `goal/real-project-096` · Started: 2026-09-01 · Status legend: ⏳ pending · 🔄 in progress · ✅ done · ⛔ blocked
