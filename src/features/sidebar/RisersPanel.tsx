@@ -9,6 +9,8 @@ import { RoutesPanel } from './RoutesPanel'
 import { describePlacementRule, describeWetCoreMembers, describeWetCoreStackPlacement } from './wetCoreCopy'
 import './RisersPanel.css'
 
+const EMPTY_FIXTURE_ASSIGNMENTS: FixtureRiserAssignment[] = []
+
 interface RisersPanelProps {
   risers: Riser[]
   fixtures: Fixture[]
@@ -64,7 +66,7 @@ export function RisersPanel({
   sanitaryRouteCount = 0,
   routingModel = 'branch-runs',
   branchRouteFloor = null,
-  fixtureAssignments = [],
+  fixtureAssignments = EMPTY_FIXTURE_ASSIGNMENTS,
   modelLengthUnit = null,
   wetCoreStacks = null,
   isSuggestingRisers = false,

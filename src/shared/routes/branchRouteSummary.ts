@@ -96,8 +96,8 @@ export function groupBranchRunsByStack(
   return [...groups.values()]
     .map(({ fixtureSet, diameterSet, ...group }) => ({
       ...group,
-      fixtureExpressIds: [...fixtureSet].sort((a, b) => a - b),
-      diametersMm: [...diameterSet].sort((a, b) => a - b),
+      fixtureExpressIds: Array.from(fixtureSet).toSorted((a, b) => a - b),
+      diametersMm: Array.from(diameterSet).toSorted((a, b) => a - b),
     }))
     .sort((a, b) => compareStackLabels(a.stackLabel, b.stackLabel))
 }
