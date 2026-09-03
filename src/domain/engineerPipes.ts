@@ -24,7 +24,14 @@ export interface EngineerStoreyRef {
   elevationSource: number
 }
 
-export type EngineerEndpointSource = 'extrusion-axis' | 'mesh-bounds'
+/**
+ * How a segment centreline was derived:
+ * - `extrusion-axis`: IfcExtrudedAreaSolid axis through the placement chain.
+ * - `distribution-ports`: the two IfcDistributionPort placements of the
+ *   segment (Revit exports vertical pipes as a cut face with full-length ports).
+ * - `mesh-bounds`: bounding-box centreline of the tessellated mesh (approximate).
+ */
+export type EngineerEndpointSource = 'extrusion-axis' | 'distribution-ports' | 'mesh-bounds'
 
 export interface EngineerPoint3 {
   x: number
