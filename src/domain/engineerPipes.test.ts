@@ -15,6 +15,7 @@ import {
   classifyEngineerRiserStacks,
   deriveStoreyPitchM,
   isVerticalEngineerSegment,
+  selectEngineerBranchSegments,
   stackIntersectsBand,
   stacksIntersectingBand,
   storeySlabBandM,
@@ -189,6 +190,91 @@ describe('storeySlabBandM / stackIntersectsBand', () => {
       { id: 'a', zMinM: -1, zMaxM: 1 },
     ]
     expect(stacksIntersectingBand(runs, band).map((run) => run.id)).toEqual(['b', 'a'])
+  })
+})
+
+describe('selectEngineerBranchSegments', () => {
+  const storeys: EngineerStoreyRef[] = [
+    { id: 1, name: 'L1', elevationSource: 0 },
+    { id: 2, name: 'L2', elevationSource: 300 },
+    { id: 3, name: 'L3', elevationSource: 600 },
+  ]
+  /** Horizontal cm-unit segment at height z, 4 m long. */
+  const horizontal = (expressId: number, z: number, overrides: Partial<EngineerPipeSegment> = {}) =>
+    segment({ expressId, start: { x: 0, y: 0, z }, end: { x: 400, y: 0, z }, lengthM: 4, ...overrides })
+
+  it('keeps horizontal sanitary segments whose Z lies in the band [bottom, top), sorted by expressId', () => {
+    const net = network(
+      [
+        horizontal(9, 450), // L2 band [3, 6)
+        horizontal(4, 300), // exactly the band bottom → belongs to L2
+        horizontal(5, 600), // exactly the band top → belongs to L3
+        horizontal(6, 290), // just below → L1
+        horizontal(7, 450, { storeyId: 1 }), // containment disagrees; geometry wins
+      ],
+      storeys,
+    )
+    const selection = selectEngineerBranchSegments(net, storeySlabBandM(net, 2)!, {
+      systemPrefixes: ['XX-GRV'],
+    })
+    expect(selection.segments.map((s) => s.expressId)).toEqual([4, 7, 9])
+    expect(selection.byGeometryCount).toBe(3)
+    expect(selection.byContainmentCount).toBe(0)
+  })
+
+  it('excludes vertical runs and other systems, and never counts them', () => {
+    const net = network(
+      [
+        vertical(1, 0, 0, 300, 600),
+        horizontal(2, 450, { systemName: 'XX-VNT 3' }),
+        horizontal(3, 450, { systemName: null }),
+        horizontal(4, 450),
+      ],
+      storeys,
+    )
+    const selection = selectEngineerBranchSegments(net, storeySlabBandM(net, 2)!, {
+      systemPrefixes: ['XX-GRV'],
+    })
+    expect(selection.segments.map((s) => s.expressId)).toEqual([4])
+  })
+
+  it('falls back to IFC storey containment for segments without a centreline and counts them separately', () => {
+    const net = network(
+      [
+        horizontal(1, 450),
+        segment({ expressId: 2, start: null, end: null, endpointSource: null, storeyId: 2, lengthM: 1.5 }),
+        segment({ expressId: 3, start: null, end: null, endpointSource: null, storeyId: 1, lengthM: 1.5 }),
+        segment({ expressId: 4, start: null, end: null, endpointSource: null, storeyId: null, lengthM: 1.5 }),
+      ],
+      storeys,
+    )
+    const selection = selectEngineerBranchSegments(net, storeySlabBandM(net, 2)!, {
+      systemPrefixes: ['XX-GRV'],
+    })
+    expect(selection.segments.map((s) => s.expressId)).toEqual([1, 2])
+    expect(selection.byGeometryCount).toBe(1)
+    expect(selection.byContainmentCount).toBe(1)
+  })
+
+  it('treats the top storey band as open-ended', () => {
+    const net = network([horizontal(1, 5000)], storeys)
+    expect(selectEngineerBranchSegments(net, storeySlabBandM(net, 3)!, { systemPrefixes: ['XX-GRV'] }).segments).toHaveLength(1)
+  })
+
+  it('a null band selects every horizontal sanitary segment model-wide', () => {
+    const net = network(
+      [
+        horizontal(1, 0),
+        horizontal(2, 900),
+        vertical(3, 0, 0, 0, 900),
+        segment({ expressId: 4, start: null, end: null, endpointSource: null, storeyId: null }),
+      ],
+      storeys,
+    )
+    const selection = selectEngineerBranchSegments(net, null, { systemPrefixes: ['XX-GRV'] })
+    expect(selection.segments.map((s) => s.expressId)).toEqual([1, 2, 4])
+    expect(selection.byGeometryCount).toBe(2)
+    expect(selection.byContainmentCount).toBe(1)
   })
 })
 

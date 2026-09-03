@@ -4,8 +4,10 @@ import { describe, expect, it } from 'vitest'
 import { alignStoreysByElevation, type AlignmentModelInput } from '@/domain/alignStoreys'
 import { assignFixturesToRisers } from '@/domain/assignFixturesToRisers'
 import { probeContinuityCell } from '@/domain/continuityMap'
+import { computeEngineerComparison } from '@/domain/engineerComparisonMetrics'
 import {
   classifyEngineerRiserStacks,
+  selectEngineerBranchSegments,
   stacksIntersectingBand,
   storeySlabBandM,
 } from '@/domain/engineerPipes'
@@ -20,6 +22,7 @@ import { aggregateStoreyDetections } from '@/shared/ifc/aggregateStoreyDetection
 import { parseStoreys } from '@/shared/ifc/parseStoreys'
 import { readBuildingPlacementSourcePoint } from '@/shared/ifc/readBuildingPlacement'
 import { resolveModelLengthUnit } from '@/shared/ifc/resolveModelLengthUnit'
+import { buildBranchRoutesFromAssignments } from './buildBranchRoutes'
 import { buildWetCoreSuggestedRisers } from './buildSuggestedRisers'
 import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE } from './riserPlacementProfile'
 
@@ -34,6 +37,12 @@ const IFC_096_P_PATH = path.resolve(process.cwd(), 'external/projects/096/096-P.
 const IFC_096_A_PATH = path.resolve(process.cwd(), 'external/projects/096/096-A.ifc')
 const SOURCE_STOREY_NAME = '01'
 const TEST_TIMEOUT_MS = 600_000
+/**
+ * Measured branch-length ratio ours/engineer on storey 01 (see the V5 block
+ * below): ours 7.82 m over 16 run segments vs engineer 6.16 m over 12
+ * horizontal SW-GRV segments in the storey band → 1.27 (±0.05).
+ */
+const RATIO_096_STOREY_01_PIN = 1.27
 
 function labeler(): () => string {
   let n = 1
@@ -232,6 +241,68 @@ gated('096-P + 096-A wet-core placement on storey 01 (gated: requires local clie
             (unassigned.length > 0 ? `; unassigned: ${JSON.stringify(unassigned.map((entry) => entry.reason))}` : ''),
         )
         expect(unassigned).toHaveLength(0)
+
+        // --- V5 acceptance metric: branch-run length on storey 01 vs the engineer ---
+        // Ours: every merged fixture on the storey routes to ITS core's stack
+        // (wet-core membership, as the branch-runs routing model does), and the
+        // plan lengths of the resulting runs are summed. Engineer: Pset lengths of
+        // the horizontal SW-GRV segments whose centreline lies in the storey's
+        // slab band (V1's storey scope, applied literally). Lengths are
+        // frame-independent, so no plan-frame alignment is needed here.
+        const fixtureCoreIds = new Map<number, string>()
+        for (const core of result.cores) for (const expressId of core.memberExpressIds) fixtureCoreIds.set(expressId, core.id)
+        const stackCoreIds = new Map<string, string>()
+        for (const stack of coreStacks) if (stack.anchor === 'wet-core') stackCoreIds.set(stack.stackId, stack.core.id)
+        const allAssignments = assignFixturesToRisers(
+          merged.fixtures.map((fixture) => ({ expressId: fixture.expressId, kind: fixture.kind, storeyId: fixture.storeyId, position: fixture.position })),
+          sourceRisers.map((riser) => ({ id: riser.id, stackId: riser.stackId, storeyId: riser.storeyId, position: riser.position })),
+          { units: 'm', coreMembership: { fixtureCoreIds, stackCoreIds } },
+        )
+        const byCore = allAssignments.filter((a) => !a.unassigned && a.assignedBy === 'wet-core').length
+        const branchRoutes = buildBranchRoutesFromAssignments(allAssignments)
+        const engineerBranches = selectEngineerBranchSegments(network, band!)
+        const comparison = computeEngineerComparison({
+          ourRisers: result.risers,
+          ourRiserUnits: 'm',
+          ourBranchRoutes: branchRoutes,
+          ourAssignments: allAssignments,
+          engineerRisers: classification,
+          storeyScope: { ourStoreyId: source!.id, engineerBandM: band },
+          engineerSegments: engineerBranches.segments,
+        })
+        const { branchLengths } = comparison
+        // Diagnostic only: drainage serving a storey commonly hangs under its slab,
+        // i.e. in the band of the storey below — printed so the ratio is explainable.
+        const belowStorey = [...hostStoreys]
+          .filter((storey) => storey.elevation < source!.elevation)
+          .sort((a, b) => b.elevation - a.elevation)[0]
+        const belowBand = belowStorey === undefined ? null : storeySlabBandM(network, belowStorey.id)
+        const belowSelection = belowBand === null ? null : selectEngineerBranchSegments(network, belowBand)
+        const belowTotalM = belowSelection === null ? null : belowSelection.segments.reduce((sum, s) => sum + (s.lengthM ?? 0), 0)
+        const engineerDiametersMm: Record<string, number> = {}
+        for (const s of engineerBranches.segments) {
+          const key = String(s.outerDiameterMm ?? 'null')
+          engineerDiametersMm[key] = (engineerDiametersMm[key] ?? 0) + 1
+        }
+        console.info(
+          `[096 branch ratio] storey 01 (band ${band!.bottomM.toFixed(2)}..${Number.isFinite(band!.topM) ? band!.topM.toFixed(2) : 'inf'} m): ` +
+            `ours ${branchLengths.oursTotalM.toFixed(2)} m over ${branchLengths.oursSegmentCount} run segments ` +
+            `(${allAssignments.length - allAssignments.filter((a) => a.unassigned).length}/${allAssignments.length} fixtures routed, ${byCore} by wet core); ` +
+            `engineer ${branchLengths.engineerTotalM?.toFixed(2) ?? 'n/a'} m over ${branchLengths.engineerSegmentCount} horizontal SW-GRV segments ` +
+            `(${engineerBranches.byGeometryCount} by Z, ${engineerBranches.byContainmentCount} by containment, ${branchLengths.engineerSegmentsWithNullLength} without Pset length; ø ${JSON.stringify(engineerDiametersMm)}); ` +
+            `ratio ${branchLengths.ratioOursToEngineer?.toFixed(3) ?? 'n/a'}` +
+            (belowTotalM === null
+              ? ''
+              : `; diagnostic: engineer horizontal SW-GRV in the band of the storey below = ${belowTotalM.toFixed(2)} m over ${belowSelection!.segments.length} segments`),
+        )
+        expect(branchLengths.scope).toBe('storey')
+        expect(branchLengths.ratioOursToEngineer).not.toBeNull()
+        // Measured on the client files — pinned with a tolerance so a routing
+        // change that moves the ratio is noticed; the 0.5–2.0 acceptance band is
+        // asserted separately.
+        expect(branchLengths.ratioOursToEngineer!).toBeGreaterThanOrEqual(0.5)
+        expect(branchLengths.ratioOursToEngineer!).toBeLessThanOrEqual(2.0)
+        expect(branchLengths.ratioOursToEngineer!).toBeCloseTo(RATIO_096_STOREY_01_PIN, 1)
 
         // Determinism.
         const second = run()

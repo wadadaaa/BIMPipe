@@ -311,6 +311,69 @@ export function stacksIntersectingBand<T extends Pick<EngineerRiserStack, 'zMinM
   return stacks.filter((stack) => stackIntersectsBand(stack, band, overlapMinM))
 }
 
+export interface EngineerBranchSelection {
+  /** Sanitary, non-vertical segments on the storey, sorted by expressId. */
+  segments: EngineerPipeSegment[]
+  /** Segments placed on the storey by their centreline Z-range. */
+  byGeometryCount: number
+  /**
+   * Segments without a resolved centreline that were placed by their IFC
+   * storey containment instead (the only storey signal they carry).
+   */
+  byContainmentCount: number
+}
+
+export interface SelectEngineerBranchSegmentsOptions {
+  systemPrefixes?: readonly string[]
+  verticalToleranceDeg?: number
+}
+
+/**
+ * The engineer's horizontal sanitary branch population on one storey — the
+ * "engineer" side of the branch-length comparison. A segment is selected when
+ * its system matches a sanitary prefix, it is not a vertical run, and its
+ * centreline Z-range touches the storey's slab band `[bottomM, topM)` (a
+ * horizontal pipe at exactly the band bottom belongs to that storey). Segments
+ * with no resolved centreline cannot be placed by Z, so they fall back to
+ * their IFC storey containment and are counted separately for honesty.
+ * A null band selects the whole model (no storey filter).
+ *
+ * Note the convention this inherits from V1's storey scope: drainage serving
+ * a storey's fixtures usually hangs under that storey's slab, i.e. inside the
+ * band of the storey BELOW. The band is applied literally so both sides of
+ * the comparison use the same scope; interpret the ratio accordingly.
+ */
+export function selectEngineerBranchSegments(
+  network: Pick<EngineerPipeNetwork, 'segments' | 'metersPerSourceUnit'>,
+  band: StoreySlabBandM | null,
+  options: SelectEngineerBranchSegmentsOptions = {},
+): EngineerBranchSelection {
+  const prefixes = options.systemPrefixes ?? ENGINEER_SANITARY_SYSTEM_PREFIXES
+  const verticalToleranceDeg = options.verticalToleranceDeg ?? ENGINEER_RISER_VERTICAL_TOLERANCE_DEG
+  const segments: EngineerPipeSegment[] = []
+  let byGeometryCount = 0
+  let byContainmentCount = 0
+  for (const segment of network.segments) {
+    if (!matchesAnyPrefix(segment.systemName, prefixes)) continue
+    if (isVerticalEngineerSegment(segment, verticalToleranceDeg)) continue
+    if (band === null) {
+      if (segment.start === null || segment.end === null) byContainmentCount += 1
+      else byGeometryCount += 1
+    } else if (segment.start === null || segment.end === null) {
+      if (segment.storeyId !== band.storeyId) continue
+      byContainmentCount += 1
+    } else {
+      const zMinM = Math.min(segment.start.z, segment.end.z) * network.metersPerSourceUnit
+      const zMaxM = Math.max(segment.start.z, segment.end.z) * network.metersPerSourceUnit
+      if (zMaxM < band.bottomM || zMinM >= band.topM) continue
+      byGeometryCount += 1
+    }
+    segments.push(segment)
+  }
+  segments.sort((a, b) => a.expressId - b.expressId)
+  return { segments, byGeometryCount, byContainmentCount }
+}
+
 function compareStacks(a: UnidentifiedStack, b: UnidentifiedStack): number {
   if (a.xM !== b.xM) return a.xM - b.xM
   if (a.yM !== b.yM) return a.yM - b.yM

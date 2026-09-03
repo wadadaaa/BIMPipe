@@ -272,10 +272,12 @@ function EngineerComparisonList({ comparison }: { comparison: EngineerComparison
             : formatLengthM(meanNearestEngineerRiserDistanceM, 'm')}
         </li>
         <li>
-          <strong>Branch runs:</strong> ours {formatLengthM(branchLengths.oursTotalM, 'm')} vs engineer{' '}
+          <strong>Branch runs{branchLengths.scope === 'storey' ? ' on this floor' : ' model-wide'}:</strong> ours{' '}
+          {formatLengthM(branchLengths.oursTotalM, 'm')} ({branchLengths.oursSegmentCount} segment
+          {branchLengths.oursSegmentCount === 1 ? '' : 's'}) vs engineer{' '}
           {branchLengths.engineerTotalM === null
             ? 'n/a (no Pset lengths)'
-            : formatLengthM(branchLengths.engineerTotalM, 'm')}
+            : `${formatLengthM(branchLengths.engineerTotalM, 'm')} (${branchLengths.engineerSegmentCount} horizontal sanitary segment${branchLengths.engineerSegmentCount === 1 ? '' : 's'})`}
           {branchLengths.ratioOursToEngineer !== null &&
             ` (ratio ${branchLengths.ratioOursToEngineer.toFixed(2)})`}
           {branchLengths.engineerSegmentsWithNullLength > 0 &&

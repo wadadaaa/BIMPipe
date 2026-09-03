@@ -32,7 +32,7 @@ import {
 } from '@/shared/frame/modelFrame'
 import { serializeAdjustLog } from '@/domain/adjustLog'
 import { computeEngineerComparison } from '@/domain/engineerComparisonMetrics'
-import { isVerticalEngineerSegment, storeySlabBandM } from '@/domain/engineerPipes'
+import { selectEngineerBranchSegments, storeySlabBandM } from '@/domain/engineerPipes'
 import { alignEngineerStacksToViewerPlan } from '@/shared/frame/ifcSourceFrame'
 import {
   getEngineerOverlayPresentation,
@@ -1221,11 +1221,15 @@ export function WorkspacePage({
   // x/z), engineer stacks are aligned into that frame via z = -IFC Y. Riser
   // counts and the nearest-riser distance are scoped to the open floor (our
   // entries on the host storey vs engineer stacks intersecting the matching
-  // engineer storey's slab band). Branch totals compare our plan-projected
-  // runs against the engineer's non-vertical segments' Pset lengths (model-wide).
+  // engineer storey's slab band). Branch totals use the same scope: our
+  // plan-projected runs on the open floor against the engineer's horizontal
+  // sanitary segments on the matching storey (Pset lengths); model-wide
+  // horizontal sanitary segments only when no floor is open.
   const engineerComparison = useMemo(() => {
     if (engineerBaseline === null || risers.length === 0) return null
     const { riserClassification, network } = engineerBaseline
+    const engineerBandM =
+      selectedStoreyId === null || engineerStoreyId === null ? null : storeySlabBandM(network, engineerStoreyId)
     return computeEngineerComparison({
       ourRisers: risers,
       ourRiserUnits: 'm',
@@ -1237,14 +1241,13 @@ export function WorkspacePage({
         ventStacks: alignEngineerStacksToViewerPlan(riserClassification.ventStacks),
         stubs: alignEngineerStacksToViewerPlan(riserClassification.stubs),
       },
-      storeyScope:
-        selectedStoreyId === null
-          ? null
-          : {
-              ourStoreyId: selectedStoreyId,
-              engineerBandM: engineerStoreyId === null ? null : storeySlabBandM(network, engineerStoreyId),
-            },
-      engineerSegments: network.segments.filter((segment) => !isVerticalEngineerSegment(segment)),
+      storeyScope: selectedStoreyId === null ? null : { ourStoreyId: selectedStoreyId, engineerBandM },
+      // Open floor without an engineer counterpart: no engineer population
+      // (the ratio reads n/a) rather than comparing one floor to the whole model.
+      engineerSegments:
+        selectedStoreyId !== null && engineerBandM === null
+          ? []
+          : selectEngineerBranchSegments(network, engineerBandM).segments,
     })
   }, [engineerBaseline, risers, branchRouteFloors, fixtureAssignments, selectedStoreyId, engineerStoreyId])
 

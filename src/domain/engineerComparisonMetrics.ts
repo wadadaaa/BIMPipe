@@ -12,7 +12,9 @@
  * Storey scope: riser counts "ours vs engineer" and the nearest-riser distance
  * are computed per open floor — our stacks with an entry on that host storey
  * against the engineer sanitary stacks whose Z-range intersects the matching
- * engineer storey's slab band. Model-wide totals are reported alongside so the
+ * engineer storey's slab band. Branch lengths follow the same scope: our
+ * branch runs on the open floor against the engineer segments the caller
+ * selected for that storey. Model-wide totals are reported alongside so the
  * scoped numbers stay explainable. Vent stacks and stubs are counted
  * separately and never enter the sanitary comparison.
  *
@@ -77,11 +79,15 @@ export interface EngineerComparisonInput {
   storeyScope: EngineerComparisonStoreyScope | null
   /**
    * Engineer segments whose Pset `Length` values make up the engineer branch
-   * total. The caller chooses the population (e.g. non-vertical segments of
-   * one system, via `isVerticalEngineerSegment`); this module only sums.
+   * total. The caller chooses the population — with a storey scope, the
+   * horizontal sanitary segments on that storey via
+   * `selectEngineerBranchSegments`; without one, model-wide non-vertical
+   * segments. This module only sums.
    */
   engineerSegments: EngineerPipeSegment[]
 }
+
+export type BranchLengthScope = 'storey' | 'model-wide'
 
 export interface EngineerComparisonReport {
   riserCounts: {
@@ -128,13 +134,23 @@ export interface EngineerComparisonReport {
   meanNearestEngineerRiserDistanceM: number | null
   branchLengths: {
     /**
-     * Sum of our route segments' plan lengths in metres. Plan-projected:
+     * `'storey'` when a storey scope is set: ours sums only the branch runs on
+     * `storeyScope.ourStoreyId` and the caller is expected to have selected
+     * the engineer segments on the matching storey. `'model-wide'` otherwise.
+     */
+    scope: BranchLengthScope
+    /**
+     * Sum of our branch-run segments' plan lengths in metres. Plan-projected:
      * excludes the 2% slope component (≤0.02% understatement) and contains no
      * vertical runs, while engineer Pset lengths are true 3D pipe lengths.
      */
     oursTotalM: number
+    /** How many of our branch-run segments were summed. */
+    oursSegmentCount: number
     /** Sum of non-null engineer `lengthM` values; null when none are present. */
     engineerTotalM: number | null
+    /** How many engineer segments were provided (summed + null-length ones). */
+    engineerSegmentCount: number
     /** How many provided engineer segments had no Pset Length (honesty count). */
     engineerSegmentsWithNullLength: number
     /** oursTotalM / engineerTotalM; null when engineer total is null or zero. */
@@ -204,16 +220,22 @@ function meanNearestDistanceM(ours: PlanPointM[], engineer: readonly PlanPointM[
   return sum / ours.length
 }
 
-function ourBranchTotalM(routes: FloorRoutes[]): number {
+function ourBranchTotalM(
+  routes: FloorRoutes[],
+  storeyId: number | null,
+): { totalM: number; segmentCount: number } {
   let totalM = 0
+  let segmentCount = 0
   for (const floor of routes) {
+    if (storeyId !== null && floor.storeyId !== storeyId) continue
     for (const segment of floor.segments) {
       const dx = segment.end.x - segment.start.x
       const dz = segment.end.z - segment.start.z
       totalM += toMeters(Math.sqrt(dx * dx + dz * dz), floor.planUnits)
+      segmentCount += 1
     }
   }
-  return totalM
+  return { totalM, segmentCount }
 }
 
 /**
@@ -262,7 +284,11 @@ export function computeEngineerComparison(input: EngineerComparisonInput): Engin
     engineerTotalM = (engineerTotalM ?? 0) + segment.lengthM
   }
 
-  const oursTotalM = ourBranchTotalM(input.ourBranchRoutes)
+  const branchScope: BranchLengthScope = input.storeyScope === null ? 'model-wide' : 'storey'
+  const { totalM: oursTotalM, segmentCount: oursSegmentCount } = ourBranchTotalM(
+    input.ourBranchRoutes,
+    input.storeyScope?.ourStoreyId ?? null,
+  )
   const ratioOursToEngineer =
     engineerTotalM !== null && engineerTotalM > 0 ? oursTotalM / engineerTotalM : null
 
@@ -296,8 +322,11 @@ export function computeEngineerComparison(input: EngineerComparisonInput): Engin
         ? null
         : meanNearestDistanceM(oursStacksOnStorey, engineerOnStorey),
     branchLengths: {
+      scope: branchScope,
       oursTotalM,
+      oursSegmentCount,
       engineerTotalM,
+      engineerSegmentCount: input.engineerSegments.length,
       engineerSegmentsWithNullLength,
       ratioOursToEngineer,
     },

@@ -271,10 +271,36 @@ describe('computeEngineerComparison', () => {
     })
 
     // 2000 mm + 3 m = 5 m ours; engineer 6 + 4 = 10 m.
+    expect(report.branchLengths.scope).toBe('model-wide')
     expect(report.branchLengths.oursTotalM).toBeCloseTo(5, 10)
+    expect(report.branchLengths.oursSegmentCount).toBe(2)
     expect(report.branchLengths.engineerTotalM).toBeCloseTo(10, 10)
+    expect(report.branchLengths.engineerSegmentCount).toBe(3)
     expect(report.branchLengths.engineerSegmentsWithNullLength).toBe(1)
     expect(report.branchLengths.ratioOursToEngineer).toBeCloseTo(0.5, 10)
+
+    // With a storey scope only our runs on that storey count; the caller has
+    // already selected the engineer segments for the same storey.
+    const scoped = computeEngineerComparison({
+      ...emptyInput(),
+      ourBranchRoutes: routes,
+      storeyScope: { ourStoreyId: 200, engineerBandM: { storeyId: 200, bottomM: 3, topM: 6 } },
+      engineerSegments: [engineerSegment(2, 4)],
+    })
+    expect(scoped.branchLengths.scope).toBe('storey')
+    expect(scoped.branchLengths.oursTotalM).toBeCloseTo(3, 10)
+    expect(scoped.branchLengths.oursSegmentCount).toBe(1)
+    expect(scoped.branchLengths.engineerTotalM).toBeCloseTo(4, 10)
+    expect(scoped.branchLengths.ratioOursToEngineer).toBeCloseTo(0.75, 10)
+
+    // An unresolved engineer counterpart still scopes ours to the open floor.
+    const unresolvedScope = computeEngineerComparison({
+      ...emptyInput(),
+      ourBranchRoutes: routes,
+      storeyScope: { ourStoreyId: 100, engineerBandM: null },
+    })
+    expect(unresolvedScope.branchLengths.scope).toBe('storey')
+    expect(unresolvedScope.branchLengths.oursTotalM).toBeCloseTo(2, 10)
   })
 
   it('returns a null ratio when the engineer total is zero (no Infinity)', () => {
