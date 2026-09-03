@@ -1,7 +1,11 @@
 import type { Fixture, KitchenArea, Riser, RiserId } from '@/domain/types'
+import type { FixtureRiserAssignment } from '@/domain/assignFixturesToRisers'
+import type { FloorRoutes } from '@/domain/branchRouting'
 import type { WetCoreSuggestedStack } from '@/shared/routes/buildSuggestedRisers'
+import type { RoutingModel } from '@/shared/routes/routingModel'
 import { formatLengthM, type LengthUnit } from '@/shared/lengthUnits'
 import { detectPlanUnits } from '@/shared/routes/planGeometry'
+import { RoutesPanel } from './RoutesPanel'
 import { describePlacementRule, describeWetCoreMembers, describeWetCoreStackPlacement } from './wetCoreCopy'
 import './RisersPanel.css'
 
@@ -17,10 +21,15 @@ interface RisersPanelProps {
   downloadMode?: 'full' | null
   downloadError?: string | null
   onDownloadFullIfc?: () => void
-  sanitaryRouteLimitations?: string[]
   demoFlowEnabled?: boolean
   demoFloorOpened?: boolean
   sanitaryRouteCount?: number
+  /** V5 routing switch; the branch-runs list renders only under 'branch-runs'. */
+  routingModel?: RoutingModel
+  /** Branch runs of the open floor (branch-runs model); null before stacks exist. */
+  branchRouteFloor?: FloorRoutes | null
+  /** Fixture assignments of the open floor, for the branch-run warnings. */
+  fixtureAssignments?: FixtureRiserAssignment[]
   /**
    * Length unit declared by the model's IfcUnitAssignment; null when unknown.
    * Positions here are viewer coordinates, which web-ifc normalizes to metres
@@ -50,10 +59,12 @@ export function RisersPanel({
   downloadMode = null,
   downloadError = null,
   onDownloadFullIfc = () => {},
-  sanitaryRouteLimitations = [],
   demoFlowEnabled = false,
   demoFloorOpened = false,
   sanitaryRouteCount = 0,
+  routingModel = 'branch-runs',
+  branchRouteFloor = null,
+  fixtureAssignments = [],
   modelLengthUnit = null,
   wetCoreStacks = null,
   isSuggestingRisers = false,
@@ -87,6 +98,9 @@ export function RisersPanel({
     : 0
   const isDownloadingFullIfc = downloadMode === 'full'
   const hasRoutePreview = sanitaryRouteCount > 0
+  const showBranchRuns = routingModel === 'branch-runs' && !demoFlowEnabled && risers.length > 0
+  const stackLabelByRiserId = new Map(risers.map((riser) => [riser.id, riser.stackLabel]))
+  const fixtureNameByExpressId = new Map(fixtures.map((fixture) => [fixture.expressId, fixture.name]))
   const demoBlocker = !demoFloorOpened
     ? 'Open an included ADAM_10 demo floor before placing risers.'
     : !canSuggest
@@ -205,15 +219,13 @@ export function RisersPanel({
         </p>
       )}
 
-      {sanitaryRouteLimitations.length > 0 && !demoFlowEnabled && (
-        <div className="risers-panel__hint" role="status">
-          <strong>Sanitary routing preview notes</strong>
-          <ul className="risers-panel__limitations">
-            {sanitaryRouteLimitations.map((note) => (
-              <li key={note}>{note}</li>
-            ))}
-          </ul>
-        </div>
+      {showBranchRuns && (
+        <RoutesPanel
+          floor={branchRouteFloor}
+          assignments={fixtureAssignments}
+          stackLabelByRiserId={stackLabelByRiserId}
+          fixtureNameByExpressId={fixtureNameByExpressId}
+        />
       )}
 
       {risers.length === 0 ? (

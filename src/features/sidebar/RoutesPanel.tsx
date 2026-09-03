@@ -1,75 +1,117 @@
-import type { Route, RiserId } from '@/domain/types'
-import { formatLengthMm, type LengthUnit } from '@/shared/lengthUnits'
+import type {
+  AssignedFixtureRiser,
+  FixtureRiserAssignment,
+  UnassignedFixtureRiser,
+  UnassignedReason,
+} from '@/domain/assignFixturesToRisers'
+import type { FloorRoutes } from '@/domain/branchRouting'
+import { formatBranchSlopePercent } from '@/domain/branchDefaults'
+import { groupBranchRunsByStack } from '@/shared/routes/branchRouteSummary'
 import './RoutesPanel.css'
 
 interface RoutesPanelProps {
-  routes: Route[]
-  /** Unit of the route drop/length values ('m' for web-ifc-normalized geometry). */
-  unit: LengthUnit
-  /** Maps riserId → display label (e.g. "R1") */
-  riserLabels: Map<RiserId, string>
+  /** Branch runs of the open floor; null before risers exist on it. */
+  floor: FloorRoutes | null
+  /** Fixture assignments of the open floor (unassigned / over-length ones become warnings). */
+  assignments: FixtureRiserAssignment[]
+  /** riser id → stack label ("R1"). */
+  stackLabelByRiserId: ReadonlyMap<string, string>
+  /** Fixture express id → display name for the warning rows. */
+  fixtureNameByExpressId: ReadonlyMap<number, string>
 }
 
-export function RoutesPanel({ routes, unit, riserLabels }: RoutesPanelProps) {
-  if (routes.length === 0) {
+const UNASSIGNED_REASON_COPY: Record<UnassignedReason, string> = {
+  'no-plan-position': 'no plan position in the IFC',
+  'no-riser-on-storey': 'no stack on this floor',
+  'no-riser-within-branch-length': 'no stack within the 4 m branch limit',
+}
+
+/**
+ * Branch runs of the open floor grouped by the stack they drain to (V5). This
+ * is the only routes list in plain mode — riser-to-riser chains are never shown
+ * here. Every fixture that could not be routed is a visible warning row.
+ */
+export function RoutesPanel({ floor, assignments, stackLabelByRiserId, fixtureNameByExpressId }: RoutesPanelProps) {
+  const groups = floor === null ? [] : groupBranchRunsByStack(floor, stackLabelByRiserId)
+  const unrouted = assignments.filter(
+    (assignment): assignment is UnassignedFixtureRiser => assignment.unassigned,
+  )
+  const overlength = assignments.filter(
+    (assignment): assignment is AssignedFixtureRiser => !assignment.unassigned && assignment.exceedsMaxBranchLength,
+  )
+  const totalLengthM = groups.reduce((sum, group) => sum + group.totalLengthM, 0)
+  const fixtureCount = new Set(groups.flatMap((group) => group.fixtureExpressIds)).size
+
+  if (groups.length === 0 && unrouted.length === 0) {
     return (
-      <div className="routes-panel__empty">
-        <span className="routes-panel__empty-icon">~</span>
-        <p>Place risers to generate grouped sanitary routes with fixture branches, collection mains, and 2% slope metadata.</p>
-      </div>
+      <section className="routes-panel" aria-label="Branch runs">
+        <div className="routes-panel__empty">
+          <span className="routes-panel__empty-icon" aria-hidden="true">~</span>
+          <p>
+            Branch runs appear here once the floor has stacks: every positioned fixture is routed to its wet
+            core&apos;s stack (Ø110 WC, Ø50 basin/sink/shower, Ø63 shared collector, {formatBranchSlopePercent()} slope).
+          </p>
+        </div>
+      </section>
     )
   }
 
-  const passing = routes.filter((r) => r.compliant).length
-  const failing = routes.length - passing
-
-  // Failing first, then passing — both sorted by drop descending
-  const sorted = [...routes].sort((a, b) => {
-    if (a.compliant !== b.compliant) return a.compliant ? 1 : -1
-    return b.drop - a.drop
-  })
-
   return (
-    <div className="routes-panel">
+    <section className="routes-panel" aria-label="Branch runs">
       <div className="routes-panel__summary-row">
-        <div className="routes-panel__summary-chip routes-panel__summary-chip--pass">
-          <span className="routes-panel__summary-chip-label">Pass</span>
-          <strong>{passing}</strong>
-        </div>
-        <div className="routes-panel__summary-chip routes-panel__summary-chip--fail">
-          <span className="routes-panel__summary-chip-label">Fail</span>
-          <strong>{failing}</strong>
+        <div className="routes-panel__summary-chip">
+          <span className="routes-panel__summary-chip-label">Stacks</span>
+          <strong>{groups.length}</strong>
         </div>
         <div className="routes-panel__summary-chip">
-          <span className="routes-panel__summary-chip-label">Total</span>
-          <strong>{routes.length}</strong>
+          <span className="routes-panel__summary-chip-label">Fixtures</span>
+          <strong>{fixtureCount}</strong>
+        </div>
+        <div className="routes-panel__summary-chip">
+          <span className="routes-panel__summary-chip-label">Length</span>
+          <strong>{formatMetres(totalLengthM)}</strong>
         </div>
       </div>
 
-      <ul className="routes-panel__list">
-        {sorted.map((route) => (
-          <li
-            key={route.id}
-            className={[
-              'routes-panel__item',
-              route.compliant ? 'routes-panel__item--pass' : 'routes-panel__item--fail',
-            ].join(' ')}
-          >
-            <span className="routes-panel__item-status" aria-label={route.compliant ? 'Pass' : 'Fail'}>
-              {route.compliant ? '✓' : '✗'}
-            </span>
-            <span className="routes-panel__item-name" dir="auto" title={route.fixtureName}>
-              {route.fixtureName}
-            </span>
-            <span className="routes-panel__item-riser">
-              {riserLabels.get(route.riserId) ?? '—'}
-            </span>
-            <span className="routes-panel__item-drop">
-              {formatLengthMm(route.drop, unit)}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
+      {groups.length > 0 && (
+        <ul className="routes-panel__list" data-testid="branch-run-groups">
+          {groups.map((group) => (
+            <li key={group.stackId} className="routes-panel__group" data-testid="branch-run-group">
+              <span className="routes-panel__item-riser">{group.stackLabel}</span>
+              <span className="routes-panel__group-detail">
+                {group.fixtureExpressIds.length} fixture{group.fixtureExpressIds.length === 1 ? '' : 's'} ·{' '}
+                {group.segmentCount} run{group.segmentCount === 1 ? '' : 's'}
+              </span>
+              <span className="routes-panel__group-spec">
+                {formatMetres(group.totalLengthM)} · Ø{group.diametersMm.join('/')} · {group.slopePercent.toFixed(1)} %
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {(unrouted.length > 0 || overlength.length > 0) && (
+        <ul className="routes-panel__warnings" role="status" data-testid="branch-run-warnings">
+          {unrouted.map((assignment) => (
+            <li key={`unrouted-${assignment.fixtureExpressId}`} className="routes-panel__warning">
+              <span dir="auto">{fixtureNameByExpressId.get(assignment.fixtureExpressId) ?? `#${assignment.fixtureExpressId}`}</span>{' '}
+              not routed: {UNASSIGNED_REASON_COPY[assignment.reason]}.
+            </li>
+          ))}
+          {overlength.map((assignment) => (
+            <li key={`overlength-${assignment.fixtureExpressId}`} className="routes-panel__warning">
+              <span dir="auto">{fixtureNameByExpressId.get(assignment.fixtureExpressId) ?? `#${assignment.fixtureExpressId}`}</span>{' '}
+              routes to its core stack {stackLabelByRiserId.get(assignment.riserId) ?? assignment.riserId} at{' '}
+              {formatMetres(assignment.units === 'mm' ? assignment.planDistance / 1000 : assignment.planDistance)}, beyond the 4 m
+              branch limit (kept because the moved stack wins).
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   )
+}
+
+function formatMetres(lengthM: number): string {
+  return `${lengthM.toFixed(2)} m`
 }

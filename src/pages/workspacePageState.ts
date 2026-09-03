@@ -16,6 +16,7 @@ import type {
 import { appendAdjustment, createAdjustLog, type AdjustLog } from '@/domain/adjustLog'
 import { getDemoRuntimeConfig, type DemoRuntimeConfig } from '@/shared/demoConfig'
 import { removeRiserStack } from '@/shared/routes/buildRiserStacks'
+import { resolveRoutingModel, type RoutingModel } from '@/shared/routes/routingModel'
 
 /** A non-host model opened alongside the host in a multi-file upload (W4). */
 export interface LinkedModelState {
@@ -113,6 +114,9 @@ export interface WorkspacePageState {
   // Resolved once at mount and never changed by any action.
   demoRuntime: DemoRuntimeConfig
   demoRuntimeConfigError: string | null
+  // The single horizontal-routing switch (V5), derived from demoRuntime once at
+  // mount: 'branch-runs' in plain mode, 'demo-chains' for the demo runtime.
+  routingModel: RoutingModel
 
   // --- linked models (multi-IFC ingest) ---
   // Non-host files of a multi-file upload, in upload order. Empty for a
@@ -237,6 +241,7 @@ export const initialWorkspacePageState: WorkspacePageState = {
   demoAssetError: null,
   demoRuntime: { enabled: false },
   demoRuntimeConfigError: null,
+  routingModel: 'branch-runs',
   linkedModels: [],
   storeyAlignments: [],
   selectedStoreyId: null,
@@ -290,6 +295,7 @@ export function createInitialWorkspacePageState(): WorkspacePageState {
       ...initialWorkspacePageState,
       demoRuntime,
       demoRuntimeConfigError: null,
+      routingModel: resolveRoutingModel(demoRuntime),
       continuitySnapEnabled: defaultContinuitySnapEnabled(demoRuntime),
     }
   } catch (error) {
@@ -297,6 +303,7 @@ export function createInitialWorkspacePageState(): WorkspacePageState {
       ...initialWorkspacePageState,
       demoRuntime: { enabled: false },
       demoRuntimeConfigError: error instanceof Error ? error.message : 'Demo mode config is invalid.',
+      routingModel: resolveRoutingModel({ enabled: false }),
       continuitySnapEnabled: defaultContinuitySnapEnabled({ enabled: false }),
     }
   }

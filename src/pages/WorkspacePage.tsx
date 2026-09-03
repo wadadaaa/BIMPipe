@@ -52,8 +52,9 @@ import { buildSuggestedRisersWithSnap, buildWetCoreSuggestedRisers } from '@/sha
 import { toStackExtentFixtures } from '@/domain/riserStackExtent'
 import { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
 import { buildDemoModeUploadError, isStoreyIncludedInDemoScope } from '@/shared/demoConfig'
-import { buildSanitaryRoutingDemoPlan, buildSanitaryRoutingPlan } from '@/shared/routes/buildSanitaryRoutes'
+import { buildSanitaryRoutingDemoPlan, type SanitaryRoutingPlan } from '@/shared/routes/buildSanitaryRoutes'
 import { buildBranchRoutesFromAssignments } from '@/shared/routes/buildBranchRoutes'
+import { summarizeBranchRunsForDebug } from '@/shared/routes/branchRouteSummary'
 import { assignFixturesToRisers } from '@/domain/assignFixturesToRisers'
 
 let floorViewerModulePromise: Promise<typeof import('@/viewer/FloorViewer')> | null = null
@@ -66,6 +67,10 @@ let floorSelectionModulesPromise: Promise<
     typeof import('@/shared/ifc/resolveModelOrigin'),
   ]
 > | null = null
+
+// Stable empty plans so memoised consumers do not re-render in plain mode.
+const EMPTY_SANITARY_ROUTING_PLAN: SanitaryRoutingPlan = { routes: [], limitations: [], debugGroups: [] }
+const EMPTY_BRANCH_ROUTE_FLOORS: FloorRoutes[] = []
 
 function loadFloorViewerModule() {
   floorViewerModulePromise ??= import('@/viewer/FloorViewer')
@@ -171,6 +176,8 @@ export function WorkspacePage({
     riserSnapOutcomes,
     riserStackExtents,
     wetCoreSuggestion,
+    autoStackCoreIds,
+    routingModel,
     isSuggestingRisers,
     suggestProgress,
     suggestError,
@@ -949,6 +956,7 @@ export function WorkspacePage({
           })),
         },
         sanitaryRoutesForExport,
+        branchRoutesForExport,
       )
 
       downloadBinary(
@@ -1030,6 +1038,9 @@ export function WorkspacePage({
             detectionAggregation: detectionDebugRef.current,
             risers,
           }),
+          // V5: which horizontal routing model produced the exported runs.
+          routingModel,
+          branchRoutes: summarizeBranchRunsForDebug(branchRoutesForExport, fixtureAssignments, stackLabelByRiserId),
           sanitaryRouteDebugGroups: sanitaryRoutingPreview.debugGroups,
           sanitaryRouteLimitations: sanitaryRoutingPreview.limitations,
         },
@@ -1057,33 +1068,50 @@ export function WorkspacePage({
   // ---------------------------------------------------------------------------
 
 
-  // Fixture-to-riser assignment for the active floor (toilets anchor risers,
-  // everything else attaches to the nearest in-range riser). Only computed once
-  // risers exist on the floor — before placement the panel shows detection state
-  // without misleading "unassigned" flags.
+  // Wet-core membership for the branch-runs routing model (V5): fixture → core
+  // from the last suggest run, stack → core from the reducer (auto stacks and
+  // the moved stacks that superseded them). Null in demo mode, where the
+  // toilet-anchored risers have no cores and nearest assignment is the rule.
+  const fixtureCoreMembership = useMemo(() => {
+    if (routingModel !== 'branch-runs' || wetCoreSuggestion === null) return undefined
+    const fixtureCoreIds = new Map<number, string>()
+    for (const core of wetCoreSuggestion.cores) {
+      for (const expressId of core.memberExpressIds) fixtureCoreIds.set(expressId, core.id)
+    }
+    return { fixtureCoreIds, stackCoreIds: autoStackCoreIds }
+  }, [routingModel, wetCoreSuggestion, autoStackCoreIds])
+
+  // Fixture-to-stack assignment for the active floor: a fixture routes to its
+  // wet core's stack (overrides win: a moved stack keeps its core), otherwise to
+  // the nearest in-range riser. Only computed once risers exist on the floor —
+  // before placement the panel shows detection state without misleading
+  // "unassigned" flags.
   const fixtureAssignments = useMemo(() => {
     if (selectedStoreyId === null) return []
     if (!risers.some((riser) => riser.storeyId === selectedStoreyId)) return []
-    return assignFixturesToRisers(fixtures, risers)
-  }, [fixtures, risers, selectedStoreyId])
+    return assignFixturesToRisers(fixtures, risers, { coreMembership: fixtureCoreMembership })
+  }, [fixtures, risers, selectedStoreyId, fixtureCoreMembership])
 
-  // Branch routes (T3): pure derivation from the T2 assignments above. The
-  // adapter drops unassigned entries — those stay visible in the fixtures panel
-  // with an explicit reason and have no riser to route toward.
+  // Branch runs: pure derivation from the assignments above. The adapter drops
+  // unassigned entries — those stay visible in the fixtures panel with an
+  // explicit reason and have no riser to route toward.
   const branchRouteFloors = useMemo(
     () => buildBranchRoutesFromAssignments(fixtureAssignments),
     [fixtureAssignments],
   )
 
+  // Riser-to-riser "main sanitary route" chains exist ONLY under the
+  // 'demo-chains' routing model (see `src/shared/routes/routingModel.ts`); the
+  // branch-runs model never builds them, so nothing downstream (viewer,
+  // sidebar, export, debug JSON) sees a chain in plain mode.
   const sanitaryRoutingPreview = useMemo(() => {
-    if (selectedStoreyId === null) return { routes: [], limitations: [], debugGroups: [] }
+    if (selectedStoreyId === null || routingModel !== 'demo-chains' || !demoRuntime.enabled) {
+      return EMPTY_SANITARY_ROUTING_PLAN
+    }
     const floorFixtures = fixtures.filter((fixture) => fixture.storeyId === selectedStoreyId)
     const floorRisers = risers.filter((riser) => riser.storeyId === selectedStoreyId)
-    if (demoRuntime.enabled) {
-      return buildSanitaryRoutingDemoPlan(floorFixtures, floorRisers, demoRuntime.config)
-    }
-    return buildSanitaryRoutingPlan(floorFixtures, floorRisers, modelFileName)
-  }, [demoRuntime, fixtures, modelFileName, risers, selectedStoreyId])
+    return buildSanitaryRoutingDemoPlan(floorFixtures, floorRisers, demoRuntime.config)
+  }, [demoRuntime, fixtures, risers, routingModel, selectedStoreyId])
 
   // Export the same selected-floor route plan currently shown in the viewer. Download IFC is scoped
   // to the active included demo floor (`selectedStoreyId`); `buildSanitaryRoutingDemoPlan` can still
@@ -1091,6 +1119,21 @@ export function WorkspacePage({
   // recompute a separate all-demo-floor export plan here: duplicate/independent planning can drift
   // from the preview and hide missing routes in the downloaded IFC/debug JSON.
   const sanitaryRoutesForExport = sanitaryRoutingPreview.routes
+  // Branch runs are what the plain-mode export writes; demo export keeps chains only.
+  const branchRoutesForExport = routingModel === 'branch-runs' ? branchRouteFloors : EMPTY_BRANCH_ROUTE_FLOORS
+  const stackLabelByRiserId = useMemo(
+    () => new Map(risers.map((riser) => [riser.id, riser.stackLabel])),
+    [risers],
+  )
+  // Branch runs of the open floor for the routes panel (source frame: only
+  // lengths and diameters are read, so no local-frame conversion is needed).
+  const selectedFloorBranchRoutes = useMemo(
+    () =>
+      routingModel === 'branch-runs' && selectedStoreyId !== null
+        ? (branchRouteFloors.find((floor) => floor.storeyId === selectedStoreyId) ?? null)
+        : null,
+    [routingModel, branchRouteFloors, selectedStoreyId],
+  )
 
   const selectedStorey = storeys.find((storey) => storey.id === selectedStoreyId) ?? null
   const demoFloorOpened =
@@ -1390,10 +1433,11 @@ export function WorkspacePage({
       initialStoreyDecision={initialStoreyDecision}
       storeyAlignments={storeyAlignments}
       crossFileMerge={crossFileMerge}
-      sanitaryRouteLimitations={sanitaryRoutingPreview.limitations}
       demoFlowEnabled={demoRuntime.enabled}
       demoFloorOpened={demoFloorOpened}
       sanitaryRouteCount={sanitaryRoutesForExport.length}
+      routingModel={routingModel}
+      branchRouteFloor={selectedFloorBranchRoutes}
       modelLengthUnit={modelLengthUnit}
       engineerBaseline={
         engineerBaseline === null

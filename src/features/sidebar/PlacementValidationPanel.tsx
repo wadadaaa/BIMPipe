@@ -11,7 +11,12 @@ import type {
   WetCoreSuggestedStack,
 } from '@/shared/routes/buildSuggestedRisers'
 import type { WetCore } from '@/domain/wetCores'
+import type { FixtureRiserAssignment } from '@/domain/assignFixturesToRisers'
+import type { FloorRoutes } from '@/domain/branchRouting'
+import { formatBranchSlopePercent } from '@/domain/branchDefaults'
 import { formatLengthM } from '@/shared/lengthUnits'
+import { summarizeBranchRunsForDebug } from '@/shared/routes/branchRouteSummary'
+import { describeRoutingModel, type RoutingModel } from '@/shared/routes/routingModel'
 import {
   collectPlacementWarnings,
   describeDedupeRadii,
@@ -59,6 +64,12 @@ interface PlacementValidationPanelProps {
   /** Per-stack vertical extents (V4) of the last run; null when not bounded. */
   riserStackExtents?: SuggestedRiserStackExtent[] | null
   demoFlowEnabled?: boolean
+  /** V5 routing switch; the routing-model section renders in plain mode only (demo parity). */
+  routingModel?: RoutingModel
+  /** Branch runs of the open floor (branch-runs model); null before stacks exist. */
+  branchRouteFloor?: FloorRoutes | null
+  /** Fixture assignments of the open floor, summarised in the routing-model section. */
+  fixtureAssignments?: FixtureRiserAssignment[]
   /** Why the initial floor was auto-opened (plain mode); null in demo mode. */
   initialStoreyDecision?: InitialStoreyDecision | null
   /** Storey mapping per linked file (multi-IFC uploads); empty for single-file. */
@@ -486,6 +497,59 @@ function WetCoreSection({
   )
 }
 
+/**
+ * The one line the brief asks for — "Routing model: branch runs (fixture →
+ * stack)" — plus how the open floor's fixtures were routed. Plain mode only:
+ * the demo panel text is parity-locked.
+ */
+function RoutingModelSection({
+  routingModel,
+  floor,
+  assignments,
+}: {
+  routingModel: RoutingModel
+  floor: FloorRoutes | null
+  assignments: FixtureRiserAssignment[]
+}) {
+  const summary = summarizeBranchRunsForDebug(floor === null ? [] : [floor], assignments)
+  const floorSummary = summary.floors[0] ?? null
+  const routedCount = summary.assignedBy.wetCore + summary.assignedBy.nearest
+  return (
+    <section className="sidebar__panel" data-testid="routing-model-section">
+      <p className="sidebar__panel-title">Horizontal routing</p>
+      <p className="sidebar__panel-copy">
+        <strong>{describeRoutingModel(routingModel)}</strong>. Riser-to-riser chains are not built, drawn or exported in this mode. Defaults: Ø110 WC, Ø50 basin/sink/shower, Ø63 for a shared run of two or more small fixtures, slope {formatBranchSlopePercent()}.
+      </p>
+      {assignments.length === 0 ? (
+        <p className="sidebar__panel-copy">No stacks on the open floor yet — branch runs appear after Suggest.</p>
+      ) : (
+        <ul className="risers-panel__legend-list">
+          <li>
+            <strong>Fixtures routed:</strong> {routedCount} ({summary.assignedBy.wetCore} to their wet core&apos;s stack,{' '}
+            {summary.assignedBy.nearest} to the nearest stack)
+          </li>
+          {floorSummary !== null && (
+            <li>
+              <strong>Branch runs:</strong> {floorSummary.segmentCount} segment(s) to {floorSummary.groups.length} stack(s),{' '}
+              {floorSummary.totalLengthM.toFixed(2)} m on this floor
+            </li>
+          )}
+          {summary.unrouted.length > 0 && (
+            <li>
+              <strong>Not routed:</strong> {summary.unrouted.length} fixture(s) without a reachable stack — see the Risers tab.
+            </li>
+          )}
+          {summary.overlength.length > 0 && (
+            <li>
+              <strong>Beyond branch limit:</strong> {summary.overlength.length} fixture(s) kept on a moved core stack farther than 4 m.
+            </li>
+          )}
+        </ul>
+      )}
+    </section>
+  )
+}
+
 export function PlacementValidationPanel({
   report,
   detectionAggregation,
@@ -493,6 +557,9 @@ export function PlacementValidationPanel({
   wetCoreSuggestion = null,
   riserStackExtents = null,
   demoFlowEnabled = false,
+  routingModel = 'branch-runs',
+  branchRouteFloor = null,
+  fixtureAssignments = [],
   initialStoreyDecision = null,
   storeyAlignments = [],
   crossFileMerge = null,
@@ -562,6 +629,10 @@ export function PlacementValidationPanel({
     <WetCoreSection suggestion={wetCoreSuggestion} extents={riserStackExtents} storeys={storeys} />
   )
 
+  const routingModelSection = !demoFlowEnabled && (
+    <RoutingModelSection routingModel={routingModel} floor={branchRouteFloor} assignments={fixtureAssignments} />
+  )
+
   if (!report) {
     return (
       <>
@@ -570,6 +641,7 @@ export function PlacementValidationPanel({
         {engineerSection}
         {continuitySection}
         {wetCoreSection}
+        {routingModelSection}
         <p className="sidebar__panel-copy">Suggest risers to populate export validation details.</p>
       </>
     )
@@ -590,6 +662,7 @@ export function PlacementValidationPanel({
       {engineerSection}
       {continuitySection}
       {wetCoreSection}
+      {routingModelSection}
       <p className="sidebar__panel-title">Placement and export readiness</p>
       <ul className="risers-panel__legend-list">
         <li><strong>Processed floors:</strong> {report.summary.processedFloorCount}</li>

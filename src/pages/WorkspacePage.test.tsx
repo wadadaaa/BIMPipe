@@ -432,7 +432,7 @@ describe('WorkspacePage', () => {
     expect(screen.getByText(/Fixture scan took 7 ms/)).toBeInTheDocument()
   })
 
-  it('computes and surfaces sanitary routes without demo mode once fixtures and risers exist on the floor', async () => {
+  it('routes plain mode with branch runs only: no riser-to-riser chains built, drawn, listed or exported', async () => {
     mocks.getDemoRuntimeConfig.mockReturnValue({ enabled: false as const })
 
     const user = userEvent.setup()
@@ -455,32 +455,65 @@ describe('WorkspacePage', () => {
     // metres, so the three fixtures are hundreds of metres apart and each forms
     // its own wet core → 3 core stacks + 1 kitchen stack. Without a continuity
     // map each core stack sits 150 mm outside the core's wall-side edge, so
-    // every fixture gets a real (non-degenerate) route to its own stack.
+    // every fixture gets a real (non-degenerate) branch run to its own stack.
     await screen.findByLabelText('Remove riser R1')
     await screen.findByLabelText('Remove riser R2')
     await screen.findByLabelText('Remove riser R3')
     await screen.findByLabelText('Remove riser R4')
     expect(screen.getByTestId('floor-viewer')).toHaveTextContent('risers:4')
-    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('routes:3')
+    // V5: the 'branch-runs' routing model never builds the demo chains.
+    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('routes:0')
+    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('branchSegments:3')
     // The wet-core placement of each stack is explained in the riser list.
     expect(screen.getAllByTestId('stack-placement')[0]).toHaveTextContent('1 WC · wall-side edge')
+    // The routes list groups the runs by stack with length, Ø and slope.
+    expect(screen.getAllByTestId('branch-run-group')).toHaveLength(3)
+    expect(screen.getAllByTestId('branch-run-group')[0]).toHaveTextContent('R1')
+    expect(screen.getAllByTestId('branch-run-group')[0]).toHaveTextContent('1 fixture · 1 run')
+    expect(screen.getAllByTestId('branch-run-group')[0]).toHaveTextContent('Ø110 · 2.0 %')
+    expect(screen.queryByTestId('branch-run-warnings')).not.toBeInTheDocument()
 
-    // Removing R2 rebinds WC-12 to the next riser: the route count stays at 3
-    // but the straight offset run becomes an L-run (one extra branch segment).
+    // Removing R2 rebinds WC-12 to the nearest remaining stack (its core stack
+    // is gone): the straight offset run becomes an L-run (one extra segment).
     await user.click(screen.getByLabelText('Remove riser R2'))
 
     await waitFor(() => {
       expect(screen.getByTestId('floor-viewer')).toHaveTextContent('risers:3')
     })
-    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('routes:3')
+    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('routes:0')
     expect(screen.getByTestId('floor-viewer')).toHaveTextContent('branchSegments:4')
 
-    // Demo-only chrome stays hidden, but the routing limitations surface in dev.
+    // Demo-only chrome and the chain "preview notes" never appear in plain mode.
     expect(screen.queryByLabelText('Sanitary demo flow')).not.toBeInTheDocument()
-    expect(screen.getByText('Sanitary routing preview notes')).toBeInTheDocument()
-    expect(
-      screen.getByText(/verify grouping before using this demo heuristic with anytower\.ifc/i),
-    ).toBeInTheDocument()
+    expect(screen.queryByText('Sanitary routing preview notes')).not.toBeInTheDocument()
+
+    // The Decisions tab states the routing model explicitly.
+    await user.click(screen.getByRole('tab', { name: 'Decisions' }))
+    expect(await screen.findByText('Routing model: branch runs (fixture → stack)')).toBeInTheDocument()
+    expect(screen.getByTestId('routing-model-section')).toHaveTextContent('Fixtures routed: 3')
+
+    // Export in plain mode passes branch runs and NO chains to the exporter.
+    await user.click(screen.getByRole('tab', { name: 'Risers' }))
+    await user.click(screen.getByRole('button', { name: /^download ifc$/i }))
+    await waitFor(() => {
+      expect(mocks.exportFullIfcWithRisersWithDebug).toHaveBeenCalledTimes(1)
+    })
+    const exportArgs = mocks.exportFullIfcWithRisersWithDebug.mock.calls[0]
+    expect(exportArgs[6]).toEqual([])
+    expect(exportArgs[7]).toHaveLength(1)
+    expect(exportArgs[7][0].segments).toHaveLength(4)
+    const debugDownloadIndex = anchorClick.mock.contexts
+      .map((link) => (link as HTMLAnchorElement).download)
+      .findIndex((name) => name.endsWith('riser-mapping.json'))
+    const debugBlob = (URL.createObjectURL as ReturnType<typeof vi.fn>).mock.calls[debugDownloadIndex][0] as Blob
+    const debugJson = JSON.parse(await debugBlob.text()) as {
+      routingModel: string
+      sanitaryRouteDebugGroups: unknown[]
+      branchRoutes: { floors: Array<{ segmentCount: number }> }
+    }
+    expect(debugJson.routingModel).toBe('branch-runs')
+    expect(debugJson.sanitaryRouteDebugGroups).toEqual([])
+    expect(debugJson.branchRoutes.floors[0].segmentCount).toBe(4)
   })
 
   it('loads the bundled sample model through the same upload path as a user-picked file', async () => {

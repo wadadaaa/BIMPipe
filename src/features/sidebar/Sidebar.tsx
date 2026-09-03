@@ -12,6 +12,8 @@ import type {
   SuggestedRiserStackExtent,
 } from '@/shared/routes/buildSuggestedRisers'
 import type { LengthUnit } from '@/shared/lengthUnits'
+import type { FloorRoutes } from '@/domain/branchRouting'
+import type { RoutingModel } from '@/shared/routes/routingModel'
 import { ViewTransition } from '@/shared/reactViewTransition'
 import { FixturesPanel } from './FixturesPanel'
 import { RisersPanel } from './RisersPanel'
@@ -50,10 +52,13 @@ interface SidebarProps {
   storeyAlignments?: StoreyAlignment[]
   /** Cross-file fixture merge accounting for the open floor; null for single-file. */
   crossFileMerge?: MergedStoreyDetection | null
-  sanitaryRouteLimitations?: string[]
   demoFlowEnabled?: boolean
   demoFloorOpened?: boolean
   sanitaryRouteCount?: number
+  /** V5 routing switch (one place: the reducer); drives the routes list and the Decisions line. */
+  routingModel?: RoutingModel
+  /** Branch runs of the open floor under the branch-runs model; null before stacks exist. */
+  branchRouteFloor?: FloorRoutes | null
   /** Model length unit resolved from IfcUnitAssignment; null when unknown. */
   modelLengthUnit?: LengthUnit | null
   /** Engineer baseline (W7) summary for the Decisions tab; null until loaded. */
@@ -158,10 +163,11 @@ export function Sidebar({
   initialStoreyDecision = null,
   storeyAlignments = [],
   crossFileMerge = null,
-  sanitaryRouteLimitations = [],
   demoFlowEnabled = false,
   demoFloorOpened = false,
   sanitaryRouteCount = 0,
+  routingModel = 'branch-runs',
+  branchRouteFloor = null,
   modelLengthUnit = null,
   engineerBaseline = null,
   isExtractingEngineerBaseline = false,
@@ -300,10 +306,12 @@ export function Sidebar({
                 downloadMode={downloadMode}
                 downloadError={downloadError}
                 onDownloadFullIfc={onDownloadFullIfc}
-                sanitaryRouteLimitations={sanitaryRouteLimitations}
                 demoFlowEnabled={demoFlowEnabled}
                 demoFloorOpened={demoFloorOpened}
                 sanitaryRouteCount={sanitaryRouteCount}
+                routingModel={routingModel}
+                branchRouteFloor={branchRouteFloor}
+                fixtureAssignments={fixtureAssignments}
                 modelLengthUnit={modelLengthUnit}
                 wetCoreStacks={wetCoreSuggestion?.stacks ?? null}
                 isSuggestingRisers={isSuggestingRisers}
@@ -319,6 +327,9 @@ export function Sidebar({
                 wetCoreSuggestion={wetCoreSuggestion}
                 riserStackExtents={riserStackExtents}
                 demoFlowEnabled={demoFlowEnabled}
+                routingModel={routingModel}
+                branchRouteFloor={branchRouteFloor}
+                fixtureAssignments={fixtureAssignments}
                 initialStoreyDecision={initialStoreyDecision}
                 storeyAlignments={storeyAlignments}
                 crossFileMerge={crossFileMerge}
