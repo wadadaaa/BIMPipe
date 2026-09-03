@@ -837,6 +837,22 @@ export function selectPreservedRisersOnResuggest(
   return state.risers.filter((riser) => preserved.has(riser.stackId))
 }
 
+/**
+ * Wet cores whose auto stack was moved by the user: the builder skips them on
+ * re-suggest (no fresh stack, no label consumed) so labels stay contiguous.
+ * Manual stacks have no core and never appear here.
+ */
+export function selectPreservedCoreIdsOnResuggest(
+  state: Pick<WorkspacePageState, 'risers' | 'adjustLog' | 'autoStackCoreIds'>,
+): Set<string> {
+  const preserved = new Set<string>()
+  for (const stackId of selectOverriddenStackIds(state)) {
+    const coreId = state.autoStackCoreIds.get(stackId)
+    if (coreId !== undefined) preserved.add(coreId)
+  }
+  return preserved
+}
+
 export interface MergeSuggestedRisersResult {
   /** Preserved stacks first (in their existing order), then the accepted new auto stacks. */
   risers: Riser[]

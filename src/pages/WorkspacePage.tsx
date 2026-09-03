@@ -41,6 +41,7 @@ import {
 import { getContinuityOverlayPresentation } from '@/viewer/continuityOverlayPresentation'
 import {
   createInitialWorkspacePageState,
+  selectPreservedCoreIdsOnResuggest,
   selectPreservedRisersOnResuggest,
   workspacePageReducer,
   type LinkedModelState,
@@ -865,10 +866,17 @@ export function WorkspacePage({
               Object.values(aggregation.fixturesByStoreyId).flat(),
               Object.values(aggregation.kitchensByStoreyId).flat(),
             )
-      // Labels continue after the preserved (manual / moved) stacks.
+      // Labels continue after the preserved (manual / moved) stacks; cores
+      // already served by a moved stack are skipped inside the builder so no
+      // label is consumed for a stack the merge would drop anyway.
       nextRiserLabelRef.current = getNextRiserLabelNumber(
         selectPreservedRisersOnResuggest({ risers: risersRef.current, adjustLog }),
       )
+      const preservedCoreIds = selectPreservedCoreIdsOnResuggest({
+        risers: risersRef.current,
+        adjustLog,
+        autoStackCoreIds,
+      })
       const result = buildWetCoreSuggestedRisers({
         storeys,
         sourceStoreyId,
@@ -885,6 +893,7 @@ export function WorkspacePage({
           buildingFixtures === null
             ? undefined
             : { buildingFixtures, planUnits: 'm', continuityMap: map, collectorStoreyId: null },
+        preservedCoreIds,
       })
       startTransition(() => {
         dispatch({

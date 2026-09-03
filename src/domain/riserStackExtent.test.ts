@@ -106,6 +106,29 @@ describe('computeRiserStackExtent', () => {
     expect(extent.reasons).toContain('no matching core on 3: found KITCHEN, anchor core is TOILETPAN')
   })
 
+  it('uses the wet-core membership fingerprint as the anchor when supplied, instead of the radius probe', () => {
+    // The stack was snapped next to a neighbouring basin on the anchor storey (1),
+    // so the radius probe reads TOILETPAN+WASHHANDBASIN and finds no match on 2.
+    const fixtures: StackExtentFixture[] = [
+      wc(GF),
+      wc(L1),
+      { storeyId: L1, kind: 'WASHHANDBASIN', x: STACK_XY.x + 1, z: STACK_XY.z },
+      wc(L2),
+      wc(L3),
+    ]
+    const byRadius = computeRiserStackExtent(baseInput({ fixtures }))
+    expect(byRadius.anchorCoreFingerprint).toBe('TOILETPAN+WASHHANDBASIN')
+    expect(byRadius.storeyIds).toEqual([B1, GF, L1])
+
+    const byMembership = computeRiserStackExtent(baseInput({ fixtures, anchorCoreFingerprint: 'TOILETPAN' }))
+    expect(byMembership.anchorCoreFingerprint).toBe('TOILETPAN')
+    expect(byMembership.storeyIds).toEqual([B1, GF, L1, L2, L3])
+    expect(byMembership.reasons[0]).toBe('anchor core on 1: TOILETPAN (wet-core membership)')
+
+    // Null behaves like "not supplied".
+    expect(computeRiserStackExtent(baseInput({ fixtures, anchorCoreFingerprint: null }))).toEqual(byRadius)
+  })
+
   it('ignores fixtures outside the core radius', () => {
     const farWc: StackExtentFixture = {
       storeyId: L2,

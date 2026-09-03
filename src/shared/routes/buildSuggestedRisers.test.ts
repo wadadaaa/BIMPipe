@@ -453,6 +453,68 @@ describe('buildWetCoreSuggestedRisers (V3 wet cores)', () => {
     expect(result.risers.every((riser) => !('snap' in riser) && !('placement' in riser))).toBe(true)
   })
 
+  it('skips cores whose moved stack is preserved without consuming a label (contiguous labels on re-suggest)', () => {
+    const labels: string[] = []
+    const labeler = makeLabeler()
+    const result = buildWetCoreSuggestedRisers({
+      storeys: metric,
+      sourceStoreyId: 2,
+      fixtures,
+      kitchens: [kitchen],
+      floorMeshes,
+      nextLabel: () => {
+        const label = labeler()
+        labels.push(label)
+        return label
+      },
+      wetCore: { planUnits: 'm' },
+      preservedCoreIds: new Set(['wet-core:2:1+2']),
+    })
+
+    // Only the second core and the kitchen get stacks; the labeler was called exactly twice.
+    expect(labels).toEqual(['R1', 'R2'])
+    expect(result.stacks.map((stack) => [stack.anchor, stack.stackLabel])).toEqual([
+      ['wet-core', 'R1'],
+      ['kitchen', 'R2'],
+    ])
+    expect(result.stacks[0].anchor === 'wet-core' && result.stacks[0].core.id).toBe('wet-core:2:3')
+    // Every core is still reported so fixture membership can route to the preserved stack.
+    expect(result.cores.map((core) => core.id)).toEqual(['wet-core:2:1+2', 'wet-core:2:3'])
+    expect(result.diagnostics).toContain(
+      'core TOILETPAN+WASHHANDBASIN (2 fixtures) keeps its moved stack; no new auto stack',
+    )
+  })
+
+  it('passes the wet core fingerprint to the stack extent so a snapped stack keeps its own core', () => {
+    // Building fixtures: the core's WC continues on storey GF and 2 at the same
+    // XY, but a basin sits next to the stack on the anchor storey only.
+    const buildingFixtures = toStackExtentFixtures(
+      [
+        fixtureAt(1, 'TOILETPAN', 20, 5),
+        { ...fixtureAt(4, 'WASHHANDBASIN', 20.5, 5), storeyId: 2 },
+        { ...fixtureAt(2, 'TOILETPAN', 20, 5), storeyId: 1 },
+        { ...fixtureAt(3, 'TOILETPAN', 20, 5), storeyId: 3 },
+      ],
+      [],
+    )
+    const result = buildWetCoreSuggestedRisers({
+      storeys: metric,
+      sourceStoreyId: 2,
+      fixtures: [fixtureAt(1, 'TOILETPAN', 20, 5)],
+      kitchens: [],
+      floorMeshes,
+      nextLabel: makeLabeler(),
+      wetCore: { planUnits: 'm' },
+      stackExtent: { buildingFixtures, planUnits: 'm' },
+    })
+    expect(result.stackExtents).toHaveLength(1)
+    const { extent } = result.stackExtents[0]
+    expect(extent.anchorCoreFingerprint).toBe('TOILETPAN')
+    expect(extent.reasons[0]).toBe('anchor core on 1: TOILETPAN (wet-core membership)')
+    // Storey 2 has a WC at the XY → matching core → spanned (GF, 1, 2).
+    expect(extent.storeyIds).toEqual([1, 2, 3])
+  })
+
   it('is deterministic regardless of fixture input order', () => {
     const run = (input: Fixture[]) =>
       buildWetCoreSuggestedRisers({

@@ -86,6 +86,14 @@ export interface RiserStackExtentInput {
   collectorStoreyId?: StoreyId | null
   /** Core radius in `planUnits`; defaults to the 2.6 m constant pair. */
   sameCoreRadius?: number
+  /**
+   * Anchor core fingerprint from wet-core membership (`WetCore.kindsFingerprint`,
+   * same `KIND+KIND` format). When supplied it replaces the radius-derived
+   * anchor fingerprint, so a stack snapped away from its core centroid keeps
+   * the core it actually serves; the upward walk still probes each storey by
+   * radius at the stack XY.
+   */
+  anchorCoreFingerprint?: string | null
 }
 
 export interface RiserStackExtent {
@@ -153,10 +161,13 @@ export function computeRiserStackExtent(input: RiserStackExtentInput): RiserStac
     input.sameCoreRadius ?? (input.planUnits === 'mm' ? SAME_CORE_RADIUS_MM : SAME_CORE_RADIUS_M)
   const reasons: string[] = []
 
-  const anchorCore = buildCoreFingerprint(input.fixtures, anchor.id, input.stackXY, radius)
+  const membershipCore = input.anchorCoreFingerprint ?? null
+  const anchorCore = membershipCore ?? buildCoreFingerprint(input.fixtures, anchor.id, input.stackXY, radius)
   reasons.push(
-    `anchor core on ${anchor.name}: ${describeCore(anchorCore)} ` +
-      `(fixture kinds within ${formatLength(radius, input.planUnits)} of the stack position)`,
+    membershipCore === null
+      ? `anchor core on ${anchor.name}: ${describeCore(anchorCore)} ` +
+          `(fixture kinds within ${formatLength(radius, input.planUnits)} of the stack position)`
+      : `anchor core on ${anchor.name}: ${describeCore(anchorCore)} (wet-core membership)`,
   )
 
   const obstructions = createObstructionProbe(input.continuityMap, input.planUnits, reasons)

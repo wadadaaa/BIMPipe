@@ -229,6 +229,12 @@ export interface BuildWetCoreSuggestedRisersOptions {
   nextLabel: () => string
   wetCore: WetCoreSuggestOptions
   stackExtent?: StackExtentOptions
+  /**
+   * Cores already represented by a preserved (moved) stack from an earlier
+   * suggest. No stack is built and no label consumed for them; they still
+   * appear in `cores` so fixture membership keeps routing to the moved stack.
+   */
+  preservedCoreIds?: ReadonlySet<string>
 }
 
 /**
@@ -270,11 +276,23 @@ export function buildWetCoreSuggestedRisers(options: BuildWetCoreSuggestedRisers
   const stacks: WetCoreSuggestedStack[] = []
   const snapOutcomes: SuggestedRiserSnapOutcome[] = []
   const stackExtents: SuggestedRiserStackExtent[] = []
+  const diagnostics = [...suggestion.diagnostics]
+  const preservedCoreIds = options.preservedCoreIds ?? new Set<string>()
   for (const position of suggestion.positions) {
+    // A core whose stack the user moved keeps that stack (overrides win); no
+    // fresh auto stack is built and no label is consumed, so labels stay
+    // contiguous across re-suggests. Skipped BEFORE `nextLabel()`.
+    if (position.anchor === 'wet-core' && preservedCoreIds.has(position.core.id)) {
+      diagnostics.push(
+        `core ${position.core.kindsFingerprint} (${position.core.memberExpressIds.length} fixtures) keeps its moved stack; no new auto stack`,
+      )
+      continue
+    }
     const built = buildStackForPosition(
       { storeys, sourceStoreyId, targetStoreys, demoRuntime, stackExtent },
       position,
       nextLabel(),
+      position.anchor === 'wet-core' ? position.core.kindsFingerprint : null,
     )
     risers.push(...built.risers)
     if (built.extent !== null) stackExtents.push({ stackLabel: built.stackLabel, extent: built.extent })
@@ -284,7 +302,7 @@ export function buildWetCoreSuggestedRisers(options: BuildWetCoreSuggestedRisers
     const snap = toSnapOutcome(position)
     if (snap !== null) snapOutcomes.push({ stackLabel: built.stackLabel, snap })
   }
-  return { risers, stacks, cores: suggestion.cores, snapOutcomes, stackExtents, diagnostics: suggestion.diagnostics }
+  return { risers, stacks, cores: suggestion.cores, snapOutcomes, stackExtents, diagnostics }
 }
 
 function toWetCoreStack(
@@ -349,6 +367,8 @@ function buildStackForPosition(
   context: StackBuildContext,
   position: Point3D,
   stackLabel: string,
+  /** Wet-core anchor fingerprint; null for toilet/kitchen-anchored stacks (radius-derived). */
+  anchorCoreFingerprint: string | null = null,
 ): { risers: Riser[]; stackLabel: string; extent: RiserStackExtent | null } {
   const { storeys, sourceStoreyId, demoRuntime, stackExtent } = context
   let stackStoreys = context.targetStoreys
@@ -365,6 +385,7 @@ function buildStackForPosition(
       planUnits: stackExtent.planUnits,
       continuityMap: stackExtent.continuityMap,
       collectorStoreyId: stackExtent.collectorStoreyId,
+      anchorCoreFingerprint,
     })
     stackStoreys = resolveExtentStoreys(storeys, extent, demoRuntime)
   }

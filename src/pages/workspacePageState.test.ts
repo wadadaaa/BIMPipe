@@ -5,6 +5,7 @@ import {
   createInitialWorkspacePageState,
   defaultContinuitySnapEnabled,
   initialWorkspacePageState,
+  selectPreservedCoreIdsOnResuggest,
   selectPreservedRisersOnResuggest,
   workspacePageReducer,
   type WorkspacePageState,
@@ -430,6 +431,38 @@ describe('workspacePageReducer riser actions', () => {
       ts: TS,
     })
     expect(selectPreservedRisersOnResuggest(moved).map((riser) => riser.id)).toEqual(['auto-1', 'auto-1b', 'manual-1'])
+  })
+
+  it('selectPreservedCoreIdsOnResuggest names the cores of moved auto stacks only (manual stacks have no core)', () => {
+    const first = workspacePageReducer(
+      { ...makeLoadedState(), risers: [] },
+      {
+        type: 'risers-suggested',
+        risers: [
+          makeRiser({ id: 'a-2', stackId: 'stack-a', stackLabel: 'R1', storeyId: 2, source: 'detected' }),
+          makeRiser({ id: 'b-2', stackId: 'stack-b', stackLabel: 'R2', storeyId: 2, source: 'detected' }),
+        ],
+        stackCoreIds: [
+          { stackId: 'stack-a', coreId: 'core-1' },
+          { stackId: 'stack-b', coreId: 'core-2' },
+        ],
+      },
+    )
+    expect(selectPreservedCoreIdsOnResuggest(first)).toEqual(new Set())
+
+    const withManual = workspacePageReducer(first, {
+      type: 'riser-stack-added',
+      stackRisers: [makeRiser({ id: 'm-2', stackId: 'stack-m', stackLabel: 'R3', storeyId: 2, source: 'manual' })],
+      ts: TS,
+    })
+    const moved = workspacePageReducer(withManual, {
+      type: 'riser-move-committed',
+      riserId: 'b-2',
+      from: { x: 0, y: 0, z: 0 },
+      to: { x: 4, y: 0, z: 4 },
+      ts: TS,
+    })
+    expect(selectPreservedCoreIdsOnResuggest(moved)).toEqual(new Set(['core-2']))
   })
 
   it('suggest lifecycle: started → progress → suggested/cancelled/failed are explicit', () => {
