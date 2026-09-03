@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { DemoConfig } from '@/shared/demoConfig'
 import type { ContinuityMap } from '@/domain/continuityMap'
-import type { Fixture, Storey } from '@/domain/types'
-import { buildSuggestedRisers, buildSuggestedRisersWithSnap } from './buildSuggestedRisers'
+import { toStackExtentFixtures } from '@/domain/riserStackExtent'
+import type { Fixture, Riser, Storey } from '@/domain/types'
+import {
+  buildSuggestedRisers,
+  buildSuggestedRisersWithSnap,
+  type StackExtentOptions,
+} from './buildSuggestedRisers'
 
 const storeys: Storey[] = [
   { id: 1, name: 'קומה 1', elevation: 300, modelId: 'model-1' },
@@ -172,5 +177,156 @@ describe('buildSuggestedRisersWithSnap (W5 continuity flag)', () => {
     expect(risers.every((riser) => riser.position.x === 100 && riser.position.z === 100)).toBe(true)
     expect(snapOutcomes).toHaveLength(1)
     expect(snapOutcomes[0].snap.status).toBe('snapMiss')
+  })
+})
+
+describe('buildSuggestedRisersWithSnap (V4 stack extent)', () => {
+  // Tower: basement, ground, 1..5, technical roof. WCs at the same XY on
+  // ground..3; storey 4 has a WC elsewhere on the plan, 5 has none.
+  const tower: Storey[] = [
+    { id: 10, name: 'B1', elevation: -3, modelId: 'model-1' },
+    { id: 11, name: 'GF', elevation: 0, modelId: 'model-1' },
+    { id: 12, name: '1', elevation: 3, modelId: 'model-1' },
+    { id: 13, name: '2', elevation: 6, modelId: 'model-1' },
+    { id: 14, name: '3', elevation: 9, modelId: 'model-1' },
+    { id: 15, name: '4', elevation: 12, modelId: 'model-1' },
+    { id: 16, name: '5', elevation: 15, modelId: 'model-1' },
+    { id: 17, name: 'R1', elevation: 18, modelId: 'model-1' },
+  ]
+  const wcAt = (storeyId: number, x: number, elevation: number): Fixture => ({
+    expressId: storeyId * 100,
+    name: `WC-${storeyId}`,
+    kind: 'TOILETPAN',
+    storeyId,
+    position: { x, y: elevation, z: 5 },
+  })
+  const buildingFixtures: Fixture[] = [
+    wcAt(11, 10, 0),
+    wcAt(12, 10.3, 3),
+    wcAt(13, 9.8, 6),
+    wcAt(14, 10.1, 9),
+    wcAt(15, 30, 12), // different core position → does not continue the stack
+  ]
+  const sourceFixtures = buildingFixtures.filter((fixture) => fixture.storeyId === 12)
+  const extentOptions: StackExtentOptions = {
+    buildingFixtures: toStackExtentFixtures(buildingFixtures, []),
+    planUnits: 'm',
+  }
+
+  it('without the option, every eligible storey is spanned and no extents are reported (unchanged behaviour)', () => {
+    const { risers, stackExtents } = buildSuggestedRisersWithSnap(
+      tower, 12, sourceFixtures, [], null, makeLabeler(), { enabled: false },
+    )
+
+    // Eligibility-based list: B1 (basement) and R1 (no roof keyword, so classified as the
+    // penthouse) are excluded; everything else is spanned, including 4 and 5.
+    expect(risers.map((riser) => riser.storeyId)).toEqual([11, 12, 13, 14, 15, 16])
+    expect(stackExtents).toEqual([])
+  })
+
+  it('with the option, the stack runs from the collector to the last storey with a matching core', () => {
+    const { risers, stackExtents } = buildSuggestedRisersWithSnap(
+      tower, 12, sourceFixtures, [], null, makeLabeler(), { enabled: false }, undefined, extentOptions,
+    )
+
+    // Collector = B1 (basements count); up through 3; 4's WC is 20 m away → stop; 5/R1 never reached.
+    expect(risers.map((riser) => riser.storeyId)).toEqual([10, 11, 12, 13, 14])
+    expect(risers.every((riser) => riser.source === 'detected')).toBe(true)
+    expect(risers.every((riser) => riser.levelRange?.from === 10 && riser.levelRange?.to === 14)).toBe(true)
+    expect(new Set(risers.map((riser) => riser.stackId)).size).toBe(1)
+    expect(stackExtents).toHaveLength(1)
+    expect(stackExtents[0].stackLabel).toBe('R1')
+    expect(stackExtents[0].extent).toMatchObject({
+      storeyIds: [10, 11, 12, 13, 14],
+      collectorStoreyId: 10,
+      topStoreyId: 14,
+      anchorCoreFingerprint: 'TOILETPAN',
+    })
+    expect(stackExtents[0].extent.reasons.some((reason) => reason.startsWith('no matching core on 4'))).toBe(true)
+  })
+
+  it('honours the collector override and still applies demo floor exclusions', () => {
+    const config: DemoConfig = {
+      ...demoConfig,
+      scope: { includedFloors: ['1'], excludedFloors: ['GF'] },
+    }
+    const { risers, stackExtents } = buildSuggestedRisersWithSnap(
+      tower, 12, sourceFixtures, [], null, makeLabeler(), { enabled: true, config }, undefined,
+      { ...extentOptions, collectorStoreyId: 11 },
+    )
+
+    // Extent = GF..3 (collector override GF); GF is demo-excluded, so the risers skip it
+    // while the extent decision itself still records GF as the collector.
+    expect(stackExtents[0].extent.storeyIds).toEqual([11, 12, 13, 14])
+    expect(risers.map((riser) => riser.storeyId)).toEqual([12, 13, 14])
+  })
+
+  it('evaluates the extent at the snapped position when both options are on', () => {
+    // Shaft candidate 0.5 m from the anchor WC on storey 1; the extent must be
+    // computed at the snapped XY (still within the 2.6 m core radius here).
+    const map: ContinuityMap = {
+      units: 'm',
+      cellSize: 0.25,
+      grids: [],
+      shaftCandidates: [
+        {
+          id: 'shaft-space:12:space:1',
+          source: 'shaft-named-space',
+          center: { x: 10.8, z: 5 },
+          bounds: { minX: 10.6, maxX: 11, minZ: 4.8, maxZ: 5.2 },
+          polygon: null,
+          storeyIds: [12],
+        },
+      ],
+      diagnostics: [],
+    }
+    const { risers, snapOutcomes, stackExtents } = buildSuggestedRisersWithSnap(
+      tower, 12, sourceFixtures, [], null, makeLabeler(), { enabled: false }, { map },
+      { ...extentOptions, continuityMap: map },
+    )
+
+    expect(snapOutcomes[0].snap.status).toBe('snapped')
+    expect(risers.every((riser) => riser.position.x === 10.8)).toBe(true)
+    expect(stackExtents[0].extent.storeyIds).toEqual([10, 11, 12, 13, 14])
+  })
+
+  it('leaves manual overrides untouched: the extent only shapes the auto stacks it creates', () => {
+    // A manual stack placed earlier spans floors the extent would never choose
+    // (5 and R1). The suggest step neither reads nor rewrites it: merging the
+    // page's existing manual risers with the new auto stacks keeps every manual
+    // entry byte-identical, and no auto riser ever carries `source: 'manual'`.
+    const manualStack: Riser[] = tower.map((storey) => ({
+      id: `manual-${storey.id}`,
+      stackId: 'manual-stack',
+      stackLabel: 'M1',
+      storeyId: storey.id,
+      position: { x: 40, y: storey.elevation, z: 40 },
+      source: 'manual',
+      systemType: 'sanitary',
+    }))
+    const manualSnapshot = JSON.parse(JSON.stringify(manualStack)) as Riser[]
+
+    const { risers } = buildSuggestedRisersWithSnap(
+      tower, 12, sourceFixtures, [], null, makeLabeler(), { enabled: false }, undefined, extentOptions,
+    )
+    const merged = [...manualStack, ...risers]
+
+    expect(manualStack).toEqual(manualSnapshot)
+    expect(merged.filter((riser) => riser.source === 'manual')).toEqual(manualSnapshot)
+    expect(merged.filter((riser) => riser.source === 'manual').map((riser) => riser.storeyId)).toContain(17)
+    expect(risers.every((riser) => riser.source === 'detected')).toBe(true)
+  })
+
+  it('is deterministic: two runs produce identical storey lists and reasons', () => {
+    const run = () =>
+      buildSuggestedRisersWithSnap(
+        tower, 12, sourceFixtures, [], null, makeLabeler(), { enabled: false }, undefined, extentOptions,
+      )
+    const first = run()
+    const second = run()
+    expect(first.stackExtents).toEqual(second.stackExtents)
+    expect(first.risers.map((riser) => [riser.storeyId, riser.position])).toEqual(
+      second.risers.map((riser) => [riser.storeyId, riser.position]),
+    )
   })
 })

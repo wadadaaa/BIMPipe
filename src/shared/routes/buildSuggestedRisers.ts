@@ -1,4 +1,11 @@
 import type { Fixture, KitchenArea, Riser, Storey, StoreyId } from '@/domain/types'
+import type { ContinuityMap } from '@/domain/continuityMap'
+import {
+  computeRiserStackExtent,
+  type RiserStackExtent,
+  type StackExtentFixture,
+  type StackExtentPlanUnits,
+} from '@/domain/riserStackExtent'
 import type { FloorMeshes } from '@/shared/ifc/extractFloorMeshes'
 import { buildRiserStack } from './buildRiserStacks'
 import { getEligibleStoreyIdsForAutoRisers } from './floorClassification'
@@ -23,7 +30,9 @@ import {
  * The demo scope only constrains which floors' fixtures drive placement (where the riser lands
  * in plan). A riser is a physical vertical shaft, so its stack spans every eligible floor of the
  * building, not just the demo-scoped floors — otherwise risers placed from floor 2 would vanish
- * when the user inspects an out-of-scope floor (e.g. קומה 3).
+ * when the user inspects an out-of-scope floor (e.g. קומה 3). Callers that can supply
+ * whole-building fixtures can bound each stack instead via the `stackExtent` option of
+ * {@link buildSuggestedRisersWithSnap} (V4).
  *
  * `nextLabel` is injected by the caller (the page owns the label counter), keeping this a pure,
  * dependency-free domain function.
@@ -54,6 +63,30 @@ export interface SuggestedRiserSnapOutcome {
   snap: RiserContinuitySnap
 }
 
+/**
+ * Per-stack vertical extent (V4). When supplied, each auto-suggested stack
+ * spans the storeys chosen by `computeRiserStackExtent` (collector → last
+ * storey with a matching core, never into roof/technical storeys) instead of
+ * every eligible storey of the building. Requires positioned fixtures for the
+ * WHOLE building, not just the source floor — see `toStackExtentFixtures`.
+ */
+export interface StackExtentOptions {
+  /** Every positioned fixture/kitchen of the building, all storeys. */
+  buildingFixtures: StackExtentFixture[]
+  /** Unit of the plan coordinates in `buildingFixtures` and the suggested positions. */
+  planUnits: StackExtentPlanUnits
+  /** W5 continuity map for the obstruction bound; omitted → bound skipped. */
+  continuityMap?: ContinuityMap | null
+  /** Explicit collector storey; omitted → lowest non-technical storey. */
+  collectorStoreyId?: StoreyId | null
+}
+
+/** Extent decision of one suggested riser stack (V4), for the UI/debug JSON. */
+export interface SuggestedRiserStackExtent {
+  stackLabel: string
+  extent: RiserStackExtent
+}
+
 export interface SuggestedRisersWithSnap {
   risers: Riser[]
   /**
@@ -62,12 +95,21 @@ export interface SuggestedRisersWithSnap {
    * reasons — never silently dropped.
    */
   snapOutcomes: SuggestedRiserSnapOutcome[]
+  /**
+   * One entry per suggested stack when `stackExtent` was supplied (with the
+   * reasons for every stop), empty otherwise.
+   */
+  stackExtents: SuggestedRiserStackExtent[]
 }
 
 /**
  * Same as {@link buildSuggestedRisers} but optionally snaps each suggestion to
- * the continuity map (W5). With `continuitySnap` undefined the riser output is
- * byte-identical to the plain function (the domain flag guarantees it).
+ * the continuity map (W5) and/or bounds each stack's vertical extent (V4).
+ * With `continuitySnap` and `stackExtent` undefined the riser output is
+ * byte-identical to the plain function.
+ *
+ * Only auto stacks are produced here (`source: 'detected'`); manual risers are
+ * never an input, so the extent can never touch them.
  */
 export function buildSuggestedRisersWithSnap(
   storeys: Storey[],
@@ -78,6 +120,7 @@ export function buildSuggestedRisersWithSnap(
   nextLabel: () => string,
   demoRuntime: ReturnType<typeof getDemoRuntimeConfig>,
   continuitySnap?: ContinuitySnapOptions,
+  stackExtent?: StackExtentOptions,
 ): SuggestedRisersWithSnap {
   const ruleProfile = DEFAULT_RISER_PLACEMENT_RULE_PROFILE
   const floorPlanBounds = floorMeshes
@@ -117,12 +160,30 @@ export function buildSuggestedRisersWithSnap(
 
   const risers: Riser[] = []
   const snapOutcomes: SuggestedRiserSnapOutcome[] = []
+  const stackExtents: SuggestedRiserStackExtent[] = []
   for (const position of positions) {
     const stackLabel = nextLabel()
+    let stackStoreys = targetStoreys
+    if (stackExtent !== undefined) {
+      // The extent (after snapping, so it is evaluated at the final XY)
+      // replaces the eligibility-based storey list; demo exclusions still
+      // apply because they are explicit user configuration.
+      const extent = computeRiserStackExtent({
+        storeys,
+        fixtures: stackExtent.buildingFixtures,
+        anchorStoreyId: sourceStoreyId,
+        stackXY: { x: position.x, z: position.z },
+        planUnits: stackExtent.planUnits,
+        continuityMap: stackExtent.continuityMap,
+        collectorStoreyId: stackExtent.collectorStoreyId,
+      })
+      stackExtents.push({ stackLabel, extent })
+      stackStoreys = resolveExtentStoreys(storeys, extent, demoRuntime)
+    }
     // Pass a plain point so the optional `snap` field never leaks into risers.
     risers.push(
       ...buildRiserStack(
-        targetStoreys,
+        stackStoreys,
         sourceStoreyId,
         { x: position.x, y: position.y, z: position.z },
         stackLabel,
@@ -131,5 +192,20 @@ export function buildSuggestedRisersWithSnap(
     )
     if (position.snap !== undefined) snapOutcomes.push({ stackLabel, snap: position.snap })
   }
-  return { risers, snapOutcomes }
+  return { risers, snapOutcomes, stackExtents }
+}
+
+/** Storey objects for the extent's ids (bottom → top), minus demo-excluded floors. */
+function resolveExtentStoreys(
+  storeys: Storey[],
+  extent: RiserStackExtent,
+  demoRuntime: ReturnType<typeof getDemoRuntimeConfig>,
+): Storey[] {
+  const byId = new Map(storeys.map((storey) => [storey.id, storey]))
+  return extent.storeyIds.flatMap((storeyId) => {
+    const storey = byId.get(storeyId)
+    if (storey === undefined) return []
+    if (demoRuntime.enabled && isStoreyExcludedFromDemoScope(storey.name, demoRuntime.config)) return []
+    return [storey]
+  })
 }
