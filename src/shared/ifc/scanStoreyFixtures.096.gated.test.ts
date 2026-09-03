@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { buildFixtureFingerprint, rankInitialStoreyFamilies } from '@/domain/chooseInitialStorey'
 import { parseStoreys } from './parseStoreys'
 import { chooseInitialStoreyByFixtures, scanStoreyFixtureCounts } from './scanStoreyFixtures'
 
@@ -36,12 +37,42 @@ describe.skipIf(!existsSync(IFC_096_PATH))('096-P initial storey chooser (gated:
 
         // Member of the residential group; implicitly excludes R2/R0/R1, GF,
         // B1 and Sea Level. Observed data note: in 096-P fixtures exist on
-        // only five storeys (Sea Level: 2 WCs, 01: 11, 08: 3, 37: 3, 38: 1 —
-        // cross-checked against full detectFixtures), so the largest exact-
-        // fingerprint group is {08, 37} and the chooser picks "08". Sea Level
-        // has genuine toilets but loses to the larger residential group.
+        // only five storeys, all with distinct fingerprints since the V0b
+        // classifier fix (Sea Level: 2 WCs; 01: 11 WCs + 2 basins; 08: 2 WCs +
+        // 1 basin; 37: 3 WCs; 38: 1 WC). The weighted chooser (family weight =
+        // storeys × fixtures per storey) must therefore open the reference
+        // floor "01" (weight 13) — the expected set also admits 09/10 (tower
+        // vertical runs) should the scan ever attribute fixtures there — and
+        // never fall back to the lowest fixture-bearing storey "Sea Level".
         expect(decision.storeyName).toMatch(RESIDENTIAL_NAME)
-        expect(['R2', 'R0', 'R1']).not.toContain(decision.storeyName)
+        expect(['01', '09', '10']).toContain(decision.storeyName)
+        expect(['R2', 'R0', 'R1', 'Sea Level']).not.toContain(decision.storeyName)
+
+        // Full ranking for the report: the reference floor must lead by a
+        // clear margin over every other fixture-bearing storey.
+        const allCounts = await scanStoreyFixtureCounts(api, modelId, storeys.map((storey) => storey.id))
+        const ranked = rankInitialStoreyFamilies(
+          storeys.map((storey) => ({
+            id: storey.id,
+            name: storey.name,
+            elevation: storey.elevation,
+            toiletCount: allCounts.get(storey.id)?.toiletCount ?? 0,
+            fixtureFingerprint: buildFixtureFingerprint(allCounts.get(storey.id)?.countsByKind ?? {}),
+          })),
+        )
+        console.info(
+          '[096 chooser] top families: ' +
+            ranked
+              .slice(0, 3)
+              .map(
+                (family) =>
+                  `${family.members.map((member) => member.name).join('+')}=${family.weight}` +
+                  ` (${family.members.length}×${family.meanFixturesPerStorey}, ${family.toiletCount} WC)`,
+              )
+              .join(', '),
+        )
+        expect(ranked[0].members.map((member) => member.name)).toEqual([decision.storeyName])
+        expect(ranked[0].weight).toBeGreaterThan(ranked[1].weight * 2)
 
         // Determinism: a second scan+choose pass yields the identical choice.
         const second = await chooseInitialStoreyByFixtures(api, modelId, storeys)
