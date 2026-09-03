@@ -322,8 +322,8 @@ describe('detectFixtures', () => {
     const api = makeApi(
       [{ relatingStoreyId: 1, elementIds: [1, 2] }],
       [
-        asFlowTerminal(1, 'Plumbing Fixtures : PA_Sanitary-Sink-WC-2D-NH : כיור אובלי תלוי', 'NOTDEFINED'),
-        asFlowTerminal(2, 'Plumbing Fixtures : PA_Sanitary-WC-2D-NH : אסלה תלויה', 'NOTDEFINED'),
+        asFlowTerminal(1, 'Plumbing Fixtures : LIB_Sanitary-Sink-WC-2D-NH : כיור אובלי תלוי', 'NOTDEFINED'),
+        asFlowTerminal(2, 'Plumbing Fixtures : LIB_Sanitary-WC-2D-NH : אסלה תלויה', 'NOTDEFINED'),
       ],
     )
     const result = await detectFixtures(api, 0, 1)
@@ -359,7 +359,7 @@ describe('detectFixtures', () => {
       [
         asFlowTerminal(1, 'Fire Protection : Sprinkler-Pendent : K5.6', 'NOTDEFINED'),
         asFlowTerminal(2, 'Fire Protection : AR-\uFEFFHydrant-Fire-Cabinet-3D : Type 02', 'NOTDEFINED'),
-        asProxy(3, 'Mechanical Equipment : PA_Fire-Hose_Reel : Standard'),
+        asProxy(3, 'Mechanical Equipment : LIB_Fire-Hose_Reel : Standard'),
         asFlowTerminal(4, 'Fire Protection : SPR Head : Upright', 'NOTDEFINED'),
       ],
     )
@@ -370,9 +370,9 @@ describe('detectFixtures', () => {
     const api = makeApi(
       [{ relatingStoreyId: 1, elementIds: [1, 2, 3, 4] }],
       [
-        asFlowTerminal(1, 'Plumbing Fixtures : PA_Sanitary-P_Trap-Generic : 1-1/4" - 150mm - סיפון מתכת', 'NOTDEFINED'),
-        asFlowTerminal(2, 'Plumbing Fixtures : PA_Drain-Floor_Trap-6x4 : 6x4 - מ.ר', 'NOTDEFINED'),
-        asFlowTerminal(3, 'Plumbing Fixtures : PA_Drain-Floor_Drain-Drop-4inch : 4" - ק.ב.נ', 'NOTDEFINED'),
+        asFlowTerminal(1, 'Plumbing Fixtures : LIB_Sanitary-P_Trap-Generic : 1-1/4" - 150mm - סיפון מתכת', 'NOTDEFINED'),
+        asFlowTerminal(2, 'Plumbing Fixtures : LIB_Drain-Floor_Trap-6x4 : 6x4 - מ.ר', 'NOTDEFINED'),
+        asFlowTerminal(3, 'Plumbing Fixtures : LIB_Drain-Floor_Drain-Drop-4inch : 4" - ק.ב.נ', 'NOTDEFINED'),
         asSanitary(4, 'P-Trap 40mm', 'NOTDEFINED'),
       ],
     )
@@ -629,13 +629,13 @@ describe('classifyFixtureText (ordered name rules)', () => {
 
   const cases: Array<[string, FixtureTextClassification]> = [
     // basin/sink evidence wins over a bare WC token
-    ['PA_Sanitary-Sink-WC-2D-NH', fixture('SINK')],
-    ['PA_Sanitary-Sink-WC-2D-NH : כיור אובלי תלוי', fixture('WASHHANDBASIN')],
+    ['LIB_Sanitary-Sink-WC-2D-NH', fixture('SINK')],
+    ['LIB_Sanitary-Sink-WC-2D-NH : כיור אובלי תלוי', fixture('WASHHANDBASIN')],
     ['Basin WC', fixture('WASHHANDBASIN')],
     ['Sink WC', fixture('SINK')],
     // toilets, English and Hebrew (absolute + construct form)
-    ['PA_Sanitary-WC-2D-NH : אסלה תלויה', fixture('TOILETPAN')],
-    ['PA_Sanitary-WC-2D-NH : אסלת נכים', fixture('TOILETPAN')],
+    ['LIB_Sanitary-WC-2D-NH : אסלה תלויה', fixture('TOILETPAN')],
+    ['LIB_Sanitary-WC-2D-NH : אסלת נכים', fixture('TOILETPAN')],
     ['AR-Disabled-Toilet-3D : Type-01', fixture('TOILETPAN')],
     ['AR-MMM-Chemical-WC-Wall-3D : Type 01', fixture('TOILETPAN')],
     ['Toilet-Commercial-Wall-3D1 : 15" Seat Height', fixture('TOILETPAN')],
@@ -644,7 +644,7 @@ describe('classifyFixtureText (ordered name rules)', () => {
     ['Sinks', fixture('SINK')],
     ['AR-Multi-Sinks-3D : 5 Sinks', fixture('SINK')],
     ['AR-Multi-Sinks-3D : 4 Sinks', fixture('SINK')],
-    ['PA_Sanitary-SlopSink-2D-NH : עביט שפכין', fixture('SINK')],
+    ['LIB_Sanitary-SlopSink-2D-NH : עביט שפכין', fixture('SINK')],
     ['Kitchen sink', fixture('SINK')],
     // accessories are not fixtures ...
     ['AR-Flushing-Tank-for-Toilet-3D : Type 01', excluded('accessory')],
@@ -653,24 +653,24 @@ describe('classifyFixtureText (ordered name rules)', () => {
     ['Cistern', excluded('accessory')],
     ['Cistern for WC', excluded('accessory')],
     ['ניאגרה', excluded('accessory')],
-    ['PA_Sanitary-P_Trap-Generic : 1-1/4" - 150mm - סיפון מתכת', excluded('accessory')],
+    ['LIB_Sanitary-P_Trap-Generic : 1-1/4" - 150mm - סיפון מתכת', excluded('accessory')],
     ['P-Trap 40mm', excluded('accessory')],
     // ... unless the host fixture is named first (variant descriptor, not an accessory)
     ['M_Water Closet - Flush Tank:Private - 6.1 Lpf', fixture('TOILETPAN')],
     ['Toilet with cistern', fixture('TOILETPAN')],
     ['Sink with bottle trap', fixture('SINK')],
     // drainage points follow the floor-drain policy
-    ['PA_Drain-Floor_Trap-6x4_8x4-NH : 6x4 - מ.ר', excluded('floor-drain')],
-    ['PA_Drain-Floor_Drain-4x2-NH : 4x2 - ק.ב', excluded('floor-drain')],
-    ['PA_Drain-Floor_Drain-Drop-4inch-NH : 4" - ק.ב.נ', excluded('floor-drain')],
+    ['LIB_Drain-Floor_Trap-6x4_8x4-NH : 6x4 - מ.ר', excluded('floor-drain')],
+    ['LIB_Drain-Floor_Drain-4x2-NH : 4x2 - ק.ב', excluded('floor-drain')],
+    ['LIB_Drain-Floor_Drain-Drop-4inch-NH : 4" - ק.ב.נ', excluded('floor-drain')],
     ['Floor drain 50mm', excluded('floor-drain')],
-    ['PA_Drain-Roof_Balcony_Vertical_Outlet : 70mm - נקז כפול למרפסת', excluded('floor-drain')],
+    ['LIB_Drain-Roof_Balcony_Vertical_Outlet : 70mm - נקז כפול למרפסת', excluded('floor-drain')],
     // fire protection never becomes sanitary
     ['Fire Protection : Sprinkler-Pendent : K5.6', excluded('fire-protection')],
     ['SPR Head Upright', excluded('fire-protection')],
     ['Fire Protection : AR-\uFEFF\uFEFFHydrant-Fire-Cabinet-3D : Type 02', excluded('fire-protection')],
-    ['Mechanical Equipment : PA_Fire-Hose_Reel : Standard', excluded('fire-protection')],
-    ['PA_Fire-Sprinkler_Station : 4"-ראש מערכת ספרינקלר', excluded('fire-protection')],
+    ['Mechanical Equipment : LIB_Fire-Hose_Reel : Standard', excluded('fire-protection')],
+    ['LIB_Fire-Sprinkler_Station : 4"-ראש מערכת ספרינקלר', excluded('fire-protection')],
     // other kinds
     ['AR-Plumbing-Urinal-3D : Type 01', fixture('URINAL')],
     ['Bathtub', fixture('BATH')],
