@@ -6,7 +6,7 @@ Privacy rule: `external/` and `refs/` hold private client data and are never com
 
 | Task | Status | Notes |
 | --- | --- | --- |
-| V0a — Tower recovery from federated export (tools/) | 🔄 | worker running |
+| V0a — Tower recovery from federated export (tools/) | ✅ | commit `9380e55`; tower IS modelled on L08–L29; band L10–L12 extracted (103 MB, web-ifc-validated); no sanitary band exists there (details below) |
 | V0b — detectFixtures: SHBJ name patterns | ✅ | commit `f93e726`; SA L04 21→11 toilets + 10 basins; exposed a chooser tie-break gap → pulled V6 forward (details below) |
 | V0c — Frame: context WCS + TrueNorth, envelope 64, >500 MB message | 🔄 | worker running |
 | V1 — Engineer risers, honest definition | ⏳ | after V0 |
@@ -15,12 +15,16 @@ Privacy rule: `external/` and `refs/` hold private client data and are never com
 | V4 — Stack extent | ⏳ | after V0 |
 | V5 — One routing model | ⏳ | UI lane, after V3 |
 | V6 — Auto-select weighting | 🔄 | pulled forward (domain-only, `chooseInitialStorey`) because V0b's corrected counts broke the 096 gated chooser test |
-| V7 — Tower-band acceptance | ⏳ | last, only if V0a recovered a band |
+| V7 — Tower-band acceptance | ⏳ | last; band exists → applicable, using the architect-placed fixtures of the band (the sanitary model has none on those storeys) |
 | Push | ⏳ | when all green |
 
 ## Goal 3 milestones
 
 (entries are appended per task as they land)
+
+### V0a — Federated export triage ✅ (2026-09-03, commit `9380e55`)
+
+Added stdlib-only streaming tools under `tools/` (`ifc-federated-census.py`, `ifc-extract-storey-band.py`, shared `ifc_step_index.py`/`ifc_spatial.py`, README). The census indexes a 1.45 GB / 26.1 M-entity IFC2X3 federated export in ~12 s with <800 MB RSS and reports, per `IfcBuilding` and per storey, elevations and element counts by category (walls, curtain walls, slabs, columns, beams, openings, doors, windows, spaces, flow terminals/segments/fittings, furnishing, members/plates), resolving aggregated parts and openings to their host storey. Result: the residential-tower architecture building (26 storeys) **is fully modelled on L08–L29** (per floor ≈77 walls, 25 curtain walls, 9 slabs, 43 openings, 40 doors, 16 sanitary flow terminals — toilets, urinals, multi-sink units); it has no columns/beams/windows/spaces above L07, and the structural building is empty above L07. The host sanitary building has zero elements above L09, so no sanitary band exists for the typical floors. The extractor cut the typical band L10–L12 (elev 4200/4600/5000 cm) into a standalone 103 MB IFC2X3 file (1.86 M entities, original ids, closure over all forward refs, relationships rewritten to the selection, 0 dangling refs) in ~21 s cold / ~11 s cached, deterministic output. web-ifc (Node) opens it: 3 storeys, element counts equal to the census (737/737/738), 1,999 meshes / 3.0 M triangles, no NaN vertices. Output lives under the gitignored `external/`; nothing client-specific is committed; `tools/` is Python-only and outside the tsconfig/eslint globs. Consequence for V7: the band carries architect-placed fixtures only (~9 WC + 2 urinals + 2 multi-sink units per floor), so V7 acceptance will use those instead of sanitary-model fixtures.
 
 ### V0b — Fixture classifier ✅ (2026-09-03, commit `f93e726`)
 
