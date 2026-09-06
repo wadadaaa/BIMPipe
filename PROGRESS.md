@@ -10,18 +10,26 @@ Privacy rule: `external/` and `refs/` are never committed. Per-round renderings,
 | G1 — Drawing renderer (pure model → SVG/PNG), style-critic calibration vs reference sheet, "Drawing preview" export in Risers panel | ✅ | commits `e5d7bd9`…`d914e95`; 8 style iterations, not INDISTINGUISHABLE — remaining gaps were multi-system content, not convention (re-check with sanitary-only crops in G4); preview button smoke-tested |
 | G2 — Engineer floor adapter: storey-scoped stacks + SW-GRV branches, ø, slopes from invert elevations → `FloorDrawingModel`; our-suggestion adapter | ✅ | commits `eb1735b`, `74ff14f`, `31c2824`; 15/9 engineer stacks, 125/49 drawn runs, slope coverage 89.6 % / 79.6 %; export CLI `tools/gauntlet/export-floor-models.ts`; typology pass-through awaits G3 |
 | G3 — Typology switch residential \| office on upload; office placement (core shafts only, row collectors, raised branch limit placeholder) | ✅ | commits `6efbbd1`, `53a06fd`, `112dab7`, `3310c19`; residential pins byte-identical; office storey 7 stacks on 7 core shafts, 5 row collectors, 33/33 routed; option `wetCore.typology` |
-| G4 — Gauntlet harness: hard metrics, anonymized A/B pairs, fresh-context critic protocol, per-round log under `external/gauntlet/` | ⏳ | after G1–G3 |
-| G5 — Round loop (≤ 12 rounds, both floors every round) | ⏳ | stop at ≤ 6/10 engineer preferences on both floors |
+| G4 — Gauntlet harness: hard metrics, anonymized A/B pairs, fresh-context critic protocol, per-round log under `external/gauntlet/` | ✅ | commits `824189a`, `9a6affb`, `c72b8a8`, `03b8f1a`; `tools/gauntlet/run-round.ts`, `tally-round.ts`, `CRITIC.md`; round 0 run on both floors |
+| G5 — Round loop (≤ 12 rounds, both floors every round) | 🔄 | round 0 done (both floors lose on metrics); round 1 running |
 | G6 — Gated tests pinning final metrics, final gate, push | ⏳ | |
 
 ## Goal 4 round table
 
 | Round | Floor | Obstruction | Stacks ours/eng | Mean dist to eng stack (m) | Branch ratio | Routed | Metrics | Critic: engineer preferred (of 10) | Gap named |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 00 | F1 (podium 01, residential) | 2 (+3 unknown) | 10/15 = 0.67 | 1.12 | 0.11 union (1.27 literal band) | 1.00 | loss | 10/10 forced (0 low / 8 med / 2 high) | collector geometry (8), stack location (2) |
+| 00 | F2 (office storey, office) | 0 | 7/9 = 0.78 | 5.08 | 2.33 union (0.45 literal band) | 1.00 | loss | 0/10 forced (10 high) — engineer slice under-drawn, not a credible win | none against ours; engineer side of F2 to be audited |
+
+F1 = first project podium storey 01 run as residential; F2 = second project MEP storey run as office. "Union" = engineer horizontals in the storey band ∪ the 1.2 m hang band under the slab (what the engineer's drawing shows); the literal-band ratio is reported alongside. Critics never see floor codes, file names or which side is ours.
 
 ## Goal 4 milestones
 
 (entries are appended per task as they land)
+
+### G4 — Gauntlet harness + round 0 ✅ (2026-09-06, commits `824189a`, `9a6affb`, `c72b8a8`, `03b8f1a`)
+
+The gauntlet pipeline mirrors the app's typology path (`wetCore.typology` → assignment → row collectors); the office storey exports 7 core-shaft stacks, 70 segments / 59.6 m, 33/33 routed, pinned. Pure `computeGauntletMetrics` (`src/domain/gauntletMetrics.ts`) gates a round on obstruction = 0, stacks ratio ∈ [0.6, 1.5], branch ratio ∈ [0.5, 2.0], routed fraction = 1, and reports mean distance to the nearest engineer stack. The branch ratio uses the engineer's drawn **union** set (storey band ∪ 1.2 m hang band under the slab): on the residential floor 111 of 122 hang-band runs (59.2 m) end nearer a fixture of this storey than of the storey below (median 1.26 m vs 4.51 m), on the office floor all 35 end within 0.65 m of an L04 fixture — so those runs are this storey's collectors; the literal-band ratio is reported alongside (caveat: union lengths are plan-projected, literal-band lengths are pset 3D lengths, and the literal band on F2 carries 132 m of segments with no drawable geometry). `tools/gauntlet/run-round.ts` exports both models, computes metrics, renders anonymized PNGs at identical scale/dpi, writes seeded blind A/B pairs with the key outside the trial folders (red metrics = `loss`, no trials unless `--force-trials`); `tally-round.ts` maps verbatim critic replies to verdicts/summary; `CRITIC.md` fixes the fresh-context critic prompt. Style re-check on sanitary-only crops (3 iterations) fixed one convention gap — plumbing fixtures drawn as a dark-green hairline over the architect's pale outline — and is still not INDISTINGUISHABLE; the last named gap is underlay content (furniture, ceiling grid, elbows as fittings), band widths and colours measure pixel-equal. **Round 0: both floors lose on metrics** (F1: 2 obstructed stacks — the V3 flagged-centroid fallback — and branch ratio 0.11; F2: branch ratio 2.33). Forced A/B for gap naming: F1 engineer preferred 10/10, gap = collector geometry ("a stack dropped at every fixture, no collector network"); F2 critics preferred ours 10/10 with high confidence, **not credible** — the engineer's L04 slice carries drawn runs for only the two left toilet blocks (25.6 m drawn vs 132 m pset length), and several of its 9 intersecting stacks sit at the plan edge (plausibly roof/terrace drains) — the engineer side of F2 must be audited before its A/B counts.
 
 ### G3 — Building typology switch ✅ (2026-09-06, commits `6efbbd1`, `53a06fd`, `112dab7`, `3310c19`)
 
