@@ -87,6 +87,11 @@ export interface DrawingSleeve {
   /** Direction of the crossing pipe in degrees CCW from +X. */
   readonly directionDeg: number
   readonly pipeDiameterMm: number | null
+  /**
+   * Length of the crossing along the pipe (the wall thickness at that point),
+   * in metres. Optional: the renderer falls back to a default sleeve length.
+   */
+  readonly lengthM?: number
 }
 
 export interface FloorDrawingModel {
