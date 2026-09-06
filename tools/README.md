@@ -79,3 +79,32 @@ Validate the result by opening it with web-ifc (Node) and streaming all meshes; 
   reference extraction, STEP string decoding.
 - `ifc_spatial.py` – project/site/building/storey tree, containment, aggregation and
   opening resolution, census categories.
+
+## `gauntlet/export-floor-models.ts`
+
+Node-side exporter for the drawing A/B: writes both sides of one floor as
+`FloorDrawingModel` JSON (`src/domain/drawing/floorDrawingModel.ts`) plus the
+comparison-metrics input.
+
+```sh
+node tools/gauntlet/export-floor-models.ts --list
+node tools/gauntlet/export-floor-models.ts --floor 096-01
+node tools/gauntlet/export-floor-models.ts --spec /tmp/my-floor.json --out /tmp/gauntlet
+```
+
+Writes `<out>/<floor>/engineer.json`, `ours.json`, `metrics-input.json` and
+`summary.json`; the default `--out` is `external/gauntlet/models` (gitignored — the
+output is client-derived geometry and must stay there).
+
+- Runs on Node ≥ 22.18 (native type stripping); needs no build step.
+- The repo has no `tsx`/`vite-node`, so the script spawns vitest on
+  `src/shared/drawing/gauntletExport.gated.test.ts` with `GAUNTLET_EXPORT=1` and
+  passes the floor/spec/out through `GAUNTLET_EXPORT_FLOOR` / `GAUNTLET_EXPORT_SPEC` /
+  `GAUNTLET_EXPORT_OUT`. That test file is skipped in a normal `pnpm test`.
+- "Ours" comes from the same code path the app uses
+  (`src/shared/drawing/gauntletFloorPipeline.ts`: alignment → merged fixtures →
+  continuity map → wet-core stacks → fixture assignment → branch routes).
+- Spec shape (`gauntletFloorSpecSchema`): `floor`, `host {path, fileName}`,
+  `linked [...]`, `storey {name | elevationSource}`, `storeyLabel`, optional
+  `typology` (`residential | office`) and `wholeBuildingExtent`. Built-in keys:
+  `096-01`, `shbj-L04`.
