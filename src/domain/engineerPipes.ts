@@ -325,14 +325,29 @@ export interface EngineerBranchSelection {
   byGeometryCount: number
   /**
    * Segments without a resolved centreline that were placed by their IFC
-   * storey containment instead (the only storey signal they carry).
+   * storey containment instead (the only storey signal they carry), and whose
+   * invert elevation — when the Pset carries one — does not contradict it.
    */
   byContainmentCount: number
+  /**
+   * Geometry-less segments contained in the storey whose invert elevation lies
+   * outside `[bottom − hangDepthM, top)`: their containment is contradicted
+   * by their own level (typically a full-height stack the model files on one
+   * storey), so they are NOT counted as this storey's horizontals. Reported
+   * with their summed Pset length so the exclusion is always visible.
+   */
+  byContainmentRejectedCount: number
+  byContainmentRejectedLengthM: number
 }
 
 export interface SelectEngineerBranchSegmentsOptions {
   systemPrefixes?: readonly string[]
   verticalToleranceDeg?: number
+  /**
+   * Hang depth under the slab a containment-placed segment's invert may sit at
+   * and still count for the storey; defaults to {@link ENGINEER_HANG_DEPTH_M}.
+   */
+  hangDepthM?: number
 }
 
 /**
@@ -342,7 +357,13 @@ export interface SelectEngineerBranchSegmentsOptions {
  * centreline Z-range touches the storey's slab band `[bottomM, topM)` (a
  * horizontal pipe at exactly the band bottom belongs to that storey). Segments
  * with no resolved centreline cannot be placed by Z, so they fall back to
- * their IFC storey containment and are counted separately for honesty.
+ * their IFC storey containment and are counted separately for honesty — unless
+ * their Pset invert elevation contradicts the containment (invert outside
+ * `[bottom − hangDepthM, top)`): such a piece is a stack the model files on
+ * this storey, not a horizontal of it, and is rejected with its length
+ * reported (`byContainmentRejected*`). Measured on the office storey: 6
+ * geometry-less pieces carried 124 m of Pset length; 5 of them have inverts
+ * 12–19 m below the storey (rejected), 1 sits 0.42 m under the slab (kept).
  * A null band selects the whole model (no storey filter).
  *
  * Note the convention this inherits from V1's storey scope: drainage serving
@@ -357,9 +378,12 @@ export function selectEngineerBranchSegments(
 ): EngineerBranchSelection {
   const prefixes = options.systemPrefixes ?? ENGINEER_SANITARY_SYSTEM_PREFIXES
   const verticalToleranceDeg = options.verticalToleranceDeg ?? ENGINEER_RISER_VERTICAL_TOLERANCE_DEG
+  const hangDepthM = options.hangDepthM ?? ENGINEER_HANG_DEPTH_M
   const segments: EngineerPipeSegment[] = []
   let byGeometryCount = 0
   let byContainmentCount = 0
+  let byContainmentRejectedCount = 0
+  let byContainmentRejectedLengthM = 0
   for (const segment of network.segments) {
     if (!matchesAnyPrefix(segment.systemName, prefixes)) continue
     if (isVerticalEngineerSegment(segment, verticalToleranceDeg)) continue
@@ -368,6 +392,12 @@ export function selectEngineerBranchSegments(
       else byGeometryCount += 1
     } else if (segment.start === null || segment.end === null) {
       if (segment.storeyId !== band.storeyId) continue
+      const invertM = segment.invertElevationM
+      if (invertM !== null && (invertM < band.bottomM - hangDepthM || invertM >= band.topM)) {
+        byContainmentRejectedCount += 1
+        byContainmentRejectedLengthM += segment.lengthM ?? 0
+        continue
+      }
       byContainmentCount += 1
     } else {
       const zMinM = Math.min(segment.start.z, segment.end.z) * network.metersPerSourceUnit
@@ -378,7 +408,61 @@ export function selectEngineerBranchSegments(
     segments.push(segment)
   }
   segments.sort((a, b) => a.expressId - b.expressId)
-  return { segments, byGeometryCount, byContainmentCount }
+  return { segments, byGeometryCount, byContainmentCount, byContainmentRejectedCount, byContainmentRejectedLengthM }
+}
+
+// ---------------------------------------------------------------------------
+// Served vs pass-through stacks on a storey (R1)
+// ---------------------------------------------------------------------------
+
+/**
+ * A stack SERVES a storey when a horizontal run of that storey joins it: one
+ * endpoint of a drawn horizontal lies within this plan distance of the stack
+ * centre. Fittings (wyes, bends) sit between a run end and the stack axis;
+ * 0.5 m covers a Ø160 fitting plus the branch's own bend. Stacks intersecting
+ * the storey band with no such join only pass through (roof / terrace drains,
+ * stacks of other storeys' fixtures) and are excluded from the storey's
+ * drawn / compared set. Measured: residential storey 15 → 12 intersecting
+ * stacks, office storey 9 → 5.
+ */
+export const ENGINEER_STACK_JOIN_TOLERANCE_M = 0.5
+
+export interface EngineerServedStackSelection<T> {
+  /** Stacks with at least one joining horizontal, input order preserved. */
+  served: T[]
+  /** Stacks with no joining horizontal on the storey, input order preserved. */
+  passThrough: T[]
+  joinToleranceM: number
+}
+
+/**
+ * Splits the stacks intersecting a storey into served and pass-through by the
+ * storey's drawn horizontals (`selectEngineerStoreyHorizontals(...).horizontals`,
+ * which are resolved centrelines). Plan frame: stack `xM`/`yM` and segment
+ * endpoints are both source-frame; endpoints are scaled to metres here.
+ */
+export function selectEngineerServedStacks<T extends Pick<EngineerRiserStack, 'xM' | 'yM'>>(
+  stacks: readonly T[],
+  horizontals: readonly Pick<EngineerStoreyHorizontal, 'segment'>[],
+  metersPerSourceUnit: number,
+  joinToleranceM: number = ENGINEER_STACK_JOIN_TOLERANCE_M,
+): EngineerServedStackSelection<T> {
+  const endpoints: Array<{ xM: number; yM: number }> = []
+  for (const { segment } of horizontals) {
+    if (segment.start === null || segment.end === null) continue
+    endpoints.push(
+      { xM: segment.start.x * metersPerSourceUnit, yM: segment.start.y * metersPerSourceUnit },
+      { xM: segment.end.x * metersPerSourceUnit, yM: segment.end.y * metersPerSourceUnit },
+    )
+  }
+  const served: T[] = []
+  const passThrough: T[] = []
+  for (const stack of stacks) {
+    const joined = endpoints.some((point) => Math.hypot(point.xM - stack.xM, point.yM - stack.yM) <= joinToleranceM)
+    if (joined) served.push(stack)
+    else passThrough.push(stack)
+  }
+  return { served, passThrough, joinToleranceM }
 }
 
 // ---------------------------------------------------------------------------

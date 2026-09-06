@@ -11,6 +11,7 @@ import {
   ENGINEER_SANITARY_SYSTEM_PREFIXES,
   ENGINEER_VENT_SYSTEM_PREFIXES,
   engineerSegmentSlopePercent,
+  selectEngineerServedStacks,
   selectEngineerStoreyHorizontals,
   stacksIntersectingBand,
   storeySlabBandM,
@@ -80,7 +81,15 @@ export interface EngineerFloorDrawingInput {
 export interface EngineerFloorDrawingDiagnostics {
   storeyBandM: { bottomM: number; topM: number | null }
   hangDepthM: number
-  risers: { sanitary: number; vent: number; tagsFromEngineer: number }
+  risers: {
+    /** Sanitary stacks drawn: intersecting the band AND joined by a horizontal of the storey. */
+    sanitary: number
+    /** Sanitary stacks intersecting the band with no joining horizontal (not drawn), with the join tolerance. */
+    sanitaryPassThrough: number
+    sanitaryJoinToleranceM: number
+    vent: number
+    tagsFromEngineer: number
+  }
   pipes: {
     /** Drawn sanitary + vent runs. */
     drawn: number
@@ -139,8 +148,25 @@ export function buildEngineerFloorDrawing(input: EngineerFloorDrawingInput): Eng
   }
   const storeyNameById = new Map(network.storeys.map((storey) => [storey.id, storey.name]))
 
+  // --- pipes (selected first: the served-stack rule needs the storey's horizontals) ---
+  const hangDepthM = input.hangDepthM
+  const sanitary = selectEngineerStoreyHorizontals(network, band, {
+    hangDepthM,
+    systemPrefixes: input.sanitarySystemPrefixes ?? ENGINEER_SANITARY_SYSTEM_PREFIXES,
+  })
+  const vent = selectEngineerStoreyHorizontals(network, band, {
+    hangDepthM,
+    systemPrefixes: input.ventSystemPrefixes ?? ENGINEER_VENT_SYSTEM_PREFIXES,
+  })
+
   // --- risers -------------------------------------------------------------
-  const sanitaryStacks = stacksIntersectingBand(classification.sanitaryStacks, band)
+  // Sanitary stacks: only those a horizontal of this storey joins (R1); a
+  // stack merely passing through the band (roof drain, other storeys' stacks)
+  // is not part of the storey's sanitary plan. Vent stacks are drawn as they
+  // intersect the band (a vent legitimately has no horizontal here).
+  const intersectingSanitary = stacksIntersectingBand(classification.sanitaryStacks, band)
+  const servedSelection = selectEngineerServedStacks(intersectingSanitary, sanitary.horizontals, scale)
+  const sanitaryStacks = servedSelection.served
   const ventStacks = stacksIntersectingBand(classification.ventStacks, band)
   const segmentById = new Map(network.segments.map((segment) => [segment.expressId, segment]))
   let tagsFromEngineer = 0
@@ -167,15 +193,6 @@ export function buildEngineerFloorDrawing(input: EngineerFloorDrawingInput): Eng
   ]
 
   // --- pipes ------------------------------------------------------------
-  const hangDepthM = input.hangDepthM
-  const sanitary = selectEngineerStoreyHorizontals(network, band, {
-    hangDepthM,
-    systemPrefixes: input.sanitarySystemPrefixes ?? ENGINEER_SANITARY_SYSTEM_PREFIXES,
-  })
-  const vent = selectEngineerStoreyHorizontals(network, band, {
-    hangDepthM,
-    systemPrefixes: input.ventSystemPrefixes ?? ENGINEER_VENT_SYSTEM_PREFIXES,
-  })
   const includeVent = input.includeVentPipes ?? true
   const drawnHorizontals: Array<{ entry: EngineerStoreyHorizontal; system: 'sanitary' | 'vent' }> = [
     ...sanitary.horizontals.map((entry) => ({ entry, system: 'sanitary' as const })),
@@ -275,7 +292,13 @@ export function buildEngineerFloorDrawing(input: EngineerFloorDrawingInput): Eng
   const diagnostics: EngineerFloorDrawingDiagnostics = {
     storeyBandM: { bottomM: band.bottomM, topM: Number.isFinite(band.topM) ? band.topM : null },
     hangDepthM: sanitary.hangDepthM,
-    risers: { sanitary: sanitaryStacks.length, vent: ventStacks.length, tagsFromEngineer },
+    risers: {
+      sanitary: sanitaryStacks.length,
+      sanitaryPassThrough: servedSelection.passThrough.length,
+      sanitaryJoinToleranceM: servedSelection.joinToleranceM,
+      vent: ventStacks.length,
+      tagsFromEngineer,
+    },
     pipes: {
       drawn: pipes.length,
       sanitary: {

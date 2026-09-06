@@ -122,7 +122,9 @@ describe('buildEngineerFloorDrawing (synthetic)', () => {
     const { model, diagnostics } = build()
     expect(model.title).toBe('Storey 02 — sanitary plan')
     expect(model.storeyLabel).toBe('Storey 02')
-    expect(diagnostics.risers).toEqual({ sanitary: 2, vent: 1, tagsFromEngineer: 0 })
+    // Both sanitary stacks are joined by a storey horizontal (h1 starts on
+    // stack 1, h3 ends on stack 2): served, none passes through.
+    expect(diagnostics.risers).toEqual({ sanitary: 2, sanitaryPassThrough: 0, sanitaryJoinToleranceM: 0.5, vent: 1, tagsFromEngineer: 0 })
     expect(model.risers.map((riser) => [riser.system, riser.tag, riser.diameterMm])).toEqual([
       ['sanitary', '2.1ק', 110],
       ['sanitary', '2.2ק', 110],
@@ -132,6 +134,32 @@ describe('buildEngineerFloorDrawing (synthetic)', () => {
     expect(model.risers[0].spansStoreyLabels).toEqual(['A', 'B'])
     // The Revit element id in `Tag` and the type name in `Name` never reach the sheet.
     expect(drawingLabelsContaining(model, ['8828274', 'Pipe'])).toEqual([])
+  })
+
+  it('leaves out a sanitary stack that only passes through the storey (no horizontal joins it)', () => {
+    const network = syntheticNetwork()
+    // A third full-height sanitary stack at (9, 9) m: intersects storey B's band, no run of B touches it.
+    network.segments.push(
+      seg({ expressId: 5, start: { x: 900, y: 900, z: 0 }, end: { x: 900, y: 900, z: 600 }, storeyId: 100, storeyName: 'A' }),
+    )
+    const classification = classifyEngineerRiserStacks(network, CLASSES)
+    expect(classification.sanitaryStacks).toHaveLength(3)
+    const { model, diagnostics } = buildEngineerFloorDrawing({
+      network,
+      classification,
+      storeyId: 200,
+      storeyLabel: 'Storey 02',
+      sanitarySystemPrefixes: CLASSES.sanitarySystemPrefixes,
+      ventSystemPrefixes: CLASSES.ventSystemPrefixes,
+    })
+    expect(diagnostics.risers.sanitary).toBe(2)
+    expect(diagnostics.risers.sanitaryPassThrough).toBe(1)
+    expect(model.risers.filter((riser) => riser.system === 'sanitary').map((riser) => riser.centre)).toEqual([
+      { xM: 1, yM: 1 },
+      { xM: 5, yM: 1 },
+    ])
+    // Sheet tags still count 1..n over the DRAWN stacks, then the vent.
+    expect(model.risers.map((riser) => riser.tag)).toEqual(['2.1ק', '2.2ק', '2.3ק'])
   })
 
   it('uses a bare engineer sheet number from the stack segments when present', () => {

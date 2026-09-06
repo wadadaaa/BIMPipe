@@ -23,6 +23,8 @@ import {
   ENGINEER_SLOPE_MIN_DATA_MM,
   ENGINEER_SLOPE_MIN_RUN_M,
   ENGINEER_SLOPE_MIN_RUN_MM,
+  ENGINEER_STACK_JOIN_TOLERANCE_M,
+  selectEngineerServedStacks,
   classifyEngineerRiserStacks,
   classifyEngineerRunRoles,
   deriveStoreyPitchM,
@@ -255,21 +257,63 @@ describe('selectEngineerBranchSegments', () => {
   })
 
   it('falls back to IFC storey containment for segments without a centreline and counts them separately', () => {
+    const geometryless = (expressId: number, storeyId: number | null, invertElevationM: number | null) =>
+      segment({ expressId, start: null, end: null, endpointSource: null, storeyId, lengthM: 1.5, invertElevationM })
     const net = network(
       [
         horizontal(1, 450),
-        segment({ expressId: 2, start: null, end: null, endpointSource: null, storeyId: 2, lengthM: 1.5 }),
-        segment({ expressId: 3, start: null, end: null, endpointSource: null, storeyId: 1, lengthM: 1.5 }),
-        segment({ expressId: 4, start: null, end: null, endpointSource: null, storeyId: null, lengthM: 1.5 }),
+        geometryless(2, 2, 4.2), // contained in L2, invert inside the band → kept
+        geometryless(3, 1, 4.2), // contained elsewhere → not this storey's
+        geometryless(4, null, 4.2), // no containment → cannot be placed
+        geometryless(5, 2, null), // contained in L2, no invert → containment is all there is → kept
+        geometryless(6, 2, 2.0), // 1.0 m under the L2 slab: within the 1.2 m hang depth → kept
       ],
       storeys,
     )
     const selection = selectEngineerBranchSegments(net, storeySlabBandM(net, 2)!, {
       systemPrefixes: ['XX-GRV'],
     })
-    expect(selection.segments.map((s) => s.expressId)).toEqual([1, 2])
+    expect(selection.segments.map((s) => s.expressId)).toEqual([1, 2, 5, 6])
     expect(selection.byGeometryCount).toBe(1)
-    expect(selection.byContainmentCount).toBe(1)
+    expect(selection.byContainmentCount).toBe(3)
+    expect(selection.byContainmentRejectedCount).toBe(0)
+    expect(selection.byContainmentRejectedLengthM).toBe(0)
+  })
+
+  it('rejects a contained geometry-less segment whose invert contradicts the band, reporting its Pset length', () => {
+    // R1 F2 audit: a full-height stack the model files on one storey has no
+    // resolved centreline and a Pset invert metres below the storey — it is
+    // not a horizontal of that storey and must not inflate its branch length.
+    const geometryless = (expressId: number, invertElevationM: number, lengthM: number) =>
+      segment({ expressId, start: null, end: null, endpointSource: null, storeyId: 2, lengthM, invertElevationM })
+    const net = network(
+      [
+        geometryless(1, -12.0, 20), // 15 m below the L2 band → rejected
+        geometryless(2, 1.79, 5), // 1.21 m under the slab, just beyond the 1.2 m hang depth → rejected
+        geometryless(3, 1.8, 2), // exactly at the hang-depth limit → kept
+        geometryless(4, 6.0, 7), // at the band top (belongs to L3) → rejected
+        geometryless(5, 5.99, 1), // just under the top → kept
+      ],
+      storeys,
+    )
+    const selection = selectEngineerBranchSegments(net, storeySlabBandM(net, 2)!, {
+      systemPrefixes: ['XX-GRV'],
+    })
+    expect(selection.segments.map((s) => s.expressId)).toEqual([3, 5])
+    expect(selection.byContainmentCount).toBe(2)
+    expect(selection.byContainmentRejectedCount).toBe(3)
+    expect(selection.byContainmentRejectedLengthM).toBe(32)
+
+    // A wider hang depth keeps the 1.21 m piece; the rule is the option, not a magic number.
+    const deeper = selectEngineerBranchSegments(net, storeySlabBandM(net, 2)!, { systemPrefixes: ['XX-GRV'], hangDepthM: 1.5 })
+    expect(deeper.segments.map((s) => s.expressId)).toEqual([2, 3, 5])
+    expect(deeper.byContainmentRejectedCount).toBe(2)
+    expect(deeper.byContainmentRejectedLengthM).toBe(27)
+
+    // Without a band there is no storey to contradict: every geometry-less piece counts by containment.
+    const modelWide = selectEngineerBranchSegments(net, null, { systemPrefixes: ['XX-GRV'] })
+    expect(modelWide.segments).toHaveLength(5)
+    expect(modelWide.byContainmentRejectedCount).toBe(0)
   })
 
   it('treats the top storey band as open-ended', () => {
@@ -291,6 +335,33 @@ describe('selectEngineerBranchSegments', () => {
     expect(selection.segments.map((s) => s.expressId)).toEqual([1, 2, 4])
     expect(selection.byGeometryCount).toBe(2)
     expect(selection.byContainmentCount).toBe(1)
+  })
+})
+
+describe('selectEngineerServedStacks', () => {
+  const stacks = [
+    { id: 'served-at-start', xM: 1, yM: 1 },
+    { id: 'served-at-end-within-tolerance', xM: 8.4, yM: 1 }, // 0.4 m from the run end (8, 1)
+    { id: 'pass-through', xM: 20, yM: 20 },
+    { id: 'just-outside', xM: 8.51, yM: 1 },
+  ]
+  /** cm-unit horizontal (1, 1) → (8, 1) m. */
+  const horizontals = [{ segment: segment({ expressId: 1, start: { x: 100, y: 100, z: 0 }, end: { x: 800, y: 100, z: 0 } }) }]
+
+  it('keeps stacks with a horizontal endpoint within the 0.5 m join tolerance, preserving order, and lists the rest as pass-through', () => {
+    expect(ENGINEER_STACK_JOIN_TOLERANCE_M).toBe(0.5)
+    const selection = selectEngineerServedStacks(stacks, horizontals, 0.01)
+    expect(selection.served.map((stack) => stack.id)).toEqual(['served-at-start', 'served-at-end-within-tolerance'])
+    expect(selection.passThrough.map((stack) => stack.id)).toEqual(['pass-through', 'just-outside'])
+    expect(selection.joinToleranceM).toBe(0.5)
+  })
+
+  it('ignores horizontals without a centreline and honours a custom tolerance', () => {
+    const noGeometry = [{ segment: segment({ expressId: 2, start: null, end: null, endpointSource: null }) }]
+    expect(selectEngineerServedStacks(stacks, noGeometry, 0.01).served).toEqual([])
+    expect(selectEngineerServedStacks(stacks, noGeometry, 0.01).passThrough).toHaveLength(4)
+    const wider = selectEngineerServedStacks(stacks, horizontals, 0.01, 0.6)
+    expect(wider.served.map((stack) => stack.id)).toEqual(['served-at-start', 'served-at-end-within-tolerance', 'just-outside'])
   })
 })
 
