@@ -622,6 +622,20 @@ describe('structure layer + directional probe', () => {
     expect(grid.structureBlocked![wall.cell.row * grid.columns + wall.cell.col]).toBe(1)
   })
 
+  it('blocks a fat wall bbox (diagonal/curved wall) but does not count it as dense structure', () => {
+    const floor = officeFloor(1)
+    // A 10 x 8 m "wall" bbox: what a long diagonal facade wall looks like after bbox extraction.
+    floor.obstructions.push({ id: 'diag', kind: 'wall', footprint: bbox(20, 30, 12, 20) })
+    const map = buildContinuityMap(mInput([floor]))
+    const grid = map.grids[0]
+    const probe = probeContinuityCell(map, 1, { x: 25, z: 16 }) as { status: string; cell: { col: number; row: number } }
+    expect(probe.status).toBe('blocked')
+    expect(grid.structureBlocked![probe.cell.row * grid.columns + probe.cell.col]).toBe(0)
+    // A thin wall (0.3 m) or a column (≤ 1.5 m both ways) still counts.
+    const facade = probeContinuityCell(map, 1, { x: 5, z: 0.1 }) as { cell: { col: number; row: number } }
+    expect(grid.structureBlocked![facade.cell.row * grid.columns + facade.cell.col]).toBe(1)
+  })
+
   it('probes toward the nearest wall along an axis and reports null when nothing is met', () => {
     const map = buildContinuityMap(mInput([officeFloor(1)]))
     const grid = map.grids[0]

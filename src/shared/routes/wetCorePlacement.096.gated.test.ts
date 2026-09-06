@@ -308,6 +308,44 @@ gated('096-P + 096-A wet-core placement on storey 01 (gated: requires local clie
         const second = run()
         expect(second.cores.map((core) => core.id)).toEqual(result.cores.map((core) => core.id))
         expect(second.stackExtents).toEqual(result.stackExtents)
+
+        // --- G3 report only (NOT pinned): the same residential storey run as OFFICE ---
+        // Shows what the typology switch does on the wrong typology: every stack
+        // must land on a core shaft or be flagged, so a podium file without a
+        // single slab opening flags every core.
+        const office = buildWetCoreSuggestedRisers({
+          storeys: hostStoreys,
+          sourceStoreyId: source!.id,
+          fixtures: merged.fixtures,
+          kitchens: merged.kitchens,
+          floorMeshes,
+          nextLabel: labeler(),
+          wetCore: { planUnits: 'm', continuityMap: continuity.map, typology: 'office' },
+        })
+        const officeStacks = office.stacks.filter((stack) => stack.anchor === 'wet-core')
+        const officeRules: Record<string, number> = {}
+        let officeFlagged = 0
+        for (const stack of officeStacks) {
+          if (stack.anchor !== 'wet-core') continue
+          officeRules[stack.placement.rule] = (officeRules[stack.placement.rule] ?? 0) + 1
+          if (stack.placement.flagged) officeFlagged++
+        }
+        const officeSelection = office.officeCoreShafts[0]
+        const officeAssignments = assignFixturesToRisers(
+          merged.fixtures.map((fixture) => ({ expressId: fixture.expressId, kind: fixture.kind, storeyId: fixture.storeyId, position: fixture.position })),
+          office.risers
+            .filter((riser) => riser.storeyId === source!.id)
+            .map((riser) => ({ id: riser.id, stackId: riser.stackId, storeyId: riser.storeyId, position: riser.position })),
+          { units: 'm', typology: 'office' },
+        )
+        console.info(
+          `[096 office report] cores=${office.cores.length} stacks=${officeStacks.length} (${JSON.stringify(officeRules)}, flagged ${officeFlagged}); ` +
+            `core shafts ${officeSelection?.selected.length ?? 0}/${officeSelection?.candidates.length ?? 0} (${officeSelection?.denseClusters.length ?? 0} dense clusters, ${officeSelection?.largeVoids.length ?? 0} void anchors); ` +
+            `fixture rows ${office.fixtureRows.length}; nearest-stack assignment under the 12 m placeholder: ${officeAssignments.filter((a) => !a.unassigned).length}/${officeAssignments.length} routed, ` +
+            `${officeAssignments.filter((a) => a.exceedsMaxBranchLength).length} over-length; residential run: ${coreStacks.length} stacks (${JSON.stringify(rules)})`,
+        )
+        expect(office.typology).toBe('office')
+        expect(office.cores).toHaveLength(result.cores.length)
       } finally {
         api.CloseModel(hostId)
         api.CloseModel(linkedId)

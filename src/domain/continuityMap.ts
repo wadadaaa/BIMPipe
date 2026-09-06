@@ -38,6 +38,19 @@ export const CONTINUITY_CELL_SIZE_M = 0.25
 export const SHAFT_ALIGNMENT_TOLERANCE_MM = 300
 export const SHAFT_ALIGNMENT_TOLERANCE_M = 0.3
 
+/**
+ * A wall/column footprint counts towards `structureBlocked` (the dense-structure
+ * signal behind office core detection) only when its plan bbox is at most this
+ * thick in ONE direction. Footprints come from web-ifc as plan bboxes, so a long
+ * diagonal or curved facade wall arrives as a huge rectangle that would flood
+ * the density signal (measured: 39 % of a 72 x 54 m office floor "structure"
+ * before this filter, ~5 walls responsible). Orthogonal walls and columns
+ * (≤ 1.5 m thick) always pass. Only affects `structureBlocked`; the obstruction
+ * grid (`blocked`) still uses every footprint.
+ */
+export const STRUCTURE_FOOTPRINT_MAX_THICKNESS_MM = 1500
+export const STRUCTURE_FOOTPRINT_MAX_THICKNESS_M = 1.5
+
 /** Minimum number of consecutive storeys an aligned void must span. */
 export const MIN_ALIGNED_VOID_STOREYS = 3
 
@@ -367,6 +380,7 @@ export function isCellBlocked(grid: StoreyObstructionGrid, col: number, row: num
 function buildObstructionGrid(
   storey: ContinuityStoreyInput,
   cellSize: number,
+  structureMaxThickness: number,
 ): StoreyObstructionGrid {
   const allFootprints: PlanFootprint[] = [
     ...storey.obstructions.map((o) => o.footprint),
@@ -449,12 +463,19 @@ function buildObstructionGrid(
   // Walls and columns block outright. A slab blocks where no void that applies
   // to it (see {@link voidAppliesToSlab}) contains the cell centre.
   const hardBlocked = new Uint8Array(columns * rows)
+  const structureBlocked = new Uint8Array(columns * rows)
   const slabBlocked = new Uint8Array(columns * rows)
   const infillTolerance = cellSize / 2
   for (const obstruction of storey.obstructions) {
     if (obstruction.kind !== 'slab') {
+      // Thin in at least one plan direction = a real wall/column footprint (see
+      // STRUCTURE_FOOTPRINT_MAX_THICKNESS_*); fat bboxes are diagonal/curved
+      // walls and only block, they never count as dense structure.
+      const bounds = footprintBounds(obstruction.footprint)
+      const isThin = Math.min(bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ) <= structureMaxThickness
       rasterize(obstruction.footprint, (cellIndex) => {
         hardBlocked[cellIndex] = 1
+        if (isThin) structureBlocked[cellIndex] = 1
       })
       continue
     }
@@ -479,7 +500,7 @@ function buildObstructionGrid(
     columns,
     rows,
     blocked,
-    structureBlocked: hardBlocked,
+    structureBlocked,
   }
 }
 
@@ -647,8 +668,11 @@ export function buildContinuityMap(
     (input.units === 'mm' ? SHAFT_ALIGNMENT_TOLERANCE_MM : SHAFT_ALIGNMENT_TOLERANCE_M)
   const minAlignedStoreys = options.minAlignedStoreys ?? MIN_ALIGNED_VOID_STOREYS
 
+  const structureMaxThickness =
+    input.units === 'mm' ? STRUCTURE_FOOTPRINT_MAX_THICKNESS_MM : STRUCTURE_FOOTPRINT_MAX_THICKNESS_M
+
   const diagnostics: string[] = []
-  const grids = input.storeys.map((storey) => buildObstructionGrid(storey, cellSize))
+  const grids = input.storeys.map((storey) => buildObstructionGrid(storey, cellSize, structureMaxThickness))
   // Candidates are detected on the voids that are actually open: a hosted void
   // filled by another slab is not a shaft (the grid still carves its host).
   const openStoreys = input.storeys.map((storey) => withoutFilledOpenings(storey, cellSize / 2, diagnostics))
@@ -963,21 +987,29 @@ export interface DenseStructureCluster {
   peakDensity: number
 }
 
+/** Per-window wall/column density over a grid (see {@link computeDenseWindows}). */
+interface DenseWindowField {
+  /** Window edge in cells. */
+  window: number
+  denseCols: number
+  denseRows: number
+  /** Density (0–1) per window, row-major by the window's top-left cell. */
+  density: Float32Array
+  /** 1 where `density >= minDensity`. */
+  dense: Uint8Array
+}
+
 /**
- * Finds core-like patches of structure: square windows of `windowSize` (map
- * units) whose fraction of wall/column cells (`structureBlocked`; slabs never
- * count) is ≥ `minDensity`, merged into 4-connected clusters. Deterministic
- * (row-major). Empty when the grid carries no structure knowledge.
+ * Slides a square window of `windowSize` (map units) over `structureBlocked`
+ * (walls/columns; slabs never count) and records the fraction of structure
+ * cells per window. null when the grid carries no structure layer or is
+ * smaller than one window.
  */
-export function findDenseStructureClusters(
-  grid: StoreyObstructionGrid,
-  windowSize: number,
-  minDensity: number,
-): DenseStructureCluster[] {
+function computeDenseWindows(grid: StoreyObstructionGrid, windowSize: number, minDensity: number): DenseWindowField | null {
   const structure = grid.structureBlocked
-  if (structure === undefined || grid.columns === 0 || grid.rows === 0) return []
+  if (structure === undefined || grid.columns === 0 || grid.rows === 0) return null
   const window = Math.max(1, Math.round(windowSize / grid.cellSize))
-  if (window > grid.columns || window > grid.rows) return []
+  if (window > grid.columns || window > grid.rows) return null
   const { columns, rows } = grid
 
   // Summed-area table (one extra row/column of zeros).
@@ -996,7 +1028,6 @@ export function findDenseStructureClusters(
     return sat[row1 * w + col1] - sat[row0 * w + col1] - sat[row1 * w + col0] + sat[row0 * w + col0]
   }
 
-  // Density per window, stored at the window's centre cell.
   const denseCols = columns - window + 1
   const denseRows = rows - window + 1
   const density = new Float32Array(denseCols * denseRows)
@@ -1009,6 +1040,58 @@ export function findDenseStructureClusters(
       if (value >= minDensity) dense[row0 * denseCols + col0] = 1
     }
   }
+  return { window, denseCols, denseRows, density, dense }
+}
+
+/**
+ * Plan distance (map units) from `point` to the centre of the nearest DENSE
+ * window (density ≥ `minDensity`), or null when the grid has no structure
+ * layer / no dense window. This is the honest "how far is the nearest dense
+ * structure" measure: a cluster's bbox can span a whole floor once dense
+ * patches chain along corridors, so distance-to-bbox says nothing.
+ */
+export function distanceToDenseStructure(
+  grid: StoreyObstructionGrid,
+  point: PlanPoint,
+  windowSize: number,
+  minDensity: number,
+): number | null {
+  const field = computeDenseWindows(grid, windowSize, minDensity)
+  if (field === null) return null
+  return nearestDenseWindowDistance(grid, field, point)
+}
+
+function nearestDenseWindowDistance(grid: StoreyObstructionGrid, field: DenseWindowField, point: PlanPoint): number | null {
+  const half = field.window / 2
+  let best = Infinity
+  for (let row = 0; row < field.denseRows; row++) {
+    const z = grid.origin.z + (row + half) * grid.cellSize
+    const dz = z - point.z
+    if (Math.abs(dz) >= best) continue
+    for (let col = 0; col < field.denseCols; col++) {
+      if (field.dense[row * field.denseCols + col] === 0) continue
+      const x = grid.origin.x + (col + half) * grid.cellSize
+      const distance = Math.hypot(x - point.x, dz)
+      if (distance < best) best = distance
+    }
+  }
+  return Number.isFinite(best) ? best : null
+}
+
+/**
+ * Finds core-like patches of structure: square windows of `windowSize` (map
+ * units) whose fraction of wall/column cells (`structureBlocked`; slabs never
+ * count) is ≥ `minDensity`, merged into 4-connected clusters. Deterministic
+ * (row-major). Empty when the grid carries no structure knowledge.
+ */
+export function findDenseStructureClusters(
+  grid: StoreyObstructionGrid,
+  windowSize: number,
+  minDensity: number,
+): DenseStructureCluster[] {
+  const field = computeDenseWindows(grid, windowSize, minDensity)
+  if (field === null) return []
+  const { dense, density, denseCols, denseRows, window } = field
 
   // 4-connected components over dense windows (iterative flood fill).
   const visited = new Uint8Array(denseCols * denseRows)
@@ -1094,7 +1177,7 @@ export interface OfficeCoreShaftCandidate {
   aspectRatio: number
   /** Passed the shaft-like footprint window (area + aspect). */
   shaftLike: boolean
-  /** Plan distance (m) from the candidate centre to the nearest dense-structure cluster bounds; null when none exists. */
+  /** Plan distance (m) from the candidate centre to the nearest dense-structure window centre; null when none exists. */
   distanceToDenseStructureM: number | null
   /** Plan distance (m) from the candidate centre to the nearest stair/lift void bounds; null when none exists. */
   distanceToLargeVoidM: number | null
@@ -1147,6 +1230,7 @@ export function selectOfficeCoreShafts(
     .filter((candidate) => candidate.storeyIds.includes(storeyId))
     .sort((a, b) => a.id.localeCompare(b.id))
 
+  const denseField = grid === undefined ? null : computeDenseWindows(grid, rules.denseWindowM * toMap, rules.denseStructureMinDensity)
   const denseClusters =
     grid === undefined
       ? []
@@ -1182,7 +1266,9 @@ export function selectOfficeCoreShafts(
   const candidates: OfficeCoreShaftCandidate[] = storeyCandidates.map((candidate) => {
     const areaM2 = shaftCandidatePlanArea(candidate) * toM * toM
     const aspectRatio = shaftCandidateAspectRatio(candidate)
-    const distanceToDenseStructureM = nearestBoundsDistance(candidate.center, denseClusters.map((cluster) => cluster.bounds), toM)
+    // Distance to the nearest dense WINDOW centre, not to a cluster bbox (see distanceToDenseStructure).
+    const denseDistance = grid === undefined || denseField === null ? null : nearestDenseWindowDistance(grid, denseField, candidate.center)
+    const distanceToDenseStructureM = denseDistance === null ? null : denseDistance * toM
     const distanceToLargeVoidM = nearestBoundsDistance(
       candidate.center,
       largeVoids.filter((anchor) => anchor.candidateId !== candidate.id).map((anchor) => anchor.bounds),
