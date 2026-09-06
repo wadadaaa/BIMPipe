@@ -94,6 +94,7 @@ export function renderFloorDrawingSvg(
   // sit over the light fixture underlay like the sheet does. Stack tags are
   // bigger and additionally avoid fixtures and all bands.
   const bandBoxesByPipe = new Map(pipes.map((pipe) => [pipe.id, pipeBoxes(pipe, frame)]))
+  const labelBoxes: Quad[] = []
   parts.push(`<g id="pipe-labels" fill="${TEXT_STYLE.colour}">`)
   for (const pipe of pipes) {
     // Bands of other runs block the label, except the stretch of a connected
@@ -108,10 +109,11 @@ export function renderFloorDrawingSvg(
       if (junctions.length === 0) return boxes
       return boxes.filter((box) => !junctions.some((j) => containsPoint(box, j) || distanceToQuadCentre(box, j) <= junctionReach))
     })
-    const label = renderPipeLabel(pipe, frame, [...placed, ...otherBands])
+    const label = renderPipeLabel(pipe, frame, [...placed, ...otherBands], labelBoxes)
     if (label !== null) {
       parts.push(label.svg)
       placed.push(label.box)
+      labelBoxes.push(label.box)
     }
   }
   parts.push(`</g>`)
@@ -441,7 +443,12 @@ const MAX_LABEL_OVERHANG = 1.3
 /** How far along a connected run (from the junction) a label may overhang it (paper mm). */
 const JUNCTION_LABEL_REACH_MM = 7
 
-function renderPipeLabel(pipe: DrawingPipeRun, frame: Frame, placed: readonly Quad[]): Placed | null {
+function renderPipeLabel(
+  pipe: DrawingPipeRun,
+  frame: Frame,
+  placed: readonly Quad[],
+  labelBoxes: readonly Quad[],
+): Placed | null {
   const a = frame.toSvg(pipe.start)
   const b = frame.toSvg(pipe.end)
   const dx = b.x - a.x
@@ -547,10 +554,13 @@ function renderPipeLabel(pipe: DrawingPipeRun, frame: Frame, placed: readonly Qu
     }
   }
   if (chosen === null) {
-    // No free spot: a collector keeps its label at the default place, a branch
-    // stays unlabelled rather than printing over another label.
+    // No free spot: a collector keeps its label at the default place as long
+    // as that does not print over another label (collinear collector pieces
+    // sharing one line are labelled once); a branch stays unlabelled.
     if (pipe.role !== 'collector') return null
-    chosen = candidateAt(layouts[0], LABEL_T_CANDIDATES[0])
+    const fallback = candidateAt(layouts[0], LABEL_T_CANDIDATES[0])
+    if (labelBoxes.some((other) => overlaps(fallback.box, other))) return null
+    chosen = fallback
   }
 
   const svg = `<g transform="translate(${fmt(chosen.cx)} ${fmt(chosen.cy)}) rotate(${fmt(angleDeg)})" data-label-for="${escapeXml(pipe.id)}">${chosen.svg}</g>`

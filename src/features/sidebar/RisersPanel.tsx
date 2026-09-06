@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { Fixture, KitchenArea, Riser, RiserId } from '@/domain/types'
 import type { FixtureRiserAssignment } from '@/domain/assignFixturesToRisers'
 import type { FloorRoutes } from '@/domain/branchRouting'
@@ -49,6 +50,11 @@ interface RisersPanelProps {
   suggestProgress?: { processed: number; total: number; storeyName: string | null } | null
   suggestError?: string | null
   onCancelSuggestRisers?: () => void
+  /**
+   * Drawing preview (G1): build + download the open floor's sanitary plan SVG.
+   * Returns null on success or a reason the preview could not be produced.
+   */
+  onDrawingPreview?: () => string | null
 }
 
 export function RisersPanel({
@@ -76,7 +82,9 @@ export function RisersPanel({
   suggestProgress = null,
   suggestError = null,
   onCancelSuggestRisers = () => {},
+  onDrawingPreview,
 }: RisersPanelProps) {
+  const [drawingPreviewError, setDrawingPreviewError] = useState<string | null>(null)
   const canSuggest =
     fixtures.some((fixture) => fixture.position !== null) ||
     kitchens.some((kitchen) => kitchen.position !== null)
@@ -216,11 +224,30 @@ export function RisersPanel({
           <DownloadIcon spinning={isDownloadingFullIfc} />
           <span>{isDownloadingFullIfc ? 'Preparing IFC' : 'Download IFC'}</span>
         </button>
+        {onDrawingPreview !== undefined && (
+          <button
+            className="risers-panel__btn risers-panel__btn--ghost"
+            onClick={() => setDrawingPreviewError(onDrawingPreview())}
+            disabled={risers.length === 0}
+            title={
+              risers.length === 0
+                ? 'Place or suggest risers first — the drawing preview needs at least one riser on this floor.'
+                : 'Download this floor as a sanitary plan drawing (SVG, 1:50).'
+            }
+          >
+            Drawing preview
+          </button>
+        )}
       </div>
 
       {downloadError && (
         <p className="risers-panel__error" role="alert">
           {downloadError}
+        </p>
+      )}
+      {drawingPreviewError !== null && (
+        <p className="risers-panel__error" role="alert" dir="auto">
+          Drawing preview failed: {drawingPreviewError}
         </p>
       )}
 
