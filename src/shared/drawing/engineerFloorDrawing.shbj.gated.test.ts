@@ -38,6 +38,9 @@ const PIN_SLOPE_COVERAGE = 39 / 49
 const PIN_COLLECTORS_STRICT = 0
 // Our side: 7 wet cores → 7 stacks on the storey (V3 pin).
 const PIN_OUR_STACKS = 7
+// Office typology (G3) through the harness: 5 row collectors → 70 route segments / 59.6 m.
+const PIN_OUR_OFFICE_SEGMENTS = 70
+const PIN_OUR_OFFICE_BRANCH_M = 59.6
 
 const gated = describe.skipIf(!specFilesExist(SPEC))
 
@@ -113,6 +116,16 @@ gated('engineer + our floor drawings on the second project MEP storey (gated: re
 
         expect(metricsInput.report.riserCounts.engineerStacksIntersectingStorey).toBe(PIN_ENGINEER_SANITARY_STACKS)
         expect(metricsInput.report.riserCounts.oursStacksOnStorey).toBe(PIN_OUR_STACKS)
+
+        // --- typology (G4 wiring of G3's office switch through the harness) ---
+        // The spec says office: every stack sits on a core shaft, the fixture
+        // rows drain through collectors (G3 pins: 7 shafts, 70 segments / 59.6 m).
+        expect(metricsInput.spec.typology).toBe('office')
+        expect(metricsInput.continuityProbes.map((probe) => probe.placementRule)).toEqual(Array<string>(PIN_OUR_STACKS).fill('shaft'))
+        expect(metricsInput.continuityProbes.every((probe) => probe.probe.status === 'free')).toBe(true)
+        expect(ours.model.pipes).toHaveLength(PIN_OUR_OFFICE_SEGMENTS)
+        expect(metricsInput.report.branchLengths.oursTotalM).toBeCloseTo(PIN_OUR_OFFICE_BRANCH_M, 1)
+        expect(metricsInput.diagnostics.some((line) => line.includes('typology "office" applied'))).toBe(true)
       } finally {
         closeSpecModels(api, models)
       }

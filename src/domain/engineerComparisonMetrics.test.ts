@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeEngineerComparison, type EngineerComparisonInput } from './engineerComparisonMetrics'
+import { computeEngineerComparison, ourStackPlanPointsM, type EngineerComparisonInput } from './engineerComparisonMetrics'
 import type { EngineerPipeSegment, EngineerRiserStack } from './engineerPipes'
 import type { FloorRoutes } from './branchRouting'
 import type { FixtureRiserAssignment } from './assignFixturesToRisers'
@@ -347,5 +347,21 @@ describe('computeEngineerComparison', () => {
     const report = computeEngineerComparison(emptyInput())
     expect(() => JSON.stringify(report)).not.toThrow()
     expect(JSON.parse(JSON.stringify(report))).toEqual(report)
+  })
+
+  it('exposes one mean plan point per stack, ordered by stackId, in metres (gauntlet harness)', () => {
+    const points = ourStackPlanPointsM(
+      [
+        { id: 'b-1', stackId: 'stack-b', storeyId: 100, position: { x: 4000, y: 0, z: 2000 } },
+        { id: 'a-1', stackId: 'stack-a', storeyId: 100, position: { x: 1000, y: 0, z: 1000 } },
+        { id: 'a-2', stackId: 'stack-a', storeyId: 101, position: { x: 3000, y: 3, z: 1000 } },
+      ],
+      'mm',
+    )
+    expect(points).toEqual([
+      { xM: 2, yM: 1 },
+      { xM: 4, yM: 2 },
+    ])
+    expect(ourStackPlanPointsM([], 'm')).toEqual([])
   })
 })

@@ -22,6 +22,8 @@ import {
   selectEngineerStoreyHorizontals,
   storeySlabBandM,
   type EngineerRiserClassification,
+  type EngineerStoreyHorizontalRule,
+  type EngineerStoreyHorizontalSelection,
   type StoreySlabBandM,
 } from '@/domain/engineerPipes'
 import { toStackExtentFixtures } from '@/domain/riserStackExtent'
@@ -45,7 +47,7 @@ import { buildBranchRoutesFromAssignments } from '@/shared/routes/buildBranchRou
 import { buildWetCoreSuggestedRisers, type WetCoreSuggestedStack } from '@/shared/routes/buildSuggestedRisers'
 import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE } from '@/shared/routes/riserPlacementProfile'
 import { buildEngineerFloorDrawing, type EngineerFloorDrawingDiagnostics } from './engineerFloorDrawing'
-import { footprintToDrawingOutline } from './drawingFrame'
+import { footprintToDrawingOutline, ifcSourceToDrawing, viewerPlanToDrawing } from './drawingFrame'
 import { buildOurFloorDrawing, type OurFloorDrawingDiagnostics } from './ourSuggestionDrawing'
 
 /**
@@ -85,8 +87,9 @@ export const gauntletFloorSpecSchema = z.object({
   storeyLabel: z.string().min(1),
   /**
    * Building typology for the placement path (G3's `residential | office`
-   * switch). Accepted and recorded; passed through once the suggestion path
-   * exposes the option (see the TODO in `runGauntletFloorPipeline`).
+   * switch): `wetCore.typology` at suggest time, then the suggestion's
+   * typology and fixture rows drive assignment and routing, as the page does.
+   * Omitted = residential.
    */
   typology: z.enum(['residential', 'office']).optional(),
   /** Aggregate whole-building fixtures for the V4 stack extent (the app does; default true). */
@@ -116,6 +119,39 @@ export interface GauntletContinuityProbe {
   probe: ContinuityCellProbe
 }
 
+/**
+ * One engineer horizontal run under the hang-band rule, with the plan
+ * distance from its UPSTREAM end (the higher endpoint — where a fixture drop
+ * would meet it) to the nearest positioned fixture of the host storey and of
+ * the storey below. Evidence for the branch-length definition: a hang-band
+ * run serving the host storey has a small `toHostStoreyFixtureM`.
+ */
+export interface GauntletHangBandRunEvidence {
+  expressId: number
+  rule: EngineerStoreyHorizontalRule
+  planLengthM: number
+  toHostStoreyFixtureM: number | null
+  toStoreyBelowFixtureM: number | null
+}
+
+export interface GauntletEngineerBranchRuns {
+  /**
+   * V1 literal storey band (`selectEngineerBranchSegments`): resolved runs
+   * whose Z touches `[bottom, top)` plus geometry-less segments contained in
+   * the storey. `totalM` sums Pset lengths (true 3D), as the existing report does.
+   */
+  literalBand: { segments: number; byContainment: number; totalM: number }
+  /**
+   * Storey band ∪ 1.2 m hang band under the slab
+   * (`selectEngineerStoreyHorizontals`, resolved centrelines only) — the set
+   * `buildEngineerFloorDrawing` draws. `totalM` sums plan-projected lengths,
+   * the same measure as our branch runs.
+   */
+  union: { segments: number; inBandOnly: number; inHangOnly: number; both: number; totalM: number }
+  /** Per hang-band run (rule `in-hang` or `both`): nearest-fixture distances of its upstream end. */
+  hangBandRuns: GauntletHangBandRunEvidence[]
+}
+
 /** Everything `engineerComparisonMetrics` needs, plus the report and the scope facts, JSON-ready. */
 export interface GauntletMetricsInput {
   spec: GauntletFloorSpec
@@ -133,6 +169,14 @@ export interface GauntletMetricsInput {
     total: number
     literalBandSelection: { segments: number; byGeometry: number; byContainment: number }
   }
+  /**
+   * The engineer's horizontal sanitary runs of the storey under both storey
+   * definitions, so the harness can compute the branch-length ratio against
+   * either and print both (`gauntletMetrics` documents which one counts).
+   */
+  engineerBranchRuns: GauntletEngineerBranchRuns
+  /** Whole-building fixture positions the hang-band evidence was measured against; null without `wholeBuildingExtent`. */
+  storeyBelow: { id: StoreyId; name: string; fixtures: number } | null
   cores: Array<Pick<WetCore, 'id' | 'memberExpressIds' | 'kindsFingerprint' | 'kindCounts' | 'bbox' | 'centroid'>>
   continuityProbes: GauntletContinuityProbe[]
   fixtures: { merged: number; byKind: Record<string, number>; duplicates: number }
@@ -191,6 +235,60 @@ function selectHostStorey(storeys: Storey[], selector: GauntletFloorSpec['storey
 
 function planBoundsFromBox(box: { min: { x: number; z: number }; max: { x: number; z: number } }): PlanBounds {
   return { minX: box.min.x, maxX: box.max.x, minZ: box.min.z, maxZ: box.max.z }
+}
+
+function nearestPlanDistanceM(point: { xM: number; yM: number }, targets: readonly { xM: number; yM: number }[]): number | null {
+  let nearest = Infinity
+  for (const target of targets) {
+    const distance = Math.hypot(point.xM - target.xM, point.yM - target.yM)
+    if (distance < nearest) nearest = distance
+  }
+  return Number.isFinite(nearest) ? nearest : null
+}
+
+function fixturePlanPoints(fixtures: readonly Fixture[]): Array<{ xM: number; yM: number }> {
+  return fixtures.flatMap((fixture) => (fixture.position === null ? [] : [viewerPlanToDrawing(fixture.position)]))
+}
+
+function buildEngineerBranchRuns(
+  literalBand: ReturnType<typeof selectEngineerBranchSegments>,
+  hangSelection: EngineerStoreyHorizontalSelection,
+  metersPerSourceUnit: number,
+  hostFixtures: readonly Fixture[],
+  storeyBelowFixtures: readonly Fixture[] | null,
+): GauntletEngineerBranchRuns {
+  const hostPoints = fixturePlanPoints(hostFixtures)
+  const belowPoints = storeyBelowFixtures === null ? null : fixturePlanPoints(storeyBelowFixtures)
+  let unionTotalM = 0
+  let inBandOnly = 0
+  let inHangOnly = 0
+  let both = 0
+  const hangBandRuns: GauntletHangBandRunEvidence[] = []
+  for (const entry of hangSelection.horizontals) {
+    const start = ifcSourceToDrawing(entry.segment.start!, metersPerSourceUnit)
+    const end = ifcSourceToDrawing(entry.segment.end!, metersPerSourceUnit)
+    const planLengthM = Math.hypot(end.xM - start.xM, end.yM - start.yM)
+    unionTotalM += planLengthM
+    if (entry.rule === 'in-band') inBandOnly += 1
+    else if (entry.rule === 'in-hang') inHangOnly += 1
+    else both += 1
+    if (entry.rule === 'in-band') continue
+    const upstream = entry.segment.start!.z >= entry.segment.end!.z ? start : end
+    hangBandRuns.push({
+      expressId: entry.segment.expressId,
+      rule: entry.rule,
+      planLengthM,
+      toHostStoreyFixtureM: nearestPlanDistanceM(upstream, hostPoints),
+      toStoreyBelowFixtureM: belowPoints === null ? null : nearestPlanDistanceM(upstream, belowPoints),
+    })
+  }
+  let literalTotalM = 0
+  for (const segment of literalBand.segments) literalTotalM += segment.lengthM ?? 0
+  return {
+    literalBand: { segments: literalBand.segments.length, byContainment: literalBand.byContainmentCount, totalM: literalTotalM },
+    union: { segments: hangSelection.horizontals.length, inBandOnly, inHangOnly, both, totalM: unionTotalM },
+    hangBandRuns,
+  }
 }
 
 function unionPlanBounds(a: PlanBounds, b: PlanBounds): PlanBounds {
@@ -316,6 +414,7 @@ export async function runGauntletFloorPipeline(
   // --- whole-building fixtures for the V4 stack extent ------------------------
   let buildingFixtures: Fixture[] | null = null
   let buildingKitchens: KitchenArea[] | null = null
+  let fixturesByStoreyId: Record<StoreyId, Fixture[]> | null = null
   if (spec.wholeBuildingExtent) {
     const aggregated = await timed('wholeBuildingAggregation', () =>
       aggregateStoreyDetections(api, models.host, hostStoreys, DEFAULT_RISER_PLACEMENT_RULE_PROFILE, undefined, {
@@ -325,18 +424,24 @@ export async function runGauntletFloorPipeline(
     )
     buildingFixtures = Object.values(aggregated.fixturesByStoreyId).flat()
     buildingKitchens = Object.values(aggregated.kitchensByStoreyId).flat()
+    fixturesByStoreyId = aggregated.fixturesByStoreyId
   }
+  // Storey directly below the host storey (by elevation): the other candidate
+  // owner of the hang-band runs, for the branch-length evidence.
+  const storeyBelow =
+    [...hostStoreys]
+      .filter((storey) => storey.elevation < hostStorey.elevation)
+      .sort((a, b) => b.elevation - a.elevation)[0] ?? null
+  const storeyBelowFixtures = storeyBelow === null || fixturesByStoreyId === null ? null : (fixturesByStoreyId[storeyBelow.id] ?? [])
 
   // --- wet-core suggestion (the app's plain-mode path) ------------------------
   const floorMeshes = await timed('floorMeshes', () => extractFloorMeshes(api, models.host, hostStorey.id))
   // The page hands the suggestion the SOURCE-frame box (it mixes plan bounds with source-frame fixtures).
   const suggestionMeshes = { ...floorMeshes, boundingBox: floorMeshes.sourceBoundingBox }
-  // TODO(G3): pass `spec.typology` through `wetCore.typology` /
-  // `assignFixturesToRisers({ typology })` / `computeBranchRoutes({ rowCollectors })`
-  // once G3's typology option lands on the suggestion path (not on this branch yet).
-  if (spec.typology !== undefined) {
-    diagnostics.push(`typology "${spec.typology}" recorded; the suggestion path exposes no typology option yet, so residential rules were applied.`)
-  }
+  // Typology (G3) as the page does: `wetCore.typology` at suggest time, then
+  // the suggestion's own `typology` / `fixtureRows` reach assignment and
+  // routing (WorkspacePage: `suggestedTypology`, `suggestedFixtureRows`).
+  // An omitted typology is residential, byte-identical to the pre-G3 path.
   const suggestion = buildWetCoreSuggestedRisers({
     storeys: hostStoreys,
     sourceStoreyId: hostStorey.id,
@@ -344,7 +449,7 @@ export async function runGauntletFloorPipeline(
     kitchens: merged.kitchens,
     floorMeshes: suggestionMeshes,
     nextLabel: labeler(),
-    wetCore: { planUnits: 'm', continuityMap },
+    wetCore: { planUnits: 'm', continuityMap, ...(spec.typology === undefined ? {} : { typology: spec.typology }) },
     stackExtent:
       buildingFixtures === null || buildingKitchens === null
         ? undefined
@@ -366,9 +471,12 @@ export async function runGauntletFloorPipeline(
   const assignments = assignFixturesToRisers(
     merged.fixtures.map((fixture) => ({ expressId: fixture.expressId, kind: fixture.kind, storeyId: fixture.storeyId, position: fixture.position })),
     storeyRisers.map((riser) => ({ id: riser.id, stackId: riser.stackId, storeyId: riser.storeyId, position: riser.position })),
-    { units: 'm', coreMembership: { fixtureCoreIds, stackCoreIds } },
+    { units: 'm', coreMembership: { fixtureCoreIds, stackCoreIds }, typology: suggestion.typology },
   )
-  const routes = buildBranchRoutesFromAssignments(assignments)
+  const routes = buildBranchRoutesFromAssignments(assignments, { rowCollectors: suggestion.fixtureRows })
+  diagnostics.push(
+    `typology "${suggestion.typology}" applied (placement, branch limit, ${suggestion.fixtureRows.length} row collector(s)).`,
+  )
 
   // --- comparison metrics (as the page computes them) -------------------------
   const literalBand = selectEngineerBranchSegments(network, band)
@@ -389,6 +497,13 @@ export async function runGauntletFloorPipeline(
   }
   const report = computeEngineerComparison(comparisonInput)
   const hangSelection = selectEngineerStoreyHorizontals(network, band)
+  const engineerBranchRuns = buildEngineerBranchRuns(
+    literalBand,
+    hangSelection,
+    network.metersPerSourceUnit,
+    merged.fixtures,
+    storeyBelowFixtures,
+  )
 
   const continuityProbes: GauntletContinuityProbe[] = suggestion.stacks.map((stack) => ({
     stackId: stack.stackId,
@@ -460,6 +575,11 @@ export async function runGauntletFloorPipeline(
         byContainment: literalBand.byContainmentCount,
       },
     },
+    engineerBranchRuns,
+    storeyBelow:
+      storeyBelow === null || storeyBelowFixtures === null
+        ? null
+        : { id: storeyBelow.id, name: storeyBelow.name, fixtures: storeyBelowFixtures.length },
     cores: suggestion.cores.map((core) => ({
       id: core.id,
       memberExpressIds: core.memberExpressIds,

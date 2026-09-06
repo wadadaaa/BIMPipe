@@ -175,7 +175,7 @@ function toMeters(value: number, units: ComparisonPlanUnits): number {
   return units === 'mm' ? value / MM_PER_M : value
 }
 
-interface PlanPointM {
+export interface PlanPointM {
   xM: number
   yM: number
 }
@@ -183,9 +183,10 @@ interface PlanPointM {
 /**
  * One representative plan point per our-stack: the arithmetic mean of its
  * per-floor entries' plan positions (viewer x/z), converted to metres.
- * Deterministic: stacks ordered by stackId.
+ * Deterministic: stacks ordered by stackId. Exported for the gauntlet
+ * harness, which needs the same stack points the report's distance uses.
  */
-function ourStackPlanPointsM(
+export function ourStackPlanPointsM(
   risers: readonly ComparableOurRiser[],
   units: ComparisonPlanUnits,
 ): PlanPointM[] {

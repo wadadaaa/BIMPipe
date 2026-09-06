@@ -1,9 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { computeGauntletMetrics } from '@/domain/gauntletMetrics'
 import { drawingContentOutsideBounds, drawingLabelsContaining, drawingModelHasNonFinite } from './drawingModelChecks'
 import { parseGauntletFloorSpec, runGauntletFloorPipeline, type GauntletFloorSpec } from './gauntletFloorPipeline'
 import { closeSpecModels, GAUNTLET_BUILTIN_FLOOR_SPECS, openSpecModels, resolveSpecPaths, specFilesExist } from './gauntletFloorSpecs'
+import { gauntletMetricsInputFromPipeline } from './gauntletMetricsInput'
 
 /**
  * Export "script test" behind `GAUNTLET_EXPORT=1` — the node-side entry point
@@ -18,7 +20,8 @@ import { closeSpecModels, GAUNTLET_BUILTIN_FLOOR_SPECS, openSpecModels, resolveS
  * - `GAUNTLET_EXPORT_OUT=<dir>`    output root (default `external/gauntlet/models`)
  *
  * Writes `<out>/<floor>/engineer.json`, `ours.json` (`FloorDrawingModel`s),
- * `metrics-input.json` (`GauntletMetricsInput`) and `summary.json`
+ * `metrics-input.json` (`GauntletMetricsInput`), `metrics.json` (the hard
+ * metrics + verdict of `computeGauntletMetrics`) and `summary.json`
  * (both adapters' diagnostics + counts). Output lands under the gitignored
  * `external/` by default; it contains client-derived geometry and must stay there.
  */
@@ -90,6 +93,8 @@ describe.skipIf(!ENABLED)('gauntlet floor export (GAUNTLET_EXPORT=1)', () => {
         writeJson(path.join(outDir, 'engineer.json'), engineer.model)
         writeJson(path.join(outDir, 'ours.json'), ours.model)
         writeJson(path.join(outDir, 'metrics-input.json'), metricsInput)
+        const metrics = computeGauntletMetrics(gauntletMetricsInputFromPipeline(metricsInput))
+        writeJson(path.join(outDir, 'metrics.json'), metrics)
         const summary = {
           floor: spec.floor,
           storeyLabel: spec.storeyLabel,
@@ -113,8 +118,9 @@ describe.skipIf(!ENABLED)('gauntlet floor export (GAUNTLET_EXPORT=1)', () => {
             diagnostics: ours.diagnostics,
           },
           report: metricsInput.report,
+          metrics,
           pipelineDiagnostics: metricsInput.diagnostics,
-          files: ['engineer.json', 'ours.json', 'metrics-input.json', 'summary.json'],
+          files: ['engineer.json', 'ours.json', 'metrics-input.json', 'metrics.json', 'summary.json'],
         }
         writeJson(path.join(outDir, 'summary.json'), summary)
         console.info(`[gauntlet export] wrote ${outDir}`)
