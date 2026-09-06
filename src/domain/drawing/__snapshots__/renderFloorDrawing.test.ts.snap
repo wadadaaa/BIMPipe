@@ -1,0 +1,30 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`renderFloorDrawingSvg > renders the mini model to a stable SVG document 1`] = `
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="502.36" height="554.33" viewBox="0 0 502.36 554.33" font-family="Arial, Helvetica, 'Liberation Sans', sans-serif" data-scale="1:100" data-dpi="220">
+<defs><pattern id="wall-hatch" patternUnits="userSpaceOnUse" width="19.92" height="19.92"><rect width="19.92" height="19.92" fill="#e7e7e2"/><path d="M0 0L19.92 19.92M0 19.92L19.92 0" stroke="#c9c9c4" stroke-width="1.13"/></pattern></defs>
+<rect width="502.36" height="554.33" fill="#ffffff"/>
+<g id="underlay">
+<path d="M121.26 155.91L381.1 155.91L381.1 138.58L121.26 138.58Z" fill="url(#wall-hatch)" stroke="#8c8c8c" stroke-width="3.03" stroke-linejoin="miter"/>
+</g>
+<g id="fixtures">
+<g transform="translate(207.87 186.22) scale(1 -1) rotate(180)" fill="#ebebeb" stroke="#8fb0a4" stroke-width="1.56" data-fixture="wc-1"><rect x="-16.46" y="-30.31" width="32.91" height="15.76"/><ellipse cx="0" cy="7.88" rx="13.82" ry="22.43"/><ellipse cx="0" cy="9.7" rx="9.87" ry="15.25"/></g>
+</g>
+<g id="pipes">
+<g data-pipe="run-1" data-role="branch" stroke-linecap="butt"><line x1="207.87" y1="186.22" x2="337.8" y2="251.18" stroke="#004000" stroke-width="12.65"/><line x1="207.87" y1="186.22" x2="337.8" y2="251.18" stroke="#92d050" stroke-width="9.53"/><g stroke="#d9f2b8" stroke-width="1.56"><line x1="215.04" y1="195.13" x2="219.3" y2="186.61"/><line x1="326.37" y1="250.79" x2="330.63" y2="242.27"/></g></g>
+</g>
+<g id="sleeves">
+</g>
+<g id="stacks">
+<g data-stack="stack-1"><path d="M320.91 251.18H354.69M337.8 234.29V268.07" stroke="#000000" stroke-width="1.56"/><circle cx="337.8" cy="251.18" r="11.26" fill="#92d050" stroke="#000000" stroke-width="2.17"/></g>
+</g>
+<g id="pipe-labels" fill="#000000">
+<g transform="translate(253.35 208.96) rotate(26.57)" data-label-for="run-1"><text x="0" y="-21.74" font-size="25.98" text-anchor="middle">2.0%</text><g stroke="#000000" stroke-width="1.56" fill="#000000"><line x1="-25.98" y1="-14.98" x2="12.13" y2="-14.98"/><path d="M25.98 -14.98L12.13 -18.88L12.13 -11.09Z"/></g><text x="0" y="33.69" font-size="25.98" text-anchor="middle">ø110 mm</text><text x="0" y="51.36" font-size="17.32" text-anchor="middle">SW-GRV</text></g>
+</g>
+<g id="stack-tags" fill="#000000">
+<g data-tag-for="stack-1"><line x1="224.21" y1="285.32" x2="315.4" y2="257.91" stroke="#000000" stroke-width="1.13"/><path d="M327.01 254.42L316.4 261.23L314.4 254.6Z" fill="#000000"/><rect x="52.66" y="285.32" width="224.5" height="35.65" rx="17.83" fill="#ffffff" stroke="#000000" stroke-width="1.56"/><text x="164.91" y="312.5" font-size="25.98" text-anchor="middle" direction="ltr" unicode-bidi="bidi-override">ø110 mm (2.1ק)</text></g>
+</g>
+<g id="title" fill="#000000"><circle cx="155.91" cy="389.76" r="34.65" fill="none" stroke="#000000" stroke-width="2.17"/><text x="155.91" y="400.68" font-size="30.31" text-anchor="middle">1</text><text x="216.54" y="386.3" font-size="43.31" direction="ltr" unicode-bidi="bidi-override">Storey 02 — sanitary plan</text><line x1="216.54" y1="396.69" x2="381.1" y2="396.69" stroke="#000000" stroke-width="3.03"/><text x="216.54" y="428.91" font-size="30.31">1 : 100</text></g>
+</svg>"
+`;
