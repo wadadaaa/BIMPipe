@@ -8,7 +8,7 @@ Privacy rule: `external/` and `refs/` are never committed. Per-round renderings,
 | --- | --- | --- |
 | G0 — Branch, `FloorDrawingModel` contract (`src/domain/drawing/floorDrawingModel.ts`) | ✅ | shared renderer input for our suggestion and the engineer network |
 | G1 — Drawing renderer (pure model → SVG/PNG), style-critic calibration vs reference sheet, "Drawing preview" export in Risers panel | ⏳ | |
-| G2 — Engineer floor adapter: storey-scoped stacks + SW-GRV branches, ø, slopes from invert elevations → `FloorDrawingModel`; our-suggestion adapter | ⏳ | |
+| G2 — Engineer floor adapter: storey-scoped stacks + SW-GRV branches, ø, slopes from invert elevations → `FloorDrawingModel`; our-suggestion adapter | ✅ | commits `eb1735b`, `74ff14f`, `31c2824`; 15/9 engineer stacks, 125/49 drawn runs, slope coverage 89.6 % / 79.6 %; export CLI `tools/gauntlet/export-floor-models.ts`; typology pass-through awaits G3 |
 | G3 — Typology switch residential \| office on upload; office placement (core shafts only, row collectors, raised branch limit placeholder) | ⏳ | |
 | G4 — Gauntlet harness: hard metrics, anonymized A/B pairs, fresh-context critic protocol, per-round log under `external/gauntlet/` | ⏳ | after G1–G3 |
 | G5 — Round loop (≤ 12 rounds, both floors every round) | ⏳ | stop at ≤ 6/10 engineer preferences on both floors |
@@ -22,6 +22,10 @@ Privacy rule: `external/` and `refs/` are never committed. Per-round renderings,
 ## Goal 4 milestones
 
 (entries are appended per task as they land)
+
+### G2 — Drawing adapters ✅ (2026-09-06, commits `eb1735b`, `74ff14f`, `31c2824`)
+
+Two adapters in `src/shared/drawing/` build the renderer's `FloorDrawingModel` from the same app data path: `buildEngineerFloorDrawing` (risers = sanitary stacks intersecting the storey band + vents; pipes = horizontal runs whose Z lies in the storey band or in a documented 1.2 m hang band under the slab — `ENGINEER_HANG_DEPTH_M` — with both counts always reported; slope from endpoint Z over plan length, 0 % measured on flats ≥ 100 mm, null below 1 mm, |slope| > 10 % flagged as outliers and drawn without slope; `collector` when ≥ 2 upstream branches join within 50 mm, plus a 150 mm fitting-bridged count as diagnostic because Revit pipes meet through `IfcFlowFitting` bodies that are not extracted) and `buildOurFloorDrawing` (wet-core stacks, route segments, Ø63/trunk segments as collectors). Tags follow the sheet convention `<floor>.<n>ק` from a pure formatter; engineer `Tag`/`Name` were probed and rejected (Revit element ids / type names). Gated pins on both floors: engineer stacks 15 / 9; drawn engineer runs 125 (12 in the literal band + 122 in the hang band, 9 in both; 71.7 m) / 49 (14 + 35; 25.6 m); slope coverage 89.6 % / **79.6 %** (second floor one run under the 80 % target — five sub-100 mm pieces are unresolvable at 1 mm, five 45° offset pieces are outliers; pinned as measured, not tuned); strict collectors 2 / 0 (bridged 43 / 1); all content inside bounds, no NaN, no file-name substrings. Structure on the podium storey is sparse (2 walls from the architecture file) — that sheet will look bare; the office storey carries 308 walls, 42 columns, 115 slab openings. `tools/gauntlet/export-floor-models.ts` writes `engineer.json`, `ours.json`, `metrics-input.json`, `summary.json` per floor under `external/gauntlet/models/` via a `GAUNTLET_EXPORT=1` vitest script test (the only Node runner with web-ifc + aliases wired); ≈0.5 s per floor. `typology` is accepted in the spec and recorded in diagnostics but not yet passed to the suggestion path (`TODO(G3)`) — G4 must wire it once G3 lands. Coordinates are absolute source metres (hundreds of km) so the renderer must localise from `boundsM`.
 
 ---
 
