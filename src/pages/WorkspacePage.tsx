@@ -2,6 +2,8 @@ import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRe
 import { IfcUpload } from '@/features/ifc-upload/IfcUpload'
 import { StoreyList } from '@/features/storey-list/StoreyList'
 import { Sidebar } from '@/features/sidebar/Sidebar'
+import { buildDrawingPreview } from '@/features/drawing-preview/buildDrawingPreview'
+import { downloadDrawingPreview } from '@/features/drawing-preview/downloadDrawingPreview'
 import { ViewTransition } from '@/shared/reactViewTransition'
 import { ViewerPlaceholder } from '@/viewer/ViewerPlaceholder'
 import { WorkspaceLayout } from '@/widgets/WorkspaceLayout'
@@ -1182,6 +1184,29 @@ export function WorkspacePage({
       : []
   const sidebarRisers = isExtractingGeometry ? [] : currentFloorRisers
 
+  // Drawing preview (G1): the open floor's suggestion as a sanitary plan SVG,
+  // all inputs in the source frame (the adapter converts to the drawing frame).
+  const handleDrawingPreview = (): string | null => {
+    if (selectedStorey === null) return 'Open a floor first.'
+    try {
+      downloadDrawingPreview(
+        buildDrawingPreview({
+          storeyId: selectedStorey.id,
+          storeyName: selectedStorey.name,
+          risers,
+          routes: branchRouteFloors,
+          fixtures,
+          planBounds: floorMeshes ? readSourcePlanBounds(floorMeshes) : null,
+          storeys,
+          shaftCandidates: continuityMap?.map.shaftCandidates,
+        }),
+      )
+      return null
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err)
+    }
+  }
+
   // --- viewer boundary: convert to the local rendering frame ---
   // Everything the viewers consume gets the model origin subtracted; domain
   // state stays in source coordinates. With the identity frame these helpers
@@ -1528,6 +1553,7 @@ export function WorkspacePage({
       suggestProgress={suggestProgress}
       suggestError={suggestError}
       onCancelSuggestRisers={handleCancelSuggestRisers}
+      onDrawingPreview={handleDrawingPreview}
     />
   )
 

@@ -94,6 +94,8 @@ interface SidebarProps {
   suggestProgress?: { processed: number; total: number; storeyName: string | null } | null
   suggestError?: string | null
   onCancelSuggestRisers?: () => void
+  /** Drawing preview (G1): returns null on success or a reason; undefined hides the button. */
+  onDrawingPreview?: () => string | null
 }
 
 interface TabMeta {
@@ -193,6 +195,7 @@ export function Sidebar({
   suggestProgress = null,
   suggestError = null,
   onCancelSuggestRisers = () => {},
+  onDrawingPreview,
 }: SidebarProps) {
   const tabs = demoFlowEnabled ? DEMO_TABS : TABS
   const activeTabMeta = tabs.find((tab) => tab.id === activeTab)!
@@ -323,6 +326,7 @@ export function Sidebar({
                 suggestProgress={suggestProgress}
                 suggestError={suggestError}
                 onCancelSuggestRisers={onCancelSuggestRisers}
+                onDrawingPreview={onDrawingPreview}
               />
             ) : (
               <PlacementValidationPanel
