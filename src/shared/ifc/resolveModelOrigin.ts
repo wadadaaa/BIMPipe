@@ -3,10 +3,12 @@ import { detectPlanUnits, type Point3D } from '@/shared/routes/planGeometry'
 import {
   chooseModelOrigin,
   isFarFromOrigin,
+  resolveContextSourceFrame,
   type LengthUnit,
   type ModelOriginDecision,
 } from '@/shared/frame/modelFrame'
 import { resolveLocalPlacementWorldMatrix } from './localPlacementMatrix'
+import { readRepresentationContextFrame } from './readRepresentationContextFrame'
 
 export interface PlanBoundsM {
   minX: number
@@ -82,6 +84,13 @@ export async function readPlacementOriginProbe(
  * geometry is the one signal that is reliably in viewer metres without a unit
  * reader. Both signals are deterministic for a given IFC file.
  *
+ * Near-origin geometry additionally consults the 3D 'Model' representation
+ * context: when its WorldCoordinateSystem is >1 km away (Revit "Project Base
+ * Point" exports keep the survey offset and TrueNorth there, and web-ifc does
+ * not apply it), the decision keeps the identity render origin — the viewer
+ * must not shift geometry that is already near zero — but reports
+ * `detectedBy: 'context'` with the offset/rotation as `sourceFrame` metadata.
+ *
  * Returns null when the storey has no usable geometry bounds — the caller
  * should retry on the next storey instead of freezing a wrong origin.
  */
@@ -100,7 +109,12 @@ export async function resolveModelOriginDecision(
   const centroid: Point3D = { x: (minX + maxX) / 2, y: 0, z: (minZ + maxZ) / 2 }
 
   if (!isFarFromOrigin(centroid.x, centroid.z, 'm')) {
-    // Near-origin model: identity frame, no placement probe needed.
+    // Near-origin model: identity frame, no placement probe needed. The
+    // context WCS may still document a far absolute frame (metadata only).
+    const sourceFrame = await readContextSourceFrame(api, modelId, declaredUnit)
+    if (sourceFrame !== null) {
+      return { origin: { x: 0, y: 0, z: 0 }, detectedBy: 'context', sourceFrame }
+    }
     return { origin: { x: 0, y: 0, z: 0 }, detectedBy: 'none' }
   }
 
@@ -114,4 +128,18 @@ export async function resolveModelOriginDecision(
   }
 
   return chooseModelOrigin({ storeyGeometryCentroid: centroid })
+}
+
+async function readContextSourceFrame(
+  api: IfcAPI,
+  modelId: number,
+  declaredUnit: LengthUnit | null,
+) {
+  try {
+    const context = await readRepresentationContextFrame(api, modelId, declaredUnit)
+    return context === null ? null : resolveContextSourceFrame(context)
+  } catch {
+    // A malformed context must not break floor loading; treat as absent.
+    return null
+  }
 }

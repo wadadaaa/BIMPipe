@@ -13,6 +13,8 @@ const bathAssignment: FixtureRiserAssignment = {
   riserPosition: { x: 1000, y: 612, z: 950 },
   planDistance: 250,
   units: 'mm',
+  assignedBy: 'nearest',
+  exceedsMaxBranchLength: false,
 }
 
 const unassignedToilet: FixtureRiserAssignment = {

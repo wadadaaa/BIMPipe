@@ -5,12 +5,18 @@ import type { ModelOriginDecision } from '@/shared/frame/modelFrame'
 import type { LengthUnit } from '@/shared/lengthUnits'
 import type { StoreyAlignment } from '@/domain/alignStoreys'
 import type { MergedStoreyDetection } from '@/domain/mergeFixturesAcrossFiles'
-import type { EngineerPipeNetwork, EngineerRiserStack } from '@/domain/engineerPipes'
+import type { EngineerPipeNetwork, EngineerRiserClassification } from '@/domain/engineerPipes'
 import type { ContinuityMap } from '@/domain/continuityMap'
-import type { SuggestedRiserSnapOutcome } from '@/shared/routes/buildSuggestedRisers'
+import type { WetCore } from '@/domain/wetCores'
+import type {
+  SuggestedRiserSnapOutcome,
+  SuggestedRiserStackExtent,
+  WetCoreSuggestedStack,
+} from '@/shared/routes/buildSuggestedRisers'
 import { appendAdjustment, createAdjustLog, type AdjustLog } from '@/domain/adjustLog'
 import { getDemoRuntimeConfig, type DemoRuntimeConfig } from '@/shared/demoConfig'
 import { removeRiserStack } from '@/shared/routes/buildRiserStacks'
+import { resolveRoutingModel, type RoutingModel } from '@/shared/routes/routingModel'
 
 /** A non-host model opened alongside the host in a multi-file upload (W4). */
 export interface LinkedModelState {
@@ -30,15 +36,16 @@ export interface StoreyUnderlayState {
 
 /**
  * Engineer plumbing baseline extracted on demand (W7): the prefix-filtered
- * pipe network of one loaded model plus its grouped vertical riser stacks.
- * Endpoints stay in IFC SOURCE coordinates; the viewer boundary converts them
- * through `src/shared/frame/ifcSourceFrame.ts`.
+ * pipe network of one loaded model plus its classified vertical runs
+ * (sanitary stacks / vent stacks / stubs, V1). Endpoints stay in IFC SOURCE
+ * coordinates; the viewer boundary converts them through
+ * `src/shared/frame/ifcSourceFrame.ts`.
  */
 export interface EngineerBaselineState {
   sourceFileName: string
   systemPrefixes: readonly string[]
   network: EngineerPipeNetwork
-  stacks: EngineerRiserStack[]
+  riserClassification: EngineerRiserClassification
 }
 
 /**
@@ -47,7 +54,10 @@ export interface EngineerBaselineState {
  * the W4 alignment before they land here). Timings feed the Decisions tab.
  */
 export interface ContinuityMapState {
-  /** File the walls/voids/spaces were extracted from (host or linked). */
+  /**
+   * Files the walls/voids/spaces were extracted from, '+'-joined when several
+   * loaded files contributed (V3 multi-model build).
+   */
   sourceFileName: string
   map: ContinuityMap
   /** Adapter/remap diagnostics + map.diagnostics, already combined. */
@@ -55,6 +65,32 @@ export interface ContinuityMapState {
   extractMs: number
   buildMs: number
   processedStoreyCount: number
+}
+
+/**
+ * Outcome of the last wet-core suggest run (V3), for the Risers/Decisions
+ * panels and the debug JSON. Null in demo mode (toilet-anchored path) and
+ * before the first suggest.
+ */
+export interface WetCoreSuggestionState {
+  sourceStoreyId: StoreyId
+  /** Stacks that landed in state (override-superseded stacks are NOT here). */
+  stacks: WetCoreSuggestedStack[]
+  /** Every wet core of the source storey, including ones whose stack was superseded. */
+  cores: WetCore[]
+  /** Core ids whose new auto stack was dropped because a moved stack of the same core exists. */
+  supersededCoreIds: string[]
+  /** Stack ids kept from the previous state (manual / moved) during the merge. */
+  preservedStackIds: string[]
+  diagnostics: string[]
+}
+
+/** Progress of the async suggest flow (whole-building detection scan). */
+export interface SuggestProgress {
+  processed: number
+  total: number
+  /** Raw storey name being scanned (render with dir="auto"). */
+  storeyName: string | null
 }
 
 // All WorkspacePage state in one place. Pure module: no React imports, no side
@@ -78,6 +114,9 @@ export interface WorkspacePageState {
   // Resolved once at mount and never changed by any action.
   demoRuntime: DemoRuntimeConfig
   demoRuntimeConfigError: string | null
+  // The single horizontal-routing switch (V5), derived from demoRuntime once at
+  // mount: 'branch-runs' in plain mode, 'demo-chains' for the demo runtime.
+  routingModel: RoutingModel
 
   // --- linked models (multi-IFC ingest) ---
   // Non-host files of a multi-file upload, in upload order. Empty for a
@@ -167,12 +206,28 @@ export interface WorkspacePageState {
   continuityBuildError: string | null
   // Per-storey visibility of the continuity debug overlay; absent = visible.
   continuityOverlayVisibleByStorey: Map<StoreyId, boolean>
-  // Advanced flag: pass `continuitySnap` into the suggest flow. OFF by default;
-  // with the flag off, suggestions are byte-identical to the pre-W5 behaviour.
+  // Snap flag: ON by default in plain mode (V3 wet-core placement consults the
+  // continuity map whenever one is built), OFF in demo mode where the
+  // toilet-anchored suggestions stay byte-identical to the pre-W5 behaviour.
   continuitySnapEnabled: boolean
   // Snap outcomes of the LAST suggest run (one per suggested stack); null when
   // the last run had snapping off. Misses stay visible here, never dropped.
   riserSnapOutcomes: SuggestedRiserSnapOutcome[] | null
+
+  // --- wet-core suggestion + override bookkeeping (V3) ---
+  // Auto stack id → wet-core id for stacks produced by the wet-core path. Lets a
+  // re-suggest recognise "the moved stack of THIS core already exists" and skip
+  // the fresh auto stack for it. Manual stacks never appear here.
+  autoStackCoreIds: Map<string, string>
+  // Per-stack vertical extent decisions of the last suggest run (V4); null when
+  // the run did not bound stacks (demo mode / no whole-building fixtures).
+  riserStackExtents: SuggestedRiserStackExtent[] | null
+  wetCoreSuggestion: WetCoreSuggestionState | null
+  // Async suggest lifecycle: the whole-building detection scan runs before the
+  // stacks are built; progress is visible and the scan is cancellable.
+  isSuggestingRisers: boolean
+  suggestProgress: SuggestProgress | null
+  suggestError: string | null
 }
 
 export const initialWorkspacePageState: WorkspacePageState = {
@@ -186,6 +241,7 @@ export const initialWorkspacePageState: WorkspacePageState = {
   demoAssetError: null,
   demoRuntime: { enabled: false },
   demoRuntimeConfigError: null,
+  routingModel: 'branch-runs',
   linkedModels: [],
   storeyAlignments: [],
   selectedStoreyId: null,
@@ -221,6 +277,12 @@ export const initialWorkspacePageState: WorkspacePageState = {
   continuityOverlayVisibleByStorey: new Map(),
   continuitySnapEnabled: false,
   riserSnapOutcomes: null,
+  autoStackCoreIds: new Map(),
+  riserStackExtents: null,
+  wetCoreSuggestion: null,
+  isSuggestingRisers: false,
+  suggestProgress: null,
+  suggestError: null,
 }
 
 // Lazy initializer for useReducer: resolves the demo runtime config exactly once
@@ -228,18 +290,32 @@ export const initialWorkspacePageState: WorkspacePageState = {
 // useState initializer.
 export function createInitialWorkspacePageState(): WorkspacePageState {
   try {
+    const demoRuntime = getDemoRuntimeConfig()
     return {
       ...initialWorkspacePageState,
-      demoRuntime: getDemoRuntimeConfig(),
+      demoRuntime,
       demoRuntimeConfigError: null,
+      routingModel: resolveRoutingModel(demoRuntime),
+      continuitySnapEnabled: defaultContinuitySnapEnabled(demoRuntime),
     }
   } catch (error) {
     return {
       ...initialWorkspacePageState,
       demoRuntime: { enabled: false },
       demoRuntimeConfigError: error instanceof Error ? error.message : 'Demo mode config is invalid.',
+      routingModel: resolveRoutingModel({ enabled: false }),
+      continuitySnapEnabled: defaultContinuitySnapEnabled({ enabled: false }),
     }
   }
+}
+
+/**
+ * V3: snapping is ON by default in plain mode — whenever a continuity map is
+ * built, the wet-core placement consults it. Demo mode keeps the W5 default
+ * (OFF) so its suggestions stay byte-identical; the toggle remains for debug.
+ */
+export function defaultContinuitySnapEnabled(demoRuntime: DemoRuntimeConfig): boolean {
+  return !demoRuntime.enabled
 }
 
 export type WorkspacePageAction =
@@ -305,8 +381,29 @@ export type WorkspacePageAction =
   // Label normalization computed by the page effect from the current risers.
   | { type: 'risers-normalized'; risers: Riser[] }
   // `snapOutcomes` is present (possibly empty) when the suggest run used the
-  // continuity-snap flag, null/omitted when the flag was off.
-  | { type: 'risers-suggested'; risers: Riser[]; snapOutcomes?: SuggestedRiserSnapOutcome[] | null }
+  // continuity-snap flag, null/omitted when the flag was off. `risers` are the
+  // NEW auto stacks only; the reducer merges them with the preserved manual /
+  // moved stacks (see mergeSuggestedRisers). `stackCoreIds` / `wetCore` /
+  // `stackExtents` come from the wet-core path (V3) and are omitted in demo mode.
+  | {
+      type: 'risers-suggested'
+      risers: Riser[]
+      snapOutcomes?: SuggestedRiserSnapOutcome[] | null
+      stackExtents?: SuggestedRiserStackExtent[] | null
+      stackCoreIds?: Array<{ stackId: string; coreId: string }>
+      wetCore?: {
+        sourceStoreyId: StoreyId
+        stacks: WetCoreSuggestedStack[]
+        cores: WetCore[]
+        diagnostics: string[]
+      } | null
+    }
+  // Async suggest lifecycle (V3): the whole-building scan before the stacks are
+  // built. `suggest-cancelled` / `suggest-failed` are explicit, never silent.
+  | { type: 'suggest-started' }
+  | { type: 'suggest-progress'; processed: number; total: number; storeyName: string | null }
+  | { type: 'suggest-cancelled' }
+  | { type: 'suggest-failed'; message: string }
   | { type: 'add-riser-toggled' }
   | { type: 'branch-routes-toggled'; storeyId: StoreyId }
   // Engineer baseline extraction lifecycle (W7). Extraction is async in the
@@ -399,8 +496,14 @@ function reduce(state: WorkspacePageState, action: WorkspacePageAction): Workspa
         continuityBuildProgress: null,
         continuityBuildError: null,
         continuityOverlayVisibleByStorey: new Map(),
-        continuitySnapEnabled: false,
+        continuitySnapEnabled: defaultContinuitySnapEnabled(state.demoRuntime),
         riserSnapOutcomes: null,
+        autoStackCoreIds: new Map(),
+        riserStackExtents: null,
+        wetCoreSuggestion: null,
+        isSuggestingRisers: false,
+        suggestProgress: null,
+        suggestError: null,
       }
 
     case 'model-opened':
@@ -513,9 +616,13 @@ function reduce(state: WorkspacePageState, action: WorkspacePageAction): Workspa
       const removed = state.risers.find((riser) => riser.id === action.riserId)
       const risers = removeRiserStack(state.risers, action.riserId)
       if (risers === state.risers || !removed) return state
+      // Removal is not an override: the next suggest may propose the core again.
+      const autoStackCoreIds = new Map(state.autoStackCoreIds)
+      autoStackCoreIds.delete(removed.stackId)
       return {
         ...state,
         risers,
+        autoStackCoreIds,
         adjustLog: appendAdjustment(state.adjustLog, {
           action: 'remove',
           stackId: removed.stackId,
@@ -563,14 +670,48 @@ function reduce(state: WorkspacePageState, action: WorkspacePageAction): Workspa
     case 'risers-normalized':
       return { ...state, risers: action.risers }
 
-    case 'risers-suggested':
+    case 'risers-suggested': {
+      const merge = mergeSuggestedRisers(state, action.risers, action.stackCoreIds ?? [])
+      const wetCore = action.wetCore ?? null
       return {
         ...state,
-        risers: action.risers,
+        risers: merge.risers,
+        autoStackCoreIds: merge.autoStackCoreIds,
         isAddingRiser: false,
         activeTab: 'risers',
         riserSnapOutcomes: action.snapOutcomes ?? null,
+        riserStackExtents: action.stackExtents ?? null,
+        wetCoreSuggestion:
+          wetCore === null
+            ? null
+            : {
+                sourceStoreyId: wetCore.sourceStoreyId,
+                stacks: wetCore.stacks.filter((stack) => !merge.supersededStackIds.has(stack.stackId)),
+                cores: wetCore.cores,
+                supersededCoreIds: merge.supersededCoreIds,
+                preservedStackIds: merge.preservedStackIds,
+                diagnostics: wetCore.diagnostics,
+              },
+        isSuggestingRisers: false,
+        suggestProgress: null,
+        suggestError: null,
       }
+    }
+
+    case 'suggest-started':
+      return { ...state, isSuggestingRisers: true, suggestProgress: null, suggestError: null }
+
+    case 'suggest-progress':
+      return {
+        ...state,
+        suggestProgress: { processed: action.processed, total: action.total, storeyName: action.storeyName },
+      }
+
+    case 'suggest-cancelled':
+      return { ...state, isSuggestingRisers: false, suggestProgress: null, suggestError: null }
+
+    case 'suggest-failed':
+      return { ...state, isSuggestingRisers: false, suggestProgress: null, suggestError: action.message }
 
     case 'add-riser-toggled':
       return { ...state, isAddingRiser: !state.isAddingRiser }
@@ -664,6 +805,108 @@ function reduce(state: WorkspacePageState, action: WorkspacePageAction): Workspa
 
     case 'view-mode-set':
       return { ...state, viewMode: action.viewMode }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Re-suggest merge rule (AGENTS.md / CLAUDE.md "manual override must always win")
+// ---------------------------------------------------------------------------
+
+/**
+ * Stack ids that survive a re-suggest: user-added stacks (`source: 'manual'`)
+ * and auto stacks the user dragged (a 'move' entry in the adjust log — the
+ * override marker; the reducer never rewrites `source`). Removed stacks are
+ * not overrides: the next suggest may propose the core again.
+ */
+export function selectOverriddenStackIds(state: Pick<WorkspacePageState, 'risers' | 'adjustLog'>): Set<string> {
+  const movedStackIds = new Set(
+    state.adjustLog.entries.filter((entry) => entry.action === 'move').map((entry) => entry.stackId),
+  )
+  const preserved = new Set<string>()
+  for (const riser of state.risers) {
+    if (riser.source === 'manual' || movedStackIds.has(riser.stackId)) preserved.add(riser.stackId)
+  }
+  return preserved
+}
+
+/** Risers that a re-suggest keeps untouched (see {@link selectOverriddenStackIds}). */
+export function selectPreservedRisersOnResuggest(
+  state: Pick<WorkspacePageState, 'risers' | 'adjustLog'>,
+): Riser[] {
+  const preserved = selectOverriddenStackIds(state)
+  return state.risers.filter((riser) => preserved.has(riser.stackId))
+}
+
+/**
+ * Wet cores whose auto stack was moved by the user: the builder skips them on
+ * re-suggest (no fresh stack, no label consumed) so labels stay contiguous.
+ * Manual stacks have no core and never appear here.
+ */
+export function selectPreservedCoreIdsOnResuggest(
+  state: Pick<WorkspacePageState, 'risers' | 'adjustLog' | 'autoStackCoreIds'>,
+): Set<string> {
+  const preserved = new Set<string>()
+  for (const stackId of selectOverriddenStackIds(state)) {
+    const coreId = state.autoStackCoreIds.get(stackId)
+    if (coreId !== undefined) preserved.add(coreId)
+  }
+  return preserved
+}
+
+export interface MergeSuggestedRisersResult {
+  /** Preserved stacks first (in their existing order), then the accepted new auto stacks. */
+  risers: Riser[]
+  autoStackCoreIds: Map<string, string>
+  preservedStackIds: string[]
+  /** New auto stacks dropped because a preserved (moved) stack already represents their core. */
+  supersededStackIds: Set<string>
+  supersededCoreIds: string[]
+}
+
+/**
+ * Final riser set = (auto risers without an override → replaced by the new
+ * suggestion) + (overridden auto risers, i.e. moved) + (user-added risers).
+ * A new auto stack whose wet-core id matches a preserved auto stack's core is
+ * dropped so the moved stack stays the only stack of that core. Without core
+ * ids (demo / toilet-anchored path) every new auto stack is accepted next to
+ * the preserved ones.
+ */
+export function mergeSuggestedRisers(
+  state: Pick<WorkspacePageState, 'risers' | 'adjustLog' | 'autoStackCoreIds'>,
+  incoming: Riser[],
+  stackCoreIds: Array<{ stackId: string; coreId: string }>,
+): MergeSuggestedRisersResult {
+  const preservedStackIdSet = selectOverriddenStackIds(state)
+  const preservedRisers = state.risers.filter((riser) => preservedStackIdSet.has(riser.stackId))
+  const preservedCoreIds = new Set<string>()
+  const autoStackCoreIds = new Map<string, string>()
+  for (const stackId of preservedStackIdSet) {
+    const coreId = state.autoStackCoreIds.get(stackId)
+    if (coreId !== undefined) {
+      preservedCoreIds.add(coreId)
+      autoStackCoreIds.set(stackId, coreId)
+    }
+  }
+
+  const incomingCoreByStack = new Map(stackCoreIds.map((entry) => [entry.stackId, entry.coreId]))
+  const supersededStackIds = new Set<string>()
+  const supersededCoreIds: string[] = []
+  for (const [stackId, coreId] of incomingCoreByStack) {
+    if (preservedCoreIds.has(coreId)) {
+      supersededStackIds.add(stackId)
+      supersededCoreIds.push(coreId)
+    } else {
+      autoStackCoreIds.set(stackId, coreId)
+    }
+  }
+  const accepted = incoming.filter((riser) => !supersededStackIds.has(riser.stackId))
+
+  return {
+    risers: [...preservedRisers, ...accepted],
+    autoStackCoreIds,
+    preservedStackIds: [...new Set(preservedRisers.map((riser) => riser.stackId))],
+    supersededStackIds,
+    supersededCoreIds,
   }
 }
 

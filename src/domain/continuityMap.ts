@@ -77,6 +77,16 @@ export interface ContinuityVoidInput {
    */
   kind: ContinuityVoidKind
   footprint: PlanFootprint
+  /**
+   * Id of the obstruction this void cuts (`IfcRelVoidsElement` host, e.g.
+   * `slab:1234`, same format as {@link ContinuityObstructionInput.id}). When
+   * set: a wall-hosted opening (door / window) never carves a slab, and a slab
+   * that is an INFILL of the void (its footprint lies inside the void — a
+   * tower plate sitting in the cut-out of a larger plate) stays solid and the
+   * filled void is not a shaft candidate. Voids without a host keep the legacy
+   * behaviour and carve every slab on the storey.
+   */
+  hostId?: string
 }
 
 export interface ContinuitySpaceInput {
@@ -139,9 +149,10 @@ export interface StoreyObstructionGrid {
   /**
    * Row-major blocked flags, one byte per cell: index = row * columns + col,
    * value 1 = blocked, 0 = free. A cell is blocked when a wall or column
-   * intersects it, or when a slab covers it and no void (slab opening /
-   * vertical void) contains the cell centre — i.e. slab inputs describe the
-   * slab extents and voids carve the openings back out ("slab solid").
+   * intersects it, or when a slab covers it and no void that applies to that
+   * slab (slab openings; not wall openings, not voids the slab is an infill
+   * of — see `hostId`) contains the cell centre — i.e. slab inputs describe
+   * the slab extents and voids carve the openings back out ("slab solid").
    */
   blocked: Uint8Array
 }
@@ -402,42 +413,51 @@ function buildObstructionGrid(
     }
   }
 
-  // Walls and columns block outright; slabs block only where no void opens them.
-  const hardBlocked = new Uint8Array(columns * rows)
-  const slabBlocked = new Uint8Array(columns * rows)
-  for (const obstruction of storey.obstructions) {
-    const target = obstruction.kind === 'slab' ? slabBlocked : hardBlocked
-    rasterize(obstruction.footprint, (cellIndex) => {
-      target[cellIndex] = 1
-    })
-  }
-
   // A void re-opens a slab cell only when it contains the cell centre, so
   // partially covered edge cells stay conservative (blocked).
-  const voidCovered = new Uint8Array(columns * rows)
-  for (const voidInput of storey.voids) {
-    rasterize(voidInput.footprint, (cellIndex) => {
-      const row = Math.floor(cellIndex / columns)
-      const col = cellIndex % columns
-      const center: PlanPoint = {
-        x: origin.x + (col + 0.5) * cellSize,
-        z: origin.z + (row + 0.5) * cellSize,
-      }
-      const inside =
-        voidInput.footprint.shape === 'bbox'
-          ? pointInRect(center, voidInput.footprint.bounds)
-          : pointInPolygon(center, voidInput.footprint.points)
-      if (inside) voidCovered[cellIndex] = 1
+  const coverageOf = (voids: readonly ContinuityVoidInput[]): Uint8Array => {
+    const covered = new Uint8Array(columns * rows)
+    for (const voidInput of voids) {
+      rasterize(voidInput.footprint, (cellIndex) => {
+        const row = Math.floor(cellIndex / columns)
+        const col = cellIndex % columns
+        const center: PlanPoint = {
+          x: origin.x + (col + 0.5) * cellSize,
+          z: origin.z + (row + 0.5) * cellSize,
+        }
+        const inside =
+          voidInput.footprint.shape === 'bbox'
+            ? pointInRect(center, voidInput.footprint.bounds)
+            : pointInPolygon(center, voidInput.footprint.points)
+        if (inside) covered[cellIndex] = 1
+      })
+    }
+    return covered
+  }
+
+  // Walls and columns block outright. A slab blocks where no void that applies
+  // to it (see {@link voidAppliesToSlab}) contains the cell centre.
+  const hardBlocked = new Uint8Array(columns * rows)
+  const slabBlocked = new Uint8Array(columns * rows)
+  const infillTolerance = cellSize / 2
+  for (const obstruction of storey.obstructions) {
+    if (obstruction.kind !== 'slab') {
+      rasterize(obstruction.footprint, (cellIndex) => {
+        hardBlocked[cellIndex] = 1
+      })
+      continue
+    }
+    const applicableVoidCovered = coverageOf(
+      storey.voids.filter((voidInput) => voidAppliesToSlab(voidInput, obstruction, storey, infillTolerance)),
+    )
+    rasterize(obstruction.footprint, (cellIndex) => {
+      if (applicableVoidCovered[cellIndex] === 0) slabBlocked[cellIndex] = 1
     })
   }
 
   const blocked = new Uint8Array(columns * rows)
   for (let cellIndex = 0; cellIndex < blocked.length; cellIndex++) {
-    blocked[cellIndex] =
-      hardBlocked[cellIndex] === 1 ||
-      (slabBlocked[cellIndex] === 1 && voidCovered[cellIndex] === 0)
-        ? 1
-        : 0
+    blocked[cellIndex] = hardBlocked[cellIndex] === 1 || slabBlocked[cellIndex] === 1 ? 1 : 0
   }
 
   return {
@@ -617,12 +637,156 @@ export function buildContinuityMap(
 
   const diagnostics: string[] = []
   const grids = input.storeys.map((storey) => buildObstructionGrid(storey, cellSize))
+  // Candidates are detected on the voids that are actually open: a hosted void
+  // filled by another slab is not a shaft (the grid still carves its host).
+  const openStoreys = input.storeys.map((storey) => withoutFilledOpenings(storey, cellSize / 2, diagnostics))
   const shaftCandidates = [
-    ...detectPerStoreyCandidates(input.storeys, diagnostics),
-    ...detectAlignedVoidCandidates(input.storeys, alignmentTolerance, minAlignedStoreys),
+    ...detectPerStoreyCandidates(openStoreys, diagnostics),
+    ...detectAlignedVoidCandidates(openStoreys, alignmentTolerance, minAlignedStoreys),
   ].sort((a, b) => a.id.localeCompare(b.id))
 
   return { units: input.units, cellSize, grids, shaftCandidates, diagnostics }
+}
+
+/**
+ * Whether a void re-opens cells of `slab`.
+ *
+ *  - host-less void (legacy input): applies to every slab;
+ *  - hosted by this slab: applies;
+ *  - hosted by a wall / column of the storey: never applies — a door or window
+ *    opening does not punch a hole in the floor;
+ *  - hosted by another slab (or by an element that is not an obstruction here):
+ *    applies unless `slab` is an INFILL of the void — a slab whose footprint
+ *    lies inside the void footprint (a tower plate sitting in the cut-out of a
+ *    larger plate, a landing inside a stair void) stays solid. A large slab of
+ *    another discipline that merely overlaps a small opening (an architectural
+ *    finish floor over a structural shaft opening) is still carved, as before.
+ */
+function voidAppliesToSlab(
+  voidInput: ContinuityVoidInput,
+  slab: ContinuityObstructionInput,
+  storey: ContinuityStoreyInput,
+  infillTolerance: number,
+): boolean {
+  if (voidInput.hostId === undefined || voidInput.hostId === slab.id) return true
+  const host = storey.obstructions.find((obstruction) => obstruction.id === voidInput.hostId)
+  if (host !== undefined && host.kind !== 'slab') return false
+  return !isInfillOf(slab, voidInput, infillTolerance)
+}
+
+/** True when the slab footprint lies inside the void footprint (bounds, with tolerance). */
+function isInfillOf(slab: ContinuityObstructionInput, voidInput: ContinuityVoidInput, tolerance: number): boolean {
+  const slabBounds = footprintBounds(slab.footprint)
+  const voidBounds = footprintBounds(voidInput.footprint)
+  return (
+    slabBounds.minX >= voidBounds.minX - tolerance &&
+    slabBounds.maxX <= voidBounds.maxX + tolerance &&
+    slabBounds.minZ >= voidBounds.minZ - tolerance &&
+    slabBounds.maxZ <= voidBounds.maxZ + tolerance
+  )
+}
+
+/**
+ * Drops slab-hosted voids whose plan centre is covered by an infill slab (see
+ * {@link voidAppliesToSlab}): the opening is filled, so it is neither a shaft
+ * candidate nor an aligned-void seed. Reported in diagnostics, never silent.
+ * Host-less voids (legacy inputs) are never dropped.
+ */
+function withoutFilledOpenings(
+  storey: ContinuityStoreyInput,
+  infillTolerance: number,
+  diagnostics: string[],
+): ContinuityStoreyInput {
+  const slabs = storey.obstructions.filter((obstruction) => obstruction.kind === 'slab')
+  if (slabs.length < 2) return storey
+  const voids = storey.voids.filter((voidInput) => {
+    if (voidInput.hostId === undefined) return true
+    const center = footprintCenter(voidInput.footprint)
+    const infill = slabs.find(
+      (slab) =>
+        slab.id !== voidInput.hostId &&
+        isInfillOf(slab, voidInput, infillTolerance) &&
+        footprintContainsPoint(slab.footprint, center),
+    )
+    if (infill === undefined) return true
+    diagnostics.push(
+      `Opening ${voidInput.id} (${voidInput.kind}, host ${voidInput.hostId}) on storey ${storey.storeyId} is filled by ${infill.id} at its centre and was excluded from shaft candidates.`,
+    )
+    return false
+  })
+  return voids.length === storey.voids.length ? storey : { ...storey, voids }
+}
+
+function footprintContainsPoint(footprint: PlanFootprint, point: PlanPoint): boolean {
+  if (footprint.shape === 'bbox') return pointInRect(point, footprint.bounds)
+  return footprint.points.length >= 3 && pointInPolygon(point, footprint.points)
+}
+
+// ---------------------------------------------------------------------------
+// Cell probe
+// ---------------------------------------------------------------------------
+
+export type ContinuityCellProbe =
+  | { status: 'blocked'; cell: { col: number; row: number } }
+  | { status: 'free'; cell: { col: number; row: number } }
+  /** No grid for the storey, an empty grid, or a point outside the grid. */
+  | { status: 'unknown'; reason: string }
+
+/**
+ * Obstruction state of the grid cell containing `point` on `storeyId`.
+ * Unknown is reported explicitly (never folded into free or blocked) so callers
+ * decide how to treat missing data; a point outside the grid is unknown, not
+ * blocked, unlike the out-of-range convention of {@link isCellBlocked} which
+ * exists for neighbour scans.
+ */
+export function probeContinuityCell(
+  map: ContinuityMap,
+  storeyId: StoreyId,
+  point: PlanPoint,
+): ContinuityCellProbe {
+  const grid = map.grids.find((candidate) => candidate.storeyId === storeyId)
+  if (grid === undefined) return { status: 'unknown', reason: `no obstruction grid for storey ${storeyId}` }
+  if (grid.columns === 0 || grid.rows === 0) {
+    return { status: 'unknown', reason: `obstruction grid for storey ${storeyId} is empty` }
+  }
+  const col = Math.floor((point.x - grid.origin.x) / grid.cellSize)
+  const row = Math.floor((point.z - grid.origin.z) / grid.cellSize)
+  if (col < 0 || row < 0 || col >= grid.columns || row >= grid.rows) {
+    return { status: 'unknown', reason: `point lies outside the obstruction grid of storey ${storeyId}` }
+  }
+  const cell = { col, row }
+  return grid.blocked[row * grid.columns + col] === 1 ? { status: 'blocked', cell } : { status: 'free', cell }
+}
+
+/**
+ * Nearest free cell (by centre distance to `point`) whose centre lies inside
+ * `bounds`, or null when every such cell is blocked. Row-major scan order
+ * breaks exact ties deterministically.
+ */
+export function findFreeCellWithinBounds(
+  grid: StoreyObstructionGrid,
+  bounds: PlanBounds,
+  point: PlanPoint,
+): { cell: { col: number; row: number }; position: PlanPoint; distance: number } | null {
+  if (grid.columns === 0 || grid.rows === 0) return null
+  const colFrom = Math.max(0, Math.floor((bounds.minX - grid.origin.x) / grid.cellSize))
+  const colTo = Math.min(grid.columns - 1, Math.floor((bounds.maxX - grid.origin.x) / grid.cellSize))
+  const rowFrom = Math.max(0, Math.floor((bounds.minZ - grid.origin.z) / grid.cellSize))
+  const rowTo = Math.min(grid.rows - 1, Math.floor((bounds.maxZ - grid.origin.z) / grid.cellSize))
+
+  let best: { cell: { col: number; row: number }; position: PlanPoint; distance: number } | null = null
+  for (let row = rowFrom; row <= rowTo; row++) {
+    for (let col = colFrom; col <= colTo; col++) {
+      if (grid.blocked[row * grid.columns + col] === 1) continue
+      const center = cellCenter(grid, col, row)
+      if (!pointInRect(center, bounds)) continue
+      const distance = planDistance2D(point, center)
+      if (best === null || distance < best.distance) {
+        best = { cell: { col, row }, position: center, distance }
+      }
+    }
+  }
+  return best
 }
 
 // ---------------------------------------------------------------------------

@@ -1,17 +1,26 @@
 /**
- * Pure assignment of detected sanitary fixtures to risers (T2).
+ * Pure assignment of detected sanitary fixtures to risers (T2, wet-core aware since V5).
  *
- * Risers are anchored by toilets (one riser per toilet) and by kitchens (dedicated
- * corner risers). Every other fixture does not spawn a riser; instead it attaches to
- * the nearest riser on its own storey, within a maximum branch length. Fixtures with
- * no riser in range are explicitly flagged `unassigned: true` so the UI can surface
- * them instead of silently dropping them.
+ * Assignment order per fixture:
+ * 1. **Wet-core membership** (plain mode, V3 vocabulary): when the caller supplies
+ *    `coreMembership`, a fixture that belongs to a wet core routes to the same-storey
+ *    riser of the stack that serves that core — the auto stack, or the manual/dragged
+ *    stack that superseded it (overrides win). Distance is not a criterion here; a
+ *    core stack farther than the branch limit is still assigned but flagged
+ *    `exceedsMaxBranchLength` so the UI can warn instead of silently rerouting.
+ * 2. **Nearest riser** on the fixture's own storey within the maximum branch length.
+ *    This is the documented fallback for fixtures without a core (other storeys than
+ *    the suggest source storey, fixtures detected after the suggest, demo mode) and
+ *    the only way a user-added manual stack without a core receives fixtures.
+ *
+ * Fixtures with no riser in range are explicitly flagged `unassigned: true` so the UI
+ * can surface them instead of silently dropping them.
  *
  * Notes on specific kinds:
- * - Toilets assign trivially: a suggested riser sits on each toilet, so the nearest
- *   riser is their own anchor at plan distance ~0.
- * - Kitchen-sink fixtures assign like any other fixture (nearest same-storey riser),
- *   which is typically their kitchen's dedicated corner riser.
+ * - Toilet-anchored (demo) risers assign trivially: a suggested riser sits on each
+ *   toilet, so the nearest riser is their own anchor at plan distance ~0.
+ * - Kitchen-sink fixtures assign like any other fixture (core stack, else nearest
+ *   same-storey riser, which is typically their kitchen's dedicated corner riser).
  *
  * This module is intentionally self-contained: input/output types are structural so
  * `Fixture`/`Riser` from `@/domain/types` satisfy them without this file depending on
@@ -70,6 +79,24 @@ export interface AssignedFixtureRiser {
   planDistance: number
   /** Units `planDistance` and the positions are expressed in. */
   units: PlanUnits
+  /** How the riser was chosen: its wet core's stack, or the nearest in-range riser. */
+  assignedBy: 'wet-core' | 'nearest'
+  /**
+   * Wet-core assignments are never rerouted for distance (overrides win), so a
+   * core stack farther than the branch limit is flagged here instead. Always
+   * false for `nearest` assignments, which are in range by construction.
+   */
+  exceedsMaxBranchLength: boolean
+}
+
+/**
+ * Wet-core membership handed in by the caller (the reducer knows both maps):
+ * fixture express id → wet-core id, and stack id → wet-core id (auto stacks and
+ * the preserved stacks that superseded them).
+ */
+export interface FixtureCoreMembership {
+  fixtureCoreIds: ReadonlyMap<number, string>
+  stackCoreIds: ReadonlyMap<string, string>
 }
 
 export interface UnassignedFixtureRiser {
@@ -86,12 +113,16 @@ export type FixtureRiserAssignment = AssignedFixtureRiser | UnassignedFixtureRis
 export interface AssignFixturesToRisersOptions {
   /** Plan units override. When omitted, units are detected from the coordinates. */
   units?: PlanUnits
+  /** When supplied, fixtures route to their wet core's stack before any nearest search. */
+  coreMembership?: FixtureCoreMembership
 }
 
 /**
- * Assigns each fixture to the nearest riser on the same storey within
+ * Assigns each fixture to its wet core's stack when membership is supplied,
+ * otherwise to the nearest riser on the same storey within
  * `MAX_BRANCH_LENGTH_MM`/`MAX_BRANCH_LENGTH_M`. Returns one entry per input fixture,
- * in input order. Deterministic: distance ties break on riser id.
+ * in input order. Deterministic: distance ties break on riser id; when a core's
+ * stack has several risers on one storey (should not happen) the smallest id wins.
  */
 export function assignFixturesToRisers(
   fixtures: AssignableFixture[],
@@ -100,6 +131,7 @@ export function assignFixturesToRisers(
 ): FixtureRiserAssignment[] {
   const units = options.units ?? detectUnits(fixtures, risers)
   const maxBranchLength = units === 'mm' ? MAX_BRANCH_LENGTH_MM : MAX_BRANCH_LENGTH_M
+  const membership = options.coreMembership
 
   return fixtures.map((fixture) => {
     if (fixture.position === null) {
@@ -109,6 +141,25 @@ export function assignFixturesToRisers(
     const sameStoreyRisers = risers.filter((riser) => riser.storeyId === fixture.storeyId)
     if (sameStoreyRisers.length === 0) {
       return unassigned(fixture, 'no-riser-on-storey')
+    }
+
+    const coreRiser = membership === undefined ? null : findCoreRiser(fixture, sameStoreyRisers, membership)
+    if (coreRiser !== null) {
+      const distance = planDistance(fixture.position, coreRiser.position)
+      return {
+        fixtureExpressId: fixture.expressId,
+        kind: fixture.kind,
+        storeyId: fixture.storeyId,
+        unassigned: false as const,
+        riserId: coreRiser.id,
+        stackId: coreRiser.stackId,
+        fixturePosition: fixture.position,
+        riserPosition: coreRiser.position,
+        planDistance: distance,
+        units,
+        assignedBy: 'wet-core' as const,
+        exceedsMaxBranchLength: distance > maxBranchLength,
+      }
     }
 
     let nearest = sameStoreyRisers[0]
@@ -140,8 +191,25 @@ export function assignFixturesToRisers(
       riserPosition: nearest.position,
       planDistance: nearestDistance,
       units,
+      assignedBy: 'nearest' as const,
+      exceedsMaxBranchLength: false,
     }
   })
+}
+
+function findCoreRiser(
+  fixture: AssignableFixture,
+  sameStoreyRisers: AssignableRiser[],
+  membership: FixtureCoreMembership,
+): AssignableRiser | null {
+  const coreId = membership.fixtureCoreIds.get(fixture.expressId)
+  if (coreId === undefined) return null
+  let match: AssignableRiser | null = null
+  for (const riser of sameStoreyRisers) {
+    if (membership.stackCoreIds.get(riser.stackId) !== coreId) continue
+    if (match === null || riser.id.localeCompare(match.id) < 0) match = riser
+  }
+  return match
 }
 
 function unassigned(

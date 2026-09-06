@@ -29,9 +29,14 @@ describe('alignEngineerStacksToViewerPlan', () => {
     const stacks: EngineerRiserStack[] = [
       {
         id: 'engineer-riser-1',
+        systemClass: 'sanitary',
         xM: 12.5,
         yM: -7.25,
+        zMinM: 30.15,
+        zMaxM: 36.55,
+        extentM: 6.4,
         storeys: [{ id: 90, name: '01' }],
+        spannedStoreyIds: [90, 91],
         diameterMm: 110,
         segmentExpressIds: [1, 2],
       },

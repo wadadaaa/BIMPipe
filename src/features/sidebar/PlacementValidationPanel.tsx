@@ -4,8 +4,25 @@ import type { buildRiserValidationReport } from '@/shared/routes/buildRiserValid
 import type { StoreyAlignment } from '@/domain/alignStoreys'
 import type { MergedStoreyDetection } from '@/domain/mergeFixturesAcrossFiles'
 import type { EngineerComparisonReport } from '@/domain/engineerComparisonMetrics'
-import type { SuggestedRiserSnapOutcome } from '@/shared/routes/buildSuggestedRisers'
+import type { Storey } from '@/domain/types'
+import type {
+  SuggestedRiserSnapOutcome,
+  SuggestedRiserStackExtent,
+  WetCoreSuggestedStack,
+} from '@/shared/routes/buildSuggestedRisers'
+import type { WetCore } from '@/domain/wetCores'
+import type { FixtureRiserAssignment } from '@/domain/assignFixturesToRisers'
+import type { FloorRoutes } from '@/domain/branchRouting'
+import { formatBranchSlopePercent } from '@/domain/branchDefaults'
 import { formatLengthM } from '@/shared/lengthUnits'
+import { summarizeBranchRunsForDebug } from '@/shared/routes/branchRouteSummary'
+import { describeRoutingModel, type RoutingModel } from '@/shared/routes/routingModel'
+import {
+  collectPlacementWarnings,
+  describeDedupeRadii,
+  describeWetCoreMembers,
+  describeWetCoreStackPlacement,
+} from './wetCoreCopy'
 
 type ValidationReport = ReturnType<typeof buildRiserValidationReport>
 
@@ -27,10 +44,32 @@ export interface ContinuityMapSummary {
   diagnosticsCount: number
 }
 
+/** Outcome of the last wet-core suggest run (V3); shape mirrors the page state. */
+export interface WetCoreSuggestionSummary {
+  sourceStoreyId: number
+  stacks: WetCoreSuggestedStack[]
+  cores: WetCore[]
+  supersededCoreIds: string[]
+  preservedStackIds: string[]
+  diagnostics: string[]
+}
+
 interface PlacementValidationPanelProps {
   report: ValidationReport | null
   detectionAggregation: StoreyDetectionAggregation | null
+  /** Storeys for naming stack extents; empty before a model is loaded. */
+  storeys?: Storey[]
+  /** Wet-core suggestion of the last run (V3); null in demo mode / before suggesting. */
+  wetCoreSuggestion?: WetCoreSuggestionSummary | null
+  /** Per-stack vertical extents (V4) of the last run; null when not bounded. */
+  riserStackExtents?: SuggestedRiserStackExtent[] | null
   demoFlowEnabled?: boolean
+  /** V5 routing switch; the routing-model section renders in plain mode only (demo parity). */
+  routingModel?: RoutingModel
+  /** Branch runs of the open floor (branch-runs model); null before stacks exist. */
+  branchRouteFloor?: FloorRoutes | null
+  /** Fixture assignments of the open floor, summarised in the routing-model section. */
+  fixtureAssignments?: FixtureRiserAssignment[]
   /** Why the initial floor was auto-opened (plain mode); null in demo mode. */
   initialStoreyDecision?: InitialStoreyDecision | null
   /** Storey mapping per linked file (multi-IFC uploads); empty for single-file. */
@@ -189,15 +228,23 @@ function CrossFileMergeSection({ merge }: { merge: MergedStoreyDetection }) {
       </ul>
       <p className="sidebar__panel-copy">
         {merge.duplicates.length === 0
-          ? `No cross-file duplicates within ${merge.dedupeToleranceMm} mm.`
-          : `${merge.duplicates.length} duplicate${merge.duplicates.length === 1 ? '' : 's'} dropped (same kind within ${merge.dedupeToleranceMm} mm; host instance kept).`}
+          ? `No cross-file duplicates within ${describeDedupeRadii(merge.dedupeToleranceMm)}.`
+          : `${merge.duplicates.length} duplicate${merge.duplicates.length === 1 ? '' : 's'} dropped (same kind within ${describeDedupeRadii(merge.dedupeToleranceMm)}; host instance kept).`}
       </p>
     </section>
   )
 }
 
 function EngineerComparisonList({ comparison }: { comparison: EngineerComparisonReport }) {
-  const { riserCounts, meanNearestEngineerRiserDistanceM, branchLengths, fixtures } = comparison
+  const {
+    riserCounts,
+    engineerStackDefinition,
+    storeyScope,
+    storeyScopeReason,
+    meanNearestEngineerRiserDistanceM,
+    branchLengths,
+    fixtures,
+  } = comparison
   return (
     <>
       <p className="sidebar__panel-copy">
@@ -205,20 +252,32 @@ function EngineerComparisonList({ comparison }: { comparison: EngineerComparison
       </p>
       <ul className="risers-panel__legend-list" data-testid="engineer-comparison">
         <li>
-          <strong>Riser stacks:</strong> ours {riserCounts.oursStacks} ({riserCounts.oursPerFloorEntries}{' '}
-          per-floor entries) vs engineer {riserCounts.engineerStacks}
+          <strong>Riser stacks on this floor:</strong>{' '}
+          {storeyScope === null
+            ? `n/a (${storeyScopeReason ?? 'no storey scope'})`
+            : `ours ${riserCounts.oursStacksOnStorey} vs engineer ${riserCounts.engineerStacksIntersectingStorey}` +
+              ` (${riserCounts.engineerVentStacksIntersectingStorey} vent stack(s) counted separately)`}
+        </li>
+        <li>
+          <strong>Riser stacks model-wide:</strong> ours {riserCounts.oursStacksTotal} (
+          {riserCounts.oursPerFloorEntries} per-floor entries) vs engineer {riserCounts.engineerStacksTotal}{' '}
+          sanitary, {riserCounts.engineerVentStacksTotal} vent, {riserCounts.engineerStubs} stub(s); stack =
+          vertical run ≥ {formatLengthM(engineerStackDefinition.minStackExtentM, 'm')} (
+          {engineerStackDefinition.minStackExtentSource})
         </li>
         <li>
           <strong>Mean distance to nearest engineer riser:</strong>{' '}
           {meanNearestEngineerRiserDistanceM === null
-            ? 'n/a (one side has no stacks)'
+            ? 'n/a (no storey scope or one side has no stacks on this floor)'
             : formatLengthM(meanNearestEngineerRiserDistanceM, 'm')}
         </li>
         <li>
-          <strong>Branch runs:</strong> ours {formatLengthM(branchLengths.oursTotalM, 'm')} vs engineer{' '}
+          <strong>Branch runs{branchLengths.scope === 'storey' ? ' on this floor' : ' model-wide'}:</strong> ours{' '}
+          {formatLengthM(branchLengths.oursTotalM, 'm')} ({branchLengths.oursSegmentCount} segment
+          {branchLengths.oursSegmentCount === 1 ? '' : 's'}) vs engineer{' '}
           {branchLengths.engineerTotalM === null
             ? 'n/a (no Pset lengths)'
-            : formatLengthM(branchLengths.engineerTotalM, 'm')}
+            : `${formatLengthM(branchLengths.engineerTotalM, 'm')} (${branchLengths.engineerSegmentCount} horizontal sanitary segment${branchLengths.engineerSegmentCount === 1 ? '' : 's'})`}
           {branchLengths.ratioOursToEngineer !== null &&
             ` (ratio ${branchLengths.ratioOursToEngineer.toFixed(2)})`}
           {branchLengths.engineerSegmentsWithNullLength > 0 &&
@@ -378,10 +437,131 @@ function ContinuityMapSection({
   )
 }
 
+function WetCoreSection({
+  suggestion,
+  extents,
+  storeys,
+}: {
+  suggestion: WetCoreSuggestionSummary
+  extents: SuggestedRiserStackExtent[] | null
+  storeys: Storey[]
+}) {
+  const storeyName = (id: number) => storeys.find((storey) => storey.id === id)?.name ?? `storey ${id}`
+  const warnings = collectPlacementWarnings(suggestion.stacks)
+  const extentByLabel = new Map((extents ?? []).map((entry) => [entry.stackLabel, entry.extent]))
+  return (
+    <section className="sidebar__panel" data-testid="wet-cores">
+      <p className="sidebar__panel-title">Wet cores and stack placement</p>
+      <p className="sidebar__panel-copy">
+        {suggestion.cores.length} wet {suggestion.cores.length === 1 ? 'core' : 'cores'} on the open floor (fixtures within 2.6 m
+        of each other), {suggestion.stacks.length} {suggestion.stacks.length === 1 ? 'stack' : 'stacks'} placed.
+        {suggestion.preservedStackIds.length > 0 &&
+          ` ${suggestion.preservedStackIds.length} manually placed/moved ${suggestion.preservedStackIds.length === 1 ? 'stack was' : 'stacks were'} preserved.`}
+        {suggestion.supersededCoreIds.length > 0 &&
+          ` ${suggestion.supersededCoreIds.length} ${suggestion.supersededCoreIds.length === 1 ? 'core keeps its moved stack' : 'cores keep their moved stacks'} instead of a new suggestion.`}
+      </p>
+      {warnings.length > 0 && (
+        <ul className="risers-panel__legend-list" role="alert" data-testid="placement-warnings">
+          {warnings.map((warning) => (
+            <li key={warning.stackLabel}>
+              <strong>{warning.stackLabel} needs review:</strong> {warning.message}
+            </li>
+          ))}
+        </ul>
+      )}
+      <ul className="risers-panel__legend-list" data-testid="wet-core-stacks">
+        {suggestion.stacks.map((stack) => {
+          const extent = extentByLabel.get(stack.stackLabel)
+          return (
+            <li key={stack.stackId}>
+              <strong>{stack.stackLabel}:</strong>{' '}
+              {stack.anchor === 'wet-core' ? `${describeWetCoreMembers(stack.core)} — ` : ''}
+              {describeWetCoreStackPlacement(stack)}
+              {extent !== undefined && (
+                <>
+                  {' '}
+                  Extent <span dir="auto">{storeyName(extent.collectorStoreyId)}</span> →{' '}
+                  <span dir="auto">{storeyName(extent.topStoreyId)}</span> ({extent.storeyIds.length}{' '}
+                  {extent.storeyIds.length === 1 ? 'storey' : 'storeys'}
+                  {extent.reasons.length > 0 ? `; ${extent.reasons.join('; ')}` : ''}).
+                </>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+      {suggestion.diagnostics.map((line) => (
+        <p key={line} className="sidebar__panel-copy" dir="auto">
+          {line}
+        </p>
+      ))}
+    </section>
+  )
+}
+
+/**
+ * The one line the brief asks for — "Routing model: branch runs (fixture →
+ * stack)" — plus how the open floor's fixtures were routed. Plain mode only:
+ * the demo panel text is parity-locked.
+ */
+function RoutingModelSection({
+  routingModel,
+  floor,
+  assignments,
+}: {
+  routingModel: RoutingModel
+  floor: FloorRoutes | null
+  assignments: FixtureRiserAssignment[]
+}) {
+  const summary = summarizeBranchRunsForDebug(floor === null ? [] : [floor], assignments)
+  const floorSummary = summary.floors[0] ?? null
+  const routedCount = summary.assignedBy.wetCore + summary.assignedBy.nearest
+  return (
+    <section className="sidebar__panel" data-testid="routing-model-section">
+      <p className="sidebar__panel-title">Horizontal routing</p>
+      <p className="sidebar__panel-copy">
+        <strong>{describeRoutingModel(routingModel)}</strong>. Riser-to-riser chains are not built, drawn or exported in this mode. Defaults: Ø110 WC, Ø50 basin/sink/shower, Ø63 for a shared run of two or more small fixtures, slope {formatBranchSlopePercent()}.
+      </p>
+      {assignments.length === 0 ? (
+        <p className="sidebar__panel-copy">No stacks on the open floor yet — branch runs appear after Suggest.</p>
+      ) : (
+        <ul className="risers-panel__legend-list">
+          <li>
+            <strong>Fixtures routed:</strong> {routedCount} ({summary.assignedBy.wetCore} to their wet core&apos;s stack,{' '}
+            {summary.assignedBy.nearest} to the nearest stack)
+          </li>
+          {floorSummary !== null && (
+            <li>
+              <strong>Branch runs:</strong> {floorSummary.segmentCount} segment(s) to {floorSummary.groups.length} stack(s),{' '}
+              {floorSummary.totalLengthM.toFixed(2)} m on this floor
+            </li>
+          )}
+          {summary.unrouted.length > 0 && (
+            <li>
+              <strong>Not routed:</strong> {summary.unrouted.length} fixture(s) without a reachable stack — see the Risers tab.
+            </li>
+          )}
+          {summary.overlength.length > 0 && (
+            <li>
+              <strong>Beyond branch limit:</strong> {summary.overlength.length} fixture(s) kept on their wet core&apos;s stack farther than 4 m (wide core or moved stack).
+            </li>
+          )}
+        </ul>
+      )}
+    </section>
+  )
+}
+
 export function PlacementValidationPanel({
   report,
   detectionAggregation,
+  storeys = [],
+  wetCoreSuggestion = null,
+  riserStackExtents = null,
   demoFlowEnabled = false,
+  routingModel = 'branch-runs',
+  branchRouteFloor = null,
+  fixtureAssignments = [],
   initialStoreyDecision = null,
   storeyAlignments = [],
   crossFileMerge = null,
@@ -447,6 +627,14 @@ export function PlacementValidationPanel({
     />
   )
 
+  const wetCoreSection = wetCoreSuggestion !== null && (
+    <WetCoreSection suggestion={wetCoreSuggestion} extents={riserStackExtents} storeys={storeys} />
+  )
+
+  const routingModelSection = !demoFlowEnabled && (
+    <RoutingModelSection routingModel={routingModel} floor={branchRouteFloor} assignments={fixtureAssignments} />
+  )
+
   if (!report) {
     return (
       <>
@@ -454,6 +642,8 @@ export function PlacementValidationPanel({
         {multiModelSections}
         {engineerSection}
         {continuitySection}
+        {wetCoreSection}
+        {routingModelSection}
         <p className="sidebar__panel-copy">Suggest risers to populate export validation details.</p>
       </>
     )
@@ -473,6 +663,8 @@ export function PlacementValidationPanel({
       {multiModelSections}
       {engineerSection}
       {continuitySection}
+      {wetCoreSection}
+      {routingModelSection}
       <p className="sidebar__panel-title">Placement and export readiness</p>
       <ul className="risers-panel__legend-list">
         <li><strong>Processed floors:</strong> {report.summary.processedFloorCount}</li>

@@ -120,6 +120,54 @@
   color: #ff7777;
 }
 
+.routes-panel__group {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(84, 148, 255, 0.14);
+  background: var(--surface-muted);
+  font-size: 12px;
+}
+
+.routes-panel__group-detail {
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.routes-panel__group-spec {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--text-soft);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.routes-panel__warnings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.routes-panel__warning {
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 176, 74, 0.28);
+  background: rgba(255, 176, 74, 0.08);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
 .routes-panel__empty {
   display: flex;
   flex-direction: column;

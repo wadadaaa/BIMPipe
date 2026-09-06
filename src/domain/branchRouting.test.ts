@@ -184,6 +184,42 @@ describe('computeBranchRoutes', () => {
     expect(segments[1].end).toMatchObject({ x: 0, z: 5 })
   })
 
+  it('snaps plan coordinates to 1 mm so floating-point noise neither splits a shared corridor nor emits zero-length segments', () => {
+    // Real-model shape: six WCs in a row whose extracted Z differs by ~4e-14 m
+    // (matrix noise). Without the snap every WC gets its own X leg and the Z
+    // approach splits into five ~1e-14 m segments — which the IFC export
+    // rejects as zero-length.
+    const rowZ = -4.8906744325591145
+    const riserPlan = { x: 9.549999999999999, z: rowZ + 1.2 }
+    const floors = computeBranchRoutes(
+      [0, 1, 2, 3, 4, 5].map((i) =>
+        assigned(100 + i, { x: 11.79875592707247 - 0.9 * i, z: rowZ + i * 4.1e-14 }, riserPlan),
+      ),
+    )
+
+    const segments = floors[0].segments
+    // One X corridor split at every WC (6 segments) plus one straight Z approach.
+    expect(segments).toHaveLength(7)
+    expect(segments.filter((s) => s.axis === 'x')).toHaveLength(6)
+    expect(segments.filter((s) => s.axis === 'z')).toHaveLength(1)
+    for (const segment of segments) {
+      expect(planLength(segment)).toBeGreaterThanOrEqual(0.001 - 1e-9)
+    }
+    const trunkZ = segments.find((s) => s.axis === 'z')
+    expect(trunkZ).toMatchObject({ kind: 'trunk', servedFixtureExpressIds: [100, 101, 102, 103, 104, 105] })
+    // Snapped coordinates are exact millimetres and never -0.
+    for (const segment of segments) {
+      for (const point of [segment.start, segment.end]) {
+        expect(Math.abs(point.x * 1000 - Math.round(point.x * 1000))).toBeLessThan(1e-6)
+        expect(Math.abs(point.z * 1000 - Math.round(point.z * 1000))).toBeLessThan(1e-6)
+        expect(Object.is(point.x, -0) || Object.is(point.z, -0)).toBe(false)
+      }
+    }
+    // A fixture within 1 mm of the riser snaps onto it and yields no segments.
+    const atRiser = computeBranchRoutes([assigned(7, { x: 0.0004, z: -0.0004 }, { x: 0, z: 0 })])
+    expect(atRiser[0].segments).toHaveLength(0)
+  })
+
   it('does not merge approaches flowing from opposite sides of the riser', () => {
     const riserPlan = { x: 0, z: 0 }
     const floors = computeBranchRoutes([

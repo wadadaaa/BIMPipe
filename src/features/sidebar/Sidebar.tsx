@@ -1,5 +1,5 @@
 import { startTransition } from 'react'
-import type { Fixture, KitchenArea, Riser, RiserId, SidebarTab } from '@/domain/types'
+import type { Fixture, KitchenArea, Riser, RiserId, SidebarTab, Storey } from '@/domain/types'
 import type { FixtureRiserAssignment } from '@/domain/assignFixturesToRisers'
 import type { StoreyDetectionAggregation } from '@/shared/ifc/aggregateStoreyDetections'
 import type { InitialStoreyDecision } from '@/shared/ifc/scanStoreyFixtures'
@@ -7,8 +7,13 @@ import type { StoreyAlignment } from '@/domain/alignStoreys'
 import type { MergedStoreyDetection } from '@/domain/mergeFixturesAcrossFiles'
 import type { EngineerComparisonReport } from '@/domain/engineerComparisonMetrics'
 import type { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
-import type { SuggestedRiserSnapOutcome } from '@/shared/routes/buildSuggestedRisers'
+import type {
+  SuggestedRiserSnapOutcome,
+  SuggestedRiserStackExtent,
+} from '@/shared/routes/buildSuggestedRisers'
 import type { LengthUnit } from '@/shared/lengthUnits'
+import type { FloorRoutes } from '@/domain/branchRouting'
+import type { RoutingModel } from '@/shared/routes/routingModel'
 import { ViewTransition } from '@/shared/reactViewTransition'
 import { FixturesPanel } from './FixturesPanel'
 import { RisersPanel } from './RisersPanel'
@@ -16,6 +21,7 @@ import {
   PlacementValidationPanel,
   type ContinuityMapSummary,
   type EngineerBaselineSummary,
+  type WetCoreSuggestionSummary,
 } from './PlacementValidationPanel'
 import './Sidebar.css'
 
@@ -46,10 +52,13 @@ interface SidebarProps {
   storeyAlignments?: StoreyAlignment[]
   /** Cross-file fixture merge accounting for the open floor; null for single-file. */
   crossFileMerge?: MergedStoreyDetection | null
-  sanitaryRouteLimitations?: string[]
   demoFlowEnabled?: boolean
   demoFloorOpened?: boolean
   sanitaryRouteCount?: number
+  /** V5 routing switch (one place: the reducer); drives the routes list and the Decisions line. */
+  routingModel?: RoutingModel
+  /** Branch runs of the open floor under the branch-runs model; null before stacks exist. */
+  branchRouteFloor?: FloorRoutes | null
   /** Model length unit resolved from IfcUnitAssignment; null when unknown. */
   modelLengthUnit?: LengthUnit | null
   /** Engineer baseline (W7) summary for the Decisions tab; null until loaded. */
@@ -71,9 +80,28 @@ interface SidebarProps {
   onToggleContinuitySnap?: () => void
   /** Snap outcomes of the last suggest run; null when snapping was off. */
   riserSnapOutcomes?: SuggestedRiserSnapOutcome[] | null
+  /** All storeys (for naming stack extents in the Decisions tab). */
+  storeys?: Storey[]
+  /** Wet-core suggestion of the last run (V3); null in demo mode / before suggesting. */
+  wetCoreSuggestion?: WetCoreSuggestionSummary | null
+  /** Per-stack vertical extents (V4) of the last run; null when not bounded. */
+  riserStackExtents?: SuggestedRiserStackExtent[] | null
+  /** Async suggest lifecycle (V3): whole-building scan progress + cancel. */
+  isSuggestingRisers?: boolean
+  suggestProgress?: { processed: number; total: number; storeyName: string | null } | null
+  suggestError?: string | null
+  onCancelSuggestRisers?: () => void
 }
 
-const TABS: { id: SidebarTab; label: string; focus: string; hint: string }[] = [
+interface TabMeta {
+  id: SidebarTab
+  label: string
+  focus: string
+  hint: string
+}
+
+/** Demo-mode copy: unchanged from the toilet-anchored flow (parity-checked). */
+const DEMO_TABS: TabMeta[] = [
   {
     id: 'fixtures',
     label: 'Fixtures',
@@ -91,6 +119,23 @@ const TABS: { id: SidebarTab; label: string; focus: string; hint: string }[] = [
     label: 'Decisions',
     focus: 'Validation and decisions',
     hint: 'Review processed/skipped floors, riser reuse counts, and any placement warnings before demo export.',
+  },
+]
+
+/** Plain-mode copy (V3 wet-core placement). */
+const TABS: TabMeta[] = [
+  DEMO_TABS[0],
+  {
+    id: 'risers',
+    label: 'Risers',
+    focus: 'Riser layout',
+    hint: 'Blue pins are suggested riser stacks: one per wet core (fixtures within 2.6 m of each other), snapped to a shaft or free cell when a continuity map is built, plus one per kitchen. Dragged and manually added stacks survive Re-suggest.',
+  },
+  {
+    id: 'validation',
+    label: 'Decisions',
+    focus: 'Validation and decisions',
+    hint: 'Review processed/skipped floors, wet cores, stack placement and extent, and any placement warnings before export.',
   },
 ]
 
@@ -118,10 +163,11 @@ export function Sidebar({
   initialStoreyDecision = null,
   storeyAlignments = [],
   crossFileMerge = null,
-  sanitaryRouteLimitations = [],
   demoFlowEnabled = false,
   demoFloorOpened = false,
   sanitaryRouteCount = 0,
+  routingModel = 'branch-runs',
+  branchRouteFloor = null,
   modelLengthUnit = null,
   engineerBaseline = null,
   isExtractingEngineerBaseline = false,
@@ -136,8 +182,16 @@ export function Sidebar({
   continuitySnapEnabled = false,
   onToggleContinuitySnap = () => {},
   riserSnapOutcomes = null,
+  storeys = [],
+  wetCoreSuggestion = null,
+  riserStackExtents = null,
+  isSuggestingRisers = false,
+  suggestProgress = null,
+  suggestError = null,
+  onCancelSuggestRisers = () => {},
 }: SidebarProps) {
-  const activeTabMeta = TABS.find((tab) => tab.id === activeTab)!
+  const tabs = demoFlowEnabled ? DEMO_TABS : TABS
+  const activeTabMeta = tabs.find((tab) => tab.id === activeTab)!
   const riserPanelKey = risers.map((riser) => riser.id).join(':') || 'empty'
   const statusLabel = selectedStoreyName
     ? 'Floor open'
@@ -195,7 +249,7 @@ export function Sidebar({
       </div>
 
       <div className="sidebar__tabs" role="tablist">
-        {TABS.map((tab) => (
+        {tabs.map((tab) => (
           <button
             key={tab.id}
             className={[
@@ -252,17 +306,30 @@ export function Sidebar({
                 downloadMode={downloadMode}
                 downloadError={downloadError}
                 onDownloadFullIfc={onDownloadFullIfc}
-                sanitaryRouteLimitations={sanitaryRouteLimitations}
                 demoFlowEnabled={demoFlowEnabled}
                 demoFloorOpened={demoFloorOpened}
                 sanitaryRouteCount={sanitaryRouteCount}
+                routingModel={routingModel}
+                branchRouteFloor={branchRouteFloor}
+                fixtureAssignments={fixtureAssignments}
                 modelLengthUnit={modelLengthUnit}
+                wetCoreStacks={wetCoreSuggestion?.stacks ?? null}
+                isSuggestingRisers={isSuggestingRisers}
+                suggestProgress={suggestProgress}
+                suggestError={suggestError}
+                onCancelSuggestRisers={onCancelSuggestRisers}
               />
             ) : (
               <PlacementValidationPanel
                 report={validationReport}
                 detectionAggregation={detectionAggregation}
+                storeys={storeys}
+                wetCoreSuggestion={wetCoreSuggestion}
+                riserStackExtents={riserStackExtents}
                 demoFlowEnabled={demoFlowEnabled}
+                routingModel={routingModel}
+                branchRouteFloor={branchRouteFloor}
+                fixtureAssignments={fixtureAssignments}
                 initialStoreyDecision={initialStoreyDecision}
                 storeyAlignments={storeyAlignments}
                 crossFileMerge={crossFileMerge}

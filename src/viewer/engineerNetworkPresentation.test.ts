@@ -35,9 +35,14 @@ function network(segments: EngineerPipeSegment[]): EngineerPipeNetwork {
 const stacks: EngineerRiserStack[] = [
   {
     id: 'engineer-riser-1',
+    systemClass: 'sanitary',
     xM: 20,
     yM: 30,
+    zMinM: 30.15,
+    zMaxM: 33.35,
+    extentM: 3.2,
     storeys: [{ id: 10, name: '01' }],
+    spannedStoreyIds: [10],
     diameterMm: 110,
     segmentExpressIds: [1],
   },
@@ -162,6 +167,30 @@ describe('getEngineerOverlayPresentation', () => {
     })
     expect(presentation.visibleSegments).toHaveLength(1)
     expect(presentation.excludedSegmentCount).toBe(2)
+  })
+
+  it('draws port-derived (distribution-ports) centrelines in the same source frame as extrusion axes (V5)', () => {
+    const presentation = getEngineerOverlayPresentation({
+      network: network([
+        segment({
+          expressId: 8,
+          endpointSource: 'distribution-ports',
+          start: { x: 10_500, y: -20_800, z: 3_015 },
+          end: { x: 10_500, y: -20_800, z: 3_415 },
+        }),
+      ]),
+      stacks,
+      engineerStoreyId: 10,
+      frameOrigin,
+      visible: true,
+    })
+    expect(presentation.excludedSegmentCount).toBe(0)
+    expect(presentation.visibleSegments).toHaveLength(1)
+    const [line] = presentation.visibleSegments
+    expect(line.key).toBe('engineer-segment-8')
+    expect(line.from.x).toBeCloseTo(5, 6)
+    expect(line.from.z).toBeCloseTo(8, 6)
+    expect(line.to.y).toBeCloseTo(34.15, 6)
   })
 
   it('marks riser stacks model-wide in the local plan frame', () => {

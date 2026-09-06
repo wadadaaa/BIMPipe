@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { ContinuityStoreyInput } from '@/domain/continuityMap'
 import {
   convertContinuityElevationsToMeters,
+  mergeContinuityStoreyInputs,
   remapContinuityStoreysToHost,
 } from './buildContinuityMapForModel'
 
@@ -57,5 +58,43 @@ describe('remapContinuityStoreysToHost', () => {
     expect(remap.diagnostics[0]).toContain('no aligned host storey')
     // Pure: the input storey keeps its linked id.
     expect(input[0].storeyId).toBe(77)
+  })
+})
+
+describe('mergeContinuityStoreyInputs (V3 multi-model)', () => {
+  it('concatenates per-storey geometry from several files under host storey ids with file-prefixed element ids', () => {
+    const host = [storey({ storeyId: 5, storeyName: 'L04', elevation: 18 })]
+    const structure = [
+      storey({
+        storeyId: 5,
+        storeyName: 'L04 (linked name)',
+        elevation: 18,
+        obstructions: [{ id: 'column:1', kind: 'column', footprint: { shape: 'bbox', bounds: { minX: 0, maxX: 0.5, minZ: 0, maxZ: 0.5 } } }],
+        voids: [{ id: 'opening:9', kind: 'slab-opening', footprint: { shape: 'bbox', bounds: { minX: 3, maxX: 3.6, minZ: 3, maxZ: 3.6 } } }],
+      }),
+      storey({ storeyId: 6, storeyName: 'L05', elevation: 21.5, obstructions: [] }),
+    ]
+
+    const merged = mergeContinuityStoreyInputs([
+      { fileName: 'host.ifc', storeys: host },
+      { fileName: 'structure.ifc', storeys: structure },
+    ])
+
+    expect(merged.map((entry) => entry.storeyId)).toEqual([5, 6])
+    // Host is first, so its name wins for the shared storey.
+    expect(merged[0].storeyName).toBe('L04')
+    expect(merged[0].obstructions.map((item) => item.id)).toEqual(['host.ifc:wall:10', 'structure.ifc:column:1'])
+    expect(merged[0].voids.map((item) => item.id)).toEqual(['structure.ifc:opening:9'])
+    expect(merged[1].storeyName).toBe('L05')
+    // Pure: inputs are untouched.
+    expect(host[0].obstructions[0].id).toBe('wall:10')
+  })
+
+  it('orders storeys bottom-to-top even when files list them in a different order', () => {
+    const merged = mergeContinuityStoreyInputs([
+      { fileName: 'a.ifc', storeys: [storey({ storeyId: 3, elevation: 9 }), storey({ storeyId: 1, elevation: 0 })] },
+      { fileName: 'b.ifc', storeys: [storey({ storeyId: 2, elevation: 4.5 })] },
+    ])
+    expect(merged.map((entry) => entry.storeyId)).toEqual([1, 2, 3])
   })
 })

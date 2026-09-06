@@ -3,8 +3,10 @@ import type { PlanBounds } from '@/domain/types'
 import {
   buildContinuityMap,
   cellCenter,
+  findFreeCellWithinBounds,
   isCellBlocked,
   isShaftLikeName,
+  probeContinuityCell,
   snapPointToContinuity,
   type ContinuityMapInput,
   type ContinuityStoreyInput,
@@ -112,6 +114,114 @@ describe('buildContinuityMap — obstruction grid', () => {
     // Cells whose centres fall inside the opening are free again.
     expect(isCellBlocked(grid, 2, 2)).toBe(false)
     expect(isCellBlocked(grid, 3, 3)).toBe(false)
+  })
+
+  it('carves a hosted void out of its own slab only: a slab filling another slab’s opening stays solid', () => {
+    // Outer plate 0..3000 with a 1000..2000 cut-out; an inner plate fills that
+    // cut-out exactly (real case: a tower plate sitting in the opening of a
+    // larger floor plate). The inner plate has its own small opening.
+    const map = buildContinuityMap(
+      mmInput([
+        storey(10, {
+          obstructions: [
+            { id: 'slab:outer', kind: 'slab', footprint: bbox(0, 3000, 0, 3000) },
+            { id: 'slab:inner', kind: 'slab', footprint: bbox(1000, 2000, 1000, 2000) },
+          ],
+          voids: [
+            { id: 'opening:big', kind: 'slab-opening', footprint: bbox(1000, 2000, 1000, 2000), hostId: 'slab:outer' },
+            { id: 'opening:shaft', kind: 'slab-opening', footprint: bbox(1600, 1850, 1600, 1850), hostId: 'slab:inner' },
+          ],
+        }),
+      ]),
+    )
+
+    const grid = map.grids[0]
+    // Grid origin is (-250, -250): cell (c, r) covers [-250 + 250c, 250c).
+    // Inner plate cell away from its shaft opening: blocked (the outer plate's
+    // cut-out does not un-block the inner plate).
+    expect(isCellBlocked(grid, 5, 5)).toBe(true)
+    // The inner plate's own opening re-opens cell (7, 7): its centre (1625, 1625) lies inside 1600..1850.
+    expect(isCellBlocked(grid, 7, 7)).toBe(false)
+    // Cell (8, 8) (centre 1875, 1875) is outside that opening: inner plate, blocked.
+    expect(isCellBlocked(grid, 8, 8)).toBe(true)
+    // Outer plate away from the cut-out: blocked.
+    expect(isCellBlocked(grid, 1, 1)).toBe(true)
+    // The filled cut-out is not a shaft candidate (explained), the real opening is.
+    expect(map.shaftCandidates.map((candidate) => candidate.id)).toEqual(['slab-opening:10:opening:shaft'])
+    expect(map.diagnostics).toEqual([
+      'Opening opening:big (slab-opening, host slab:outer) on storey 10 is filled by slab:inner at its centre and was excluded from shaft candidates.',
+    ])
+  })
+
+  it('lets a structural shaft opening carve an overlapping finish floor of another file (not an infill)', () => {
+    // Merged multi-file storey: the structural slab has a 500 × 500 shaft
+    // opening; the architectural finish floor covers the whole plate without
+    // modelling the hole. The finish floor is not an infill of the small
+    // opening, so the opening stays free and remains a shaft candidate.
+    const map = buildContinuityMap(
+      mmInput([
+        storey(10, {
+          obstructions: [
+            { id: 'ST.ifc:slab:1', kind: 'slab', footprint: bbox(0, 3000, 0, 3000) },
+            { id: 'AR.ifc:slab:9', kind: 'slab', footprint: bbox(0, 3000, 0, 3000) },
+          ],
+          voids: [{ id: 'ST.ifc:opening:1', kind: 'slab-opening', footprint: bbox(1000, 1500, 1000, 1500), hostId: 'ST.ifc:slab:1' }],
+        }),
+      ]),
+    )
+    const grid = map.grids[0]
+    // Cell (5, 5) has its centre (1125, 1125) inside the opening: free despite the finish floor.
+    expect(isCellBlocked(grid, 5, 5)).toBe(false)
+    expect(isCellBlocked(grid, 2, 2)).toBe(true)
+    expect(map.shaftCandidates.map((candidate) => candidate.id)).toEqual(['slab-opening:10:ST.ifc:opening:1'])
+    expect(map.diagnostics).toEqual([])
+  })
+
+  it('does not seed aligned voids from filled openings', () => {
+    const filled = (storeyId: number): ContinuityStoreyInput =>
+      storey(storeyId, {
+        obstructions: [
+          { id: 'slab:outer', kind: 'slab', footprint: bbox(0, 3000, 0, 3000) },
+          { id: 'slab:inner', kind: 'slab', footprint: bbox(1000, 2000, 1000, 2000) },
+        ],
+        voids: [{ id: 'opening:big', kind: 'slab-opening', footprint: bbox(1000, 2000, 1000, 2000), hostId: 'slab:outer' }],
+      })
+    const map = buildContinuityMap(mmInput([filled(10), filled(11), filled(12)]))
+    expect(map.shaftCandidates).toEqual([])
+    expect(map.diagnostics).toHaveLength(3)
+  })
+
+  it('does not let a wall-hosted void (door / window) punch a hole in the slab', () => {
+    const map = buildContinuityMap(
+      mmInput([
+        storey(10, {
+          obstructions: [
+            { id: 'slab:1', kind: 'slab', footprint: bbox(0, 2000, 0, 2000) },
+            { id: 'wall:1', kind: 'wall', footprint: bbox(0, 2000, 900, 1100) },
+          ],
+          voids: [{ id: 'opening:door', kind: 'void', footprint: bbox(500, 1400, 600, 1400), hostId: 'wall:1' }],
+        }),
+      ]),
+    )
+
+    const grid = map.grids[0]
+    // Cell (4, 3) has its centre (875, 625) inside the door void's bbox and
+    // clear of the wall; the void belongs to the wall, so the slab under it
+    // stays solid.
+    expect(isCellBlocked(grid, 4, 3)).toBe(true)
+    // Wall cell: blocked regardless of the void.
+    expect(isCellBlocked(grid, 4, 4)).toBe(true)
+
+    // Legacy input without a host carves every slab (unchanged behaviour).
+    const legacy = buildContinuityMap(
+      mmInput([
+        storey(10, {
+          obstructions: [{ id: 'slab:1', kind: 'slab', footprint: bbox(0, 2000, 0, 2000) }],
+          voids: [{ id: 'opening:door', kind: 'void', footprint: bbox(500, 1400, 600, 1400) }],
+        }),
+      ]),
+    )
+    expect(isCellBlocked(legacy.grids[0], 4, 3)).toBe(false)
   })
 
   it('keeps wall cells blocked even when a void overlaps them', () => {
@@ -393,5 +503,46 @@ describe('snapPointToContinuity', () => {
     const first = snapPointToContinuity(map, 10, { x: 1010, z: 600 }, 1500)
     const second = snapPointToContinuity(map, 10, { x: 1010, z: 600 }, 1500)
     expect(second).toEqual(first)
+  })
+})
+
+describe('probeContinuityCell / findFreeCellWithinBounds (V3 queries)', () => {
+  const walls = [{ id: 'wall:1', kind: 'wall' as const, footprint: bbox(0, 2000, 0, 250) }]
+
+  it('reports blocked, free, and unknown explicitly', () => {
+    const map = buildContinuityMap(mmInput([storey(10, { obstructions: walls })]))
+    expect(probeContinuityCell(map, 10, { x: 1000, z: 100 })).toEqual({
+      status: 'blocked',
+      cell: { col: 5, row: 1 },
+    })
+    // Padding row below the wall (grid spans z -250…500) is free.
+    expect(probeContinuityCell(map, 10, { x: 1000, z: 400 })).toEqual({
+      status: 'free',
+      cell: { col: 5, row: 2 },
+    })
+    // Outside the padded grid → unknown, never blocked.
+    expect(probeContinuityCell(map, 10, { x: 50_000, z: 0 })).toEqual({
+      status: 'unknown',
+      reason: 'point lies outside the obstruction grid of storey 10',
+    })
+    expect(probeContinuityCell(map, 99, { x: 0, z: 0 })).toEqual({
+      status: 'unknown',
+      reason: 'no obstruction grid for storey 99',
+    })
+    expect(probeContinuityCell(buildContinuityMap(mmInput([storey(10)])), 10, { x: 0, z: 0 })).toEqual({
+      status: 'unknown',
+      reason: 'obstruction grid for storey 10 is empty',
+    })
+  })
+
+  it('finds the nearest free cell whose centre lies inside the bounds, or null when all are blocked', () => {
+    const map = buildContinuityMap(mmInput([storey(10, { obstructions: walls })]))
+    const grid = map.grids[0]
+    // Bounds straddle the wall (z 0–250 blocked) and the free row below it.
+    const found = findFreeCellWithinBounds(grid, { minX: 500, maxX: 1000, minZ: 0, maxZ: 500 }, { x: 750, z: 100 })
+    expect(found).not.toBeNull()
+    expect(found!.position.z).toBeGreaterThan(250)
+    expect(isCellBlocked(grid, found!.cell.col, found!.cell.row)).toBe(false)
+    expect(findFreeCellWithinBounds(grid, { minX: 500, maxX: 1000, minZ: 0, maxZ: 200 }, { x: 750, z: 100 })).toBeNull()
   })
 })

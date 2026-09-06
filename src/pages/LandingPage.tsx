@@ -1,5 +1,6 @@
 import type { ThemeMode } from '@/app/App'
 import { BrandMark } from '@/shared/BrandMark'
+import { MAX_FILE_SIZE_MB, MAX_STOREYS } from '@/features/ifc-upload/validateFile'
 import './LandingPage.css'
 
 interface LandingPageProps {
@@ -115,7 +116,7 @@ export function LandingPage({ theme, onToggleTheme }: LandingPageProps) {
         <div className="landing__meta">
           <span>Web-only · nothing uploaded</span>
           <span className="landing__meta-sep" aria-hidden="true">—</span>
-          <span>Up to 50 MB IFC · 30 storeys</span>
+          <span>Up to {MAX_FILE_SIZE_MB} MB IFC · {MAX_STOREYS} storeys</span>
         </div>
 
         <figure className="landing__shot">

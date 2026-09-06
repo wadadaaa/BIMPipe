@@ -1,5 +1,5 @@
 import type { StoreyAlignment } from '@/domain/alignStoreys'
-import type { EngineerPipeNetwork, EngineerRiserStack } from '@/domain/engineerPipes'
+import type { EngineerEndpointSource, EngineerPipeNetwork, EngineerRiserStack } from '@/domain/engineerPipes'
 import type { StoreyId } from '@/domain/types'
 import type { Point3D } from '@/shared/routes/planGeometry'
 import {
@@ -31,6 +31,7 @@ export interface EngineerOverlayStackMarker {
   x: number
   z: number
   diameterMm: number
+  /** Storeys whose slab band the stack's Z-range intersects (geometric span). */
   storeyCount: number
 }
 
@@ -38,8 +39,9 @@ export interface EngineerOverlayPresentation {
   hasNetwork: boolean
   visibleSegments: EngineerOverlaySegment[]
   /**
-   * Engineer riser stacks are shown model-wide, not storey-filtered: risers
-   * are vertical shafts whose plan position is valid on every storey, and 096
+   * Engineer SANITARY riser stacks (extent ≥ one storey pitch; vents and stubs
+   * are not drawn), shown model-wide rather than storey-filtered: risers are
+   * vertical shafts whose plan position is valid on every storey, and 096
    * models several of them as single full-height pipes contained in one
    * storey only (per-storey containment understates the span).
    */
@@ -80,6 +82,16 @@ export function resolveEngineerStoreyId({
   return null
 }
 
+/** Endpoint sources whose coordinates live in the proven IFC source frame. */
+export const DRAWABLE_ENGINEER_ENDPOINT_SOURCES: ReadonlySet<EngineerEndpointSource> = new Set<EngineerEndpointSource>([
+  'extrusion-axis',
+  'distribution-ports',
+])
+
+function isDrawableEndpointSource(source: EngineerEndpointSource | null): boolean {
+  return source !== null && DRAWABLE_ENGINEER_ENDPOINT_SOURCES.has(source)
+}
+
 export function getEngineerOverlayPresentation({
   network,
   stacks,
@@ -88,6 +100,7 @@ export function getEngineerOverlayPresentation({
   visible,
 }: {
   network: EngineerPipeNetwork
+  /** Sanitary stacks from `classifyEngineerRiserStacks(...).sanitaryStacks`. */
   stacks: EngineerRiserStack[]
   /** Storey of the engineer model matching the open floor (see resolver). */
   engineerStoreyId: StoreyId
@@ -105,10 +118,12 @@ export function getEngineerOverlayPresentation({
   const visibleSegments: EngineerOverlaySegment[] = []
   let excludedSegmentCount = 0
   for (const segment of floorSegments) {
-    // Only extrusion-axis endpoints are in the verified IFC source frame; the
-    // mesh-bounds fallback goes through web-ifc's viewer transform instead and
-    // has no proven frame here, so those segments are counted, not drawn.
-    if (segment.endpointSource !== 'extrusion-axis' || segment.start === null || segment.end === null) {
+    // Extrusion-axis and port-derived (V1b: Revit vertical pipes exported as a
+    // cut face with full-length IfcDistributionPorts) endpoints are both in the
+    // verified IFC source frame; the mesh-bounds fallback goes through web-ifc's
+    // viewer transform instead and has no proven frame here, so those segments
+    // are counted, not drawn.
+    if (!isDrawableEndpointSource(segment.endpointSource) || segment.start === null || segment.end === null) {
       excludedSegmentCount += 1
       continue
     }
@@ -128,7 +143,7 @@ export function getEngineerOverlayPresentation({
     x: stack.xM - frameOrigin.x,
     z: stack.yM - frameOrigin.z,
     diameterMm: stack.diameterMm,
-    storeyCount: stack.storeys.length,
+    storeyCount: stack.spannedStoreyIds.length,
   }))
 
   return { hasNetwork, visibleSegments, visibleStackMarkers, excludedSegmentCount }

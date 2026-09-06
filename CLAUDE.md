@@ -172,9 +172,9 @@ The UI must always show whether vertical alignment is locked or broken for the a
 
 V0 supported envelope:
 
-- IFC files up to 50 MB
+- IFC files up to 500 MB
 - Up to roughly 500,000 IFC entities
-- Up to 30 storeys
+- Up to 64 storeys
 
 Files outside this envelope must produce an explicit error with a clear message before parsing begins, not a frozen tab. Parse and detection should be cancellable from the UI for files that take longer than 10 seconds.
 

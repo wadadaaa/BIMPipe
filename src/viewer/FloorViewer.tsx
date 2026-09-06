@@ -75,6 +75,12 @@ interface FloorViewerProps {
   ) => void
   onSwitch3D?: () => void
   sanitaryRoutes?: SanitaryFixtureRoute[]
+  /**
+   * Whether the riser-to-riser chain legend entries (cyan main route, dashed
+   * amber branch) apply; false under the branch-runs routing model, where no
+   * chain is ever drawn.
+   */
+  chainLegendVisible?: boolean
   demoFlowEnabled?: boolean
   /** Branch route segments computed for the currently selected floor (T3). */
   branchRouteSegments?: RouteSegment[]
@@ -133,6 +139,7 @@ export function FloorViewer({
   onRiserMoveCommit = () => {},
   onSwitch3D,
   sanitaryRoutes = [],
+  chainLegendVisible = true,
   demoFlowEnabled = false,
   branchRouteSegments = [],
   branchRoutesVisible = true,
@@ -1119,12 +1126,16 @@ export function FloorViewer({
           <span className="floor-viewer__legend-item floor-viewer__legend-item--riser">
             Blue = risers
           </span>
-          <span className="floor-viewer__legend-item floor-viewer__legend-item--route-main">
-            Cyan = main sanitary route
-          </span>
-          <span className="floor-viewer__legend-item floor-viewer__legend-item--route-branch">
-            Dashed amber = branch route
-          </span>
+          {chainLegendVisible && (
+            <>
+              <span className="floor-viewer__legend-item floor-viewer__legend-item--route-main">
+                Cyan = main sanitary route
+              </span>
+              <span className="floor-viewer__legend-item floor-viewer__legend-item--route-branch">
+                Dashed amber = branch route
+              </span>
+            </>
+          )}
           {branchRoutePresentation.hasRoutes && (
             <span className="floor-viewer__legend-item floor-viewer__legend-item--branch-route">
               Violet = fixture branch runs

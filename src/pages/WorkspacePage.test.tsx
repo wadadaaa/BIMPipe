@@ -233,7 +233,11 @@ describe('WorkspacePage', () => {
     await waitFor(() => {
       expect(levelTwoButton).toHaveClass('storey-list__item--selected')
     })
-    expect(mocks.extractFloorMeshes).toHaveBeenCalledWith(expect.anything(), 101, 2)
+    // The selection lands before the lazily imported extractor module resolves,
+    // so the geometry call is awaited rather than asserted synchronously.
+    await waitFor(() => {
+      expect(mocks.extractFloorMeshes).toHaveBeenCalledWith(expect.anything(), 101, 2)
+    })
     // Demo mode keeps its legacy floor-selection semantics: the fixture-scan
     // chooser must never run in the demo flow.
     expect(mocks.chooseInitialStoreyByFixtures).not.toHaveBeenCalled()
@@ -428,7 +432,7 @@ describe('WorkspacePage', () => {
     expect(screen.getByText(/Fixture scan took 7 ms/)).toBeInTheDocument()
   })
 
-  it('computes and surfaces sanitary routes without demo mode once fixtures and risers exist on the floor', async () => {
+  it('routes plain mode with branch runs only: no riser-to-riser chains built, drawn, listed or exported', async () => {
     mocks.getDemoRuntimeConfig.mockReturnValue({ enabled: false as const })
 
     const user = userEvent.setup()
@@ -447,29 +451,78 @@ describe('WorkspacePage', () => {
     const placeRisersButton = await screen.findByRole('button', { name: /place risers/i })
     await user.click(placeRisersButton)
 
+    // Plain mode uses the wet-core path (V3): the mocked plan coordinates are
+    // metres, so the three fixtures are hundreds of metres apart and each forms
+    // its own wet core → 3 core stacks + 1 kitchen stack. Without a continuity
+    // map each core stack sits 150 mm outside the core's wall-side edge, so
+    // every fixture gets a real (non-degenerate) branch run to its own stack.
     await screen.findByLabelText('Remove riser R1')
     await screen.findByLabelText('Remove riser R2')
     await screen.findByLabelText('Remove riser R3')
+    await screen.findByLabelText('Remove riser R4')
+    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('risers:4')
+    // V5: the 'branch-runs' routing model never builds the demo chains.
+    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('routes:0')
+    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('branchSegments:3')
+    // The wet-core placement of each stack is explained in the riser list.
+    expect(screen.getAllByTestId('stack-placement')[0]).toHaveTextContent('1 WC · wall-side edge')
+    // The routes list groups the runs by stack with length, Ø and slope.
+    expect(screen.getAllByTestId('branch-run-group')).toHaveLength(3)
+    expect(screen.getAllByTestId('branch-run-group')[0]).toHaveTextContent('R1')
+    expect(screen.getAllByTestId('branch-run-group')[0]).toHaveTextContent('1 fixture · 1 run')
+    expect(screen.getAllByTestId('branch-run-group')[0]).toHaveTextContent('Ø110 · 2.0 %')
+    expect(screen.queryByTestId('branch-run-warnings')).not.toBeInTheDocument()
 
-    // Suggested toilet risers sit exactly on the toilets, so their routes are
-    // degenerate (zero plan length) and skipped. The bath (T2: all fixtures flow
-    // through routing) already yields one real branch route to the kitchen riser.
-    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('routes:1')
-
-    // Removing R2 rebinds WC-12 to R1, which yields a second real
-    // fixture-to-riser route with no demo mode active.
+    // Removing R2 leaves WC-12 without its core stack. The model declares a
+    // length unit, so the plan coordinates are metres and the nearest remaining
+    // stack is hundreds of metres away — far beyond the 4 m branch limit. The
+    // fixture is NOT silently rerouted: its run disappears and the routes panel
+    // shows a visible warning instead.
     await user.click(screen.getByLabelText('Remove riser R2'))
 
     await waitFor(() => {
-      expect(screen.getByTestId('floor-viewer')).toHaveTextContent('routes:2')
+      expect(screen.getByTestId('floor-viewer')).toHaveTextContent('risers:3')
     })
+    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('routes:0')
+    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('branchSegments:2')
+    expect(screen.getByTestId('branch-run-warnings')).toHaveTextContent(
+      'WC-12 not routed: no stack within the 4 m branch limit.',
+    )
 
-    // Demo-only chrome stays hidden, but the routing limitations surface in dev.
+    // Demo-only chrome and the chain "preview notes" never appear in plain mode.
     expect(screen.queryByLabelText('Sanitary demo flow')).not.toBeInTheDocument()
-    expect(screen.getByText('Sanitary routing preview notes')).toBeInTheDocument()
-    expect(
-      screen.getByText(/verify grouping before using this demo heuristic with anytower\.ifc/i),
-    ).toBeInTheDocument()
+    expect(screen.queryByText('Sanitary routing preview notes')).not.toBeInTheDocument()
+
+    // The Decisions tab states the routing model explicitly.
+    await user.click(screen.getByRole('tab', { name: 'Decisions' }))
+    expect(await screen.findByText('Routing model: branch runs (fixture → stack)')).toBeInTheDocument()
+    expect(screen.getByTestId('routing-model-section')).toHaveTextContent('Fixtures routed: 2')
+    expect(screen.getByTestId('routing-model-section')).toHaveTextContent(
+      'Not routed: 1 fixture(s) without a reachable stack',
+    )
+
+    // Export in plain mode passes branch runs and NO chains to the exporter.
+    await user.click(screen.getByRole('tab', { name: 'Risers' }))
+    await user.click(screen.getByRole('button', { name: /^download ifc$/i }))
+    await waitFor(() => {
+      expect(mocks.exportFullIfcWithRisersWithDebug).toHaveBeenCalledTimes(1)
+    })
+    const exportArgs = mocks.exportFullIfcWithRisersWithDebug.mock.calls[0]
+    expect(exportArgs[6]).toEqual([])
+    expect(exportArgs[7]).toHaveLength(1)
+    expect(exportArgs[7][0].segments).toHaveLength(2)
+    const debugDownloadIndex = anchorClick.mock.contexts
+      .map((link) => (link as HTMLAnchorElement).download)
+      .findIndex((name) => name.endsWith('riser-mapping.json'))
+    const debugBlob = (URL.createObjectURL as ReturnType<typeof vi.fn>).mock.calls[debugDownloadIndex][0] as Blob
+    const debugJson = JSON.parse(await debugBlob.text()) as {
+      routingModel: string
+      sanitaryRouteDebugGroups: unknown[]
+      branchRoutes: { floors: Array<{ segmentCount: number }> }
+    }
+    expect(debugJson.routingModel).toBe('branch-runs')
+    expect(debugJson.sanitaryRouteDebugGroups).toEqual([])
+    expect(debugJson.branchRoutes.floors[0].segmentCount).toBe(2)
   })
 
   it('loads the bundled sample model through the same upload path as a user-picked file', async () => {
@@ -522,11 +575,12 @@ describe('WorkspacePage', () => {
     await user.click(placeRisersButton)
 
     await screen.findByLabelText('Remove riser R1')
+    await screen.findByLabelText('Remove riser R4')
 
-    // Both toilets sit exactly on their suggested risers (zero-length runs emit no
-    // segments); the bath routes to the kitchen corner riser as an axis-aligned
-    // L-run, so the dev flow shows its two branch segments right after suggestion.
-    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('branchSegments:2')
+    // Wet-core path (V3): each fixture is its own core here and its stack sits
+    // 150 mm outside the core's wall-side edge, an axis-aligned offset → one
+    // branch segment per fixture right after suggestion.
+    expect(screen.getByTestId('floor-viewer')).toHaveTextContent('branchSegments:3')
 
     await user.click(screen.getByRole('button', { name: 'toggle-branch-routes' }))
     await waitFor(() => {
@@ -535,14 +589,15 @@ describe('WorkspacePage', () => {
 
     await user.click(screen.getByRole('button', { name: 'toggle-branch-routes' }))
     await waitFor(() => {
-      expect(screen.getByTestId('floor-viewer')).toHaveTextContent('branchSegments:2')
+      expect(screen.getByTestId('floor-viewer')).toHaveTextContent('branchSegments:3')
     })
   })
 
   it('loads the engineer network on demand and the per-floor toggle hides and re-shows the layer', async () => {
     mocks.getDemoRuntimeConfig.mockReturnValue({ enabled: false as const })
     // One vertical SW-GRV segment on the auto-opened storey (id 2): drawable as
-    // a floor segment and eligible as a riser stack (Ø110, vertical).
+    // a floor segment and eligible as a riser stack (Ø110, vertical, 3 m ≥ the
+    // 2.5 m single-storey fallback threshold, Z-range inside the storey band).
     mocks.extractEngineerPipeNetwork.mockResolvedValue({
       metersPerSourceUnit: 1,
       storeys: [{ id: 2, name: 'קומה 2', elevationSource: 612 }],
@@ -553,8 +608,8 @@ describe('WorkspacePage', () => {
           systemName: 'SW-GRV 1',
           storeyId: 2,
           storeyName: 'קומה 2',
-          start: { x: 100, y: -50, z: 0 },
-          end: { x: 100, y: -50, z: 3 },
+          start: { x: 100, y: -50, z: 612 },
+          end: { x: 100, y: -50, z: 615 },
           endpointSource: 'extrusion-axis',
           outerDiameterMm: 110,
           lengthM: 3,

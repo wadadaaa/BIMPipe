@@ -85,6 +85,7 @@ const branchRoutes: FloorRoutes[] = [
         axis: 'x',
         kind: 'fixture-branch',
         servedFixtureExpressIds: [901],
+        diameterMm: 110,
         riserId: 's1-f2',
         riserStackId: 'stack-1',
       },
@@ -95,6 +96,7 @@ const branchRoutes: FloorRoutes[] = [
         axis: 'z',
         kind: 'trunk',
         servedFixtureExpressIds: [902, 903],
+        diameterMm: 63,
         riserId: 's2-f2',
         riserStackId: 'stack-2',
       },
@@ -145,12 +147,33 @@ function attachedDefinitionNames(
   return names
 }
 
+/**
+ * Same minimal model, but with no Body sub-context at all: its only Body shape
+ * representation (an empty swept-solid placeholder on the storey) points
+ * straight at the 'Model' context, the way the bundled Duplex MEP sample does.
+ */
+function buildIfcWithoutBodySubContext(schema: 'IFC2X3' | 'IFC4'): string {
+  return buildMinimalIfc(schema)
+    .replace(`#24=IFCGEOMETRICREPRESENTATIONSUBCONTEXT('Body','Model',*,*,*,*,#23,$,.MODEL_VIEW.,$);\n`, '')
+    .replace(
+      'ENDSEC;\nEND-ISO-10303-21;',
+      `#90=IFCCARTESIANPOINT((0.,0.));
+#91=IFCPOLYLINE((#90,#90));
+#92=IFCSHAPEREPRESENTATION(#23,'Body','Curve2D',(#91));
+#93=IFCPRODUCTDEFINITIONSHAPE($,$,(#92));
+#94=IFCBUILDINGELEMENTPROXY('0Proxy0000000000000000',#5,'Marker',$,$,#62,#93,$,$);
+ENDSEC;
+END-ISO-10303-21;`,
+    )
+}
+
 async function exportAndReopen(
   schema: 'IFC2X3' | 'IFC4',
   options: {
     risers?: ExportRiser[]
     branchRoutes?: FloorRoutes[]
     sanitaryRoutes?: SanitaryFixtureRoute[]
+    sourceIfc?: string
   } = {},
 ): Promise<{
   ifc: ImportedIfc
@@ -163,7 +186,7 @@ async function exportAndReopen(
   await exportApi.Init()
   const exportedBytes = await exportFullIfcWithRisers(
     exportApi,
-    new TextEncoder().encode(buildMinimalIfc(schema)),
+    new TextEncoder().encode(options.sourceIfc ?? buildMinimalIfc(schema)),
     70,
     options.risers ?? risers,
     null,
@@ -287,6 +310,31 @@ describe('exportFullIfcWithRisers round-trip (reopen exported bytes with web-ifc
     }
   })
 
+  it('IFC2X3: a model without a Body sub-context exports into the context its Body shapes use', async () => {
+    const { ifc, api, modelId } = await exportAndReopen('IFC2X3', {
+      sourceIfc: buildIfcWithoutBodySubContext('IFC2X3'),
+      branchRoutes,
+    })
+    try {
+      expect(idsOfType(api, modelId, ifc.IFCGEOMETRICREPRESENTATIONSUBCONTEXT)).toHaveLength(0)
+      const flowSegmentIds = idsOfType(api, modelId, ifc.IFCFLOWSEGMENT)
+      expect(flowSegmentIds).toHaveLength(STACK_COUNT + BRANCH_SEGMENT_COUNT)
+      // Every exported pipe body sits in the model's 'Model' context (#23).
+      for (const id of flowSegmentIds) {
+        const element = api.GetLine(modelId, id, false) as { Representation?: { value: number } | null }
+        const shapeDef = api.GetLine(modelId, element.Representation!.value, false) as {
+          Representations: Array<{ value: number }>
+        }
+        for (const shapeRef of shapeDef.Representations) {
+          const shape = api.GetLine(modelId, shapeRef.value, false) as { ContextOfItems: { value: number } }
+          expect(shape.ContextOfItems.value).toBe(23)
+        }
+      }
+    } finally {
+      api.CloseModel(modelId)
+    }
+  })
+
   for (const schema of ['IFC2X3', 'IFC4'] as const) {
     it(`${schema}: branch segments and stack diameters reopen correctly (count, system, profiles, quantities)`, async () => {
       const { ifc, api, modelId } = await exportAndReopen(schema, {
@@ -305,8 +353,9 @@ describe('exportFullIfcWithRisers round-trip (reopen exported bytes with web-ifc
 
         // Branch elements are named after their role and target stack.
         const elementNames = elementIds.map((id) => readNameValue(api, modelId, id))
+        // Segment names carry the per-segment diameter: Ø110 WC branch, Ø63 shared trunk.
         expect(elementNames).toContain('BIMPipe Branch 110mm -> R1')
-        expect(elementNames).toContain('BIMPipe Trunk 110mm -> R2')
+        expect(elementNames).toContain('BIMPipe Trunk 63mm -> R2')
 
         // The stacks system groups stacks AND branch segments.
         const memberIds = systemMemberIds(api, modelId, ifc, 'BIMPipe Sanitary Stacks')
@@ -314,21 +363,26 @@ describe('exportFullIfcWithRisers round-trip (reopen exported bytes with web-ifc
         expect([...memberIds].sort((a, b) => a - b)).toEqual([...elementIds].sort((a, b) => a - b))
 
         // Diameters round-trip through the written circle profiles (source units = mm):
-        // Ø110 default -> radius 55 (stack-1 + both branches), explicit Ø160 -> radius 80.
+        // Ø63 shared trunk -> radius 31.5, Ø110 default stack-1 + Ø110 WC branch -> radius 55,
+        // explicit Ø160 stack-2 -> radius 80.
         const radii = idsOfType(api, modelId, ifc.IFCCIRCLEPROFILEDEF)
           .map((id) => readRadiusValue(api, modelId, id))
           .sort((a, b) => (a ?? 0) - (b ?? 0))
-        expect(radii).toEqual([55, 55, 55, 80])
+        expect(radii).toEqual([31.5, 55, 55, 80])
 
         // ...and through the NominalDiameter base quantity on every segment.
         const diameterQuantities = quantityLengthValues(api, modelId, ifc, 'NominalDiameter').sort((a, b) => a - b)
-        expect(diameterQuantities).toEqual([110, 110, 110, 160])
+        expect(diameterQuantities).toEqual([63, 110, 110, 160])
 
         if (schema === 'IFC2X3') {
-          // One type per stack + one shared branch type, each with the type-common pset.
-          expect(idsOfType(api, modelId, ifc.IFCPIPESEGMENTTYPE)).toHaveLength(STACK_COUNT + 1)
+          // One type per stack + one shared branch type per distinct branch diameter
+          // (Ø63 and Ø110 here), each with the type-common pset.
+          const BRANCH_DIAMETER_COUNT = 2
+          expect(idsOfType(api, modelId, ifc.IFCPIPESEGMENTTYPE)).toHaveLength(STACK_COUNT + BRANCH_DIAMETER_COUNT)
           const psetNames = idsOfType(api, modelId, ifc.IFCPROPERTYSET).map((id) => readNameValue(api, modelId, id))
-          expect(psetNames.filter((name) => name === 'Pset_PipeSegmentTypeCommon')).toHaveLength(STACK_COUNT + 1)
+          expect(psetNames.filter((name) => name === 'Pset_PipeSegmentTypeCommon')).toHaveLength(
+            STACK_COUNT + BRANCH_DIAMETER_COUNT,
+          )
         } else {
           // TODO(BIM-51) parity: the IFC4 path still writes no type objects/psets,
           // for branches exactly as for stacks.
@@ -368,6 +422,7 @@ describe('exportFullIfcWithRisers round-trip (reopen exported bytes with web-ifc
             axis: 'x',
             kind: 'fixture-branch',
             servedFixtureExpressIds: [901],
+            diameterMm: 110,
             riserId: 's1-f2',
             riserStackId: 'stack-1',
           },
@@ -405,6 +460,7 @@ describe('exportFullIfcWithRisers round-trip (reopen exported bytes with web-ifc
             axis: 'x',
             kind: 'fixture-branch',
             servedFixtureExpressIds: [901],
+            diameterMm: 110,
             riserId: 'ghost',
           },
         ],

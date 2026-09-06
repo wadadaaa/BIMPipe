@@ -1,13 +1,11 @@
 import * as THREE from 'three'
 import type { IfcAPI } from 'web-ifc'
 import type { StoreyId } from '@/domain/types'
+import { IDENTITY_MODEL_FRAME, type Bounds3D, type ModelFrame } from '@/shared/frame/modelFrame'
 import {
-  createArtifactAwareBoundsAccumulator,
-  IDENTITY_MODEL_FRAME,
-  type ArtifactAwareBoundsAccumulator,
-  type Bounds3D,
-  type ModelFrame,
-} from '@/shared/frame/modelFrame'
+  createOriginGuardedBoundsAccumulator,
+  type OriginGuardedBoundsAccumulator,
+} from '@/shared/frame/originArtifacts'
 import { computeOutlierRobustFloorBounds } from '@/shared/frame/robustFloorBounds'
 
 /** Counts of geometry that was excluded from the viewer-facing bounds. */
@@ -153,11 +151,12 @@ function streamElementMeshes(
   frame: ModelFrame,
 ): FloorMeshes {
   const group = new THREE.Group()
-  // Source-frame bounds accumulated in double precision across all meshes.
-  // Origin-artifact strays ((0,0,0)-adjacent vertices in otherwise
-  // far-from-origin geometry) are excluded from the bounds so they cannot
-  // poison camera fitting or the origin centroid.
-  const sourceBounds = createArtifactAwareBoundsAccumulator()
+  // Source-frame bounds in double precision: the union of the per-mesh boxes.
+  // Each mesh box is origin-guarded (`src/shared/frame/originArtifacts.ts`):
+  // an isolated stray (0,0,0) vertex is excluded from the bounds so it cannot
+  // poison camera fitting or the origin centroid, while geometry that really
+  // touches the origin keeps it. The guard decides per mesh, never per storey.
+  let sourceBounds: Bounds3D | null = null
   // Per-mesh bounds feed the outlier-robust viewer box (see robustFloorBounds).
   const perMeshSourceBounds: Bounds3D[] = []
   let nonFiniteVertexCount = 0
@@ -184,19 +183,21 @@ function streamElementMeshes(
 
         if (rawVerts.length === 0) continue
 
-        const meshBounds = createArtifactAwareBoundsAccumulator()
+        const meshBounds = createOriginGuardedBoundsAccumulator()
         const localized = buildLocalFrameGeometry(
           rawVerts,
           rawIndices,
           placed.flatTransformation,
           frame,
-          sourceBounds,
           meshBounds,
         )
         if (localized === null) continue
 
         const meshBoundsResult = meshBounds.result()
-        if (meshBoundsResult !== null) perMeshSourceBounds.push(meshBoundsResult)
+        if (meshBoundsResult !== null) {
+          perMeshSourceBounds.push(meshBoundsResult)
+          sourceBounds = unionBounds(sourceBounds, meshBoundsResult)
+        }
         nonFiniteVertexCount += meshBounds.nonFiniteVertexCount()
 
         const bufGeo = new THREE.BufferGeometry()
@@ -224,7 +225,7 @@ function streamElementMeshes(
     })
   }
 
-  const sourceBoundingBox = boundsToBox3(sourceBounds.result())
+  const sourceBoundingBox = boundsToBox3(sourceBounds)
 
   // Viewer box: outlier-robust bounds in the local frame. When no mesh is an
   // outlier this equals sourceBoundingBox minus the origin bit-for-bit, so
@@ -266,16 +267,15 @@ interface LocalFrameGeometry {
 /**
  * Transforms raw web-ifc vertices (stride 6: x, y, z, nx, ny, nz) through the
  * column-major placement matrix in double precision, subtracts the model-frame
- * origin, and accumulates the source-frame bounds — into the storey-wide
- * accumulator and the per-mesh one (which feeds outlier-robust viewer bounds).
+ * origin, and accumulates the per-mesh source-frame bounds (which feed both
+ * the storey box and the outlier-robust viewer bounds).
  */
 function buildLocalFrameGeometry(
   rawVerts: Float32Array,
   rawIndices: Uint32Array,
   t: number[] | Float32Array | Float64Array,
   frame: ModelFrame,
-  sourceBounds: ArtifactAwareBoundsAccumulator,
-  meshBounds: ArtifactAwareBoundsAccumulator,
+  meshBounds: OriginGuardedBoundsAccumulator,
 ): LocalFrameGeometry | null {
   const vertexCount = rawVerts.length / 6
   if (vertexCount === 0) return null
@@ -291,7 +291,6 @@ function buildLocalFrameGeometry(
     const wy = t[1] * lx + t[5] * ly + t[9] * lz + t[13]
     const wz = t[2] * lx + t[6] * ly + t[10] * lz + t[14]
 
-    sourceBounds.add(wx, wy, wz)
     meshBounds.add(wx, wy, wz)
 
     positions[j * 3] = wx - frame.origin.x
@@ -302,7 +301,19 @@ function buildLocalFrameGeometry(
   return { positions, indices: new Uint32Array(rawIndices) }
 }
 
-function boundsToBox3(bounds: ReturnType<ArtifactAwareBoundsAccumulator['result']>): THREE.Box3 {
+function unionBounds(current: Bounds3D | null, next: Bounds3D): Bounds3D {
+  if (current === null) return { ...next }
+  return {
+    minX: Math.min(current.minX, next.minX),
+    minY: Math.min(current.minY, next.minY),
+    minZ: Math.min(current.minZ, next.minZ),
+    maxX: Math.max(current.maxX, next.maxX),
+    maxY: Math.max(current.maxY, next.maxY),
+    maxZ: Math.max(current.maxZ, next.maxZ),
+  }
+}
+
+function boundsToBox3(bounds: Bounds3D | null): THREE.Box3 {
   if (bounds === null) return new THREE.Box3()
   return new THREE.Box3(
     new THREE.Vector3(bounds.minX, bounds.minY, bounds.minZ),

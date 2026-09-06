@@ -1,4 +1,14 @@
 import type { FixtureKind, RiserId, StoreyId } from '@/domain/types'
+import {
+  BRANCH_SLOPE_RATIO,
+  DEFAULT_BRANCH_SLOPE_DROP_MM,
+  DEFAULT_BRANCH_SLOPE_RUN_MM,
+  resolveBranchSegmentDiameterMm,
+} from './branchDefaults'
+
+// The slope constants live in the shared defaults table (`branchDefaults.ts`);
+// re-exported here so existing importers keep working.
+export { DEFAULT_BRANCH_SLOPE_DROP_MM, DEFAULT_BRANCH_SLOPE_RUN_MM }
 
 /**
  * Units the plan coordinates are expressed in. Plan geometry lives on the
@@ -49,6 +59,12 @@ export interface RouteSegment {
   kind: RouteSegmentKind
   /** Fixtures whose flow passes through this segment, sorted ascending. */
   servedFixtureExpressIds: number[]
+  /**
+   * Nominal diameter in millimetres from the served fixture kinds
+   * (`resolveBranchSegmentDiameterMm` in `branchDefaults.ts`): per-kind for a
+   * single fixture, Ø63 collector for ≥ 2 shared small fixtures, Ø110 when a WC is served.
+   */
+  diameterMm: number
   /** Riser this segment drains toward. */
   riserId: RiserId
   /** Vertical stack of the target riser, when known. */
@@ -100,16 +116,6 @@ export interface ComputeBranchRoutesOptions {
 }
 
 /**
- * Default branch slope as a mm-per-mm-run constant pair:
- * 20 mm of drop per 1000 mm of run (2%). The ratio is dimensionless, so the
- * same 2% applies unchanged to metre-scale coordinates.
- */
-export const DEFAULT_BRANCH_SLOPE_DROP_MM = 20
-export const DEFAULT_BRANCH_SLOPE_RUN_MM = 1000
-
-const BRANCH_SLOPE_RATIO = DEFAULT_BRANCH_SLOPE_DROP_MM / DEFAULT_BRANCH_SLOPE_RUN_MM
-
-/**
  * Computes horizontal branch routing from every assigned fixture to its riser,
  * grouped per floor. Pure and deterministic: same input produces identical
  * segments, IDs, and ordering regardless of input order.
@@ -136,8 +142,12 @@ const BRANCH_SLOPE_RATIO = DEFAULT_BRANCH_SLOPE_DROP_MM / DEFAULT_BRANCH_SLOPE_R
  * Approximations (V0):
  * - No obstacle avoidance: there is no wall/void data yet, so runs may cross
  *   walls, shafts, or room boundaries.
- * - Coordinates are compared exactly when merging; there is no snapping
- *   tolerance, so only legs on identical line coordinates merge.
+ * - Plan coordinates are snapped to 1 mm (`PLAN_SNAP_RESOLUTION`) before
+ *   routing and compared exactly after that: legs merge only when they lie on
+ *   the same millimetre line. The snap absorbs floating-point noise from
+ *   geometry extraction (fixtures in a row typically differ by ~1e-14 m),
+ *   which would otherwise split a shared corridor into parallel legs and emit
+ *   zero-length segments that the IFC export rejects.
  * - Junction invert refinement is not modelled: elevations are the ideal
  *   2%-of-remaining-run levels, not min-invert-at-junction hydraulics.
  *
@@ -169,13 +179,28 @@ export function computeBranchRoutes(
 
     const segments: RouteSegment[] = []
     for (const riserId of [...byRiser.keys()].sort((a, b) => a.localeCompare(b))) {
-      segments.push(...routeRiserGroup(storeyId, riserId, byRiser.get(riserId) ?? []))
+      segments.push(...routeRiserGroup(storeyId, riserId, byRiser.get(riserId) ?? [], planUnits))
     }
 
     floors.push({ storeyId, planUnits, segments })
   }
 
   return floors
+}
+
+/**
+ * Resolution the plan coordinates are snapped to before routing, per plan
+ * unit: 1 mm. Anything closer than this is the same line / the same point.
+ */
+export const PLAN_SNAP_RESOLUTION: Record<PlanUnits, number> = { m: 0.001, mm: 1 }
+
+function snapPlanPoint(point: PlanPoint, resolution: number): PlanPoint {
+  return { x: snapCoordinate(point.x, resolution), z: snapCoordinate(point.z, resolution) }
+}
+
+function snapCoordinate(value: number, resolution: number): number {
+  // `+ 0` folds -0 into 0 so snapped coordinates compare and stringify identically.
+  return Math.round(value / resolution) * resolution + 0
 }
 
 interface LegEntry {
@@ -201,18 +226,23 @@ function routeRiserGroup(
   storeyId: StoreyId,
   riserId: RiserId,
   assignments: AssignedFixture[],
+  planUnits: PlanUnits,
 ): RouteSegment[] {
-  const riserPlan = assignments[0].riserPlan
+  const resolution = PLAN_SNAP_RESOLUTION[planUnits]
+  const riserPlan = snapPlanPoint(assignments[0].riserPlan, resolution)
   for (const assignment of assignments) {
-    if (assignment.riserPlan.x !== riserPlan.x || assignment.riserPlan.z !== riserPlan.z) {
+    const candidate = snapPlanPoint(assignment.riserPlan, resolution)
+    if (candidate.x !== riserPlan.x || candidate.z !== riserPlan.z) {
       throw new Error(`Conflicting plan positions for riser ${riserId} on storey ${storeyId}`)
     }
   }
   const riserStackId = assignments.find((assignment) => assignment.riserStackId !== undefined)?.riserStackId
+  const kindByFixture = new Map(assignments.map((assignment) => [assignment.fixtureExpressId, assignment.fixtureKind]))
 
   const buckets = new Map<string, LegBucket>()
   for (const assignment of assignments) {
-    const { fixturePlan, fixtureExpressId } = assignment
+    const { fixtureExpressId } = assignment
+    const fixturePlan = snapPlanPoint(assignment.fixturePlan, resolution)
     const dx = fixturePlan.x - riserPlan.x
     const dz = fixturePlan.z - riserPlan.z
 
@@ -248,6 +278,12 @@ function routeRiserGroup(
       segments.push({
         ...segment,
         id: `branch-seg|${storeyId}|${riserId}|${segments.length}`,
+        diameterMm: resolveBranchSegmentDiameterMm(
+          segment.servedFixtureExpressIds.flatMap((expressId) => {
+            const kind = kindByFixture.get(expressId)
+            return kind === undefined ? [] : [kind]
+          }),
+        ),
         riserId,
         riserStackId,
       })
@@ -270,7 +306,7 @@ function addLeg(
   buckets.set(key, { ...bucket, entries: [entry] })
 }
 
-type UnkeyedSegment = Omit<RouteSegment, 'id' | 'riserId' | 'riserStackId'>
+type UnkeyedSegment = Omit<RouteSegment, 'id' | 'diameterMm' | 'riserId' | 'riserStackId'>
 
 /**
  * Merges a bucket of collinear same-direction legs and splits the merged run

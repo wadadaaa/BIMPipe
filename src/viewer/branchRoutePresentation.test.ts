@@ -10,6 +10,7 @@ const segments: RouteSegment[] = [
     axis: 'x',
     kind: 'trunk',
     servedFixtureExpressIds: [11, 13],
+    diameterMm: 63,
     riserId: 'riser-a',
     riserStackId: 'stack-a',
   },
@@ -20,6 +21,7 @@ const segments: RouteSegment[] = [
     axis: 'z',
     kind: 'fixture-branch',
     servedFixtureExpressIds: [13],
+    diameterMm: 50,
     riserId: 'riser-a',
   },
 ]
@@ -37,6 +39,7 @@ const floors: FloorRoutes[] = [
         axis: 'x',
         kind: 'fixture-branch',
         servedFixtureExpressIds: [21],
+        diameterMm: 110,
         riserId: 'riser-b',
       },
     ],

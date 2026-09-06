@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { validateFile, MAX_FILE_SIZE } from './validateFile'
+import { validateFile, FILE_TOO_LARGE_MESSAGE, MAX_FILE_SIZE } from './validateFile'
 
 function makeFile(name: string, size: number): File {
   return new File([new ArrayBuffer(size)], name)
@@ -26,8 +26,11 @@ describe('validateFile', () => {
     expect(validateFile(makeFile('model.ifc', 0))).toMatch(/empty/)
   })
 
-  it('rejects a file exceeding 500 MB', () => {
-    expect(validateFile(makeFile('model.ifc', MAX_FILE_SIZE + 1))).toMatch(/500 MB/)
+  it('rejects a file exceeding 500 MB with linked-file guidance', () => {
+    const message = validateFile(makeFile('model.ifc', MAX_FILE_SIZE + 1))
+    expect(message).toMatch(/500 MB/)
+    expect(message).toMatch(/export linked files as separate IFCs/i)
+    expect(message).toBe(FILE_TOO_LARGE_MESSAGE)
   })
 
   it('accepts a file exactly at the size limit', () => {

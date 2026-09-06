@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { detectFixtures } from './detectFixtures'
+import { classifyFixtureText, detectFixtures, type FixtureTextClassification } from './detectFixtures'
 import type { IfcAPI } from 'web-ifc'
 
 const IFCRELCONTAINEDINSPATIALSTRUCTURE = 3242617
@@ -287,7 +287,6 @@ describe('detectFixtures', () => {
       ['Bathtub', 'BATH'],
       ['Urinal', 'URINAL'],
       ['Bidet', 'BIDET'],
-      ['Cistern', 'CISTERN'],
     ]
     for (const [name, expectedKind] of cases) {
       const api = makeApi(
@@ -297,6 +296,93 @@ describe('detectFixtures', () => {
       const result = await detectFixtures(api, 0, 1)
       expect(result[0]?.kind, `name="${name}"`).toBe(expectedKind)
     }
+  })
+
+  it('treats a text-only cistern as an accessory, not a proxy fixture', async () => {
+    const api = makeApi(
+      [{ relatingStoreyId: 1, elementIds: [1] }],
+      [asProxy(1, 'Cistern')],
+    )
+    expect(await detectFixtures(api, 0, 1)).toEqual([])
+  })
+
+  it('keeps an IfcSanitaryTerminal explicitly typed CISTERN as a CISTERN fixture', async () => {
+    const api = makeApi(
+      [{ relatingStoreyId: 1, elementIds: [1] }],
+      [asSanitary(1, 'Flushing tank', 'CISTERN')],
+    )
+    const result = await detectFixtures(api, 0, 1)
+    expect(result).toHaveLength(1)
+    expect(result[0].kind).toBe('CISTERN')
+  })
+
+  // --- Revit `Category : Family : Type` name patterns (sanitary + architecture exports) ---
+
+  it('classifies basins whose family name carries a bare WC token as basins, not toilets', async () => {
+    const api = makeApi(
+      [{ relatingStoreyId: 1, elementIds: [1, 2] }],
+      [
+        asFlowTerminal(1, 'Plumbing Fixtures : LIB_Sanitary-Sink-WC-2D-NH : כיור אובלי תלוי', 'NOTDEFINED'),
+        asFlowTerminal(2, 'Plumbing Fixtures : LIB_Sanitary-WC-2D-NH : אסלה תלויה', 'NOTDEFINED'),
+      ],
+    )
+    const result = await detectFixtures(api, 0, 1)
+    expect(result.map((fixture) => fixture.kind)).toEqual(['WASHHANDBASIN', 'TOILETPAN'])
+  })
+
+  it('does not count a flushing tank next to a toilet as a second toilet', async () => {
+    const api = makeApi(
+      [{ relatingStoreyId: 1, elementIds: [1, 2] }],
+      [
+        asFlowTerminal(1, 'Plumbing Fixtures : AR-Plumbing-Toilet-3D : Type 01', 'NOTDEFINED'),
+        asFlowTerminal(2, 'Plumbing Fixtures : AR-Flushing-Tank-for-Toilet-3D : Type 01', 'NOTDEFINED'),
+      ],
+    )
+    const result = await detectFixtures(api, 0, 1)
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({ expressId: 1, kind: 'TOILETPAN' })
+  })
+
+  it('counts a multi-bowl sink family as ONE sink fixture per IFC element', async () => {
+    const api = makeApi(
+      [{ relatingStoreyId: 1, elementIds: [1] }],
+      [asFlowTerminal(1, 'Plumbing Fixtures : AR-Multi-Sinks-3D : 5 Sinks', 'NOTDEFINED')],
+    )
+    const result = await detectFixtures(api, 0, 1)
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({ kind: 'SINK', isKitchenSink: false })
+  })
+
+  it('never turns fire-protection flow terminals into sanitary fixtures', async () => {
+    const api = makeApi(
+      [{ relatingStoreyId: 1, elementIds: [1, 2, 3, 4] }],
+      [
+        asFlowTerminal(1, 'Fire Protection : Sprinkler-Pendent : K5.6', 'NOTDEFINED'),
+        asFlowTerminal(2, 'Fire Protection : AR-\uFEFFHydrant-Fire-Cabinet-3D : Type 02', 'NOTDEFINED'),
+        asProxy(3, 'Mechanical Equipment : LIB_Fire-Hose_Reel : Standard'),
+        asFlowTerminal(4, 'Fire Protection : SPR Head : Upright', 'NOTDEFINED'),
+      ],
+    )
+    expect(await detectFixtures(api, 0, 1)).toEqual([])
+  })
+
+  it('never turns P-traps, floor traps or floor drains into toilets or basins', async () => {
+    const api = makeApi(
+      [{ relatingStoreyId: 1, elementIds: [1, 2, 3, 4] }],
+      [
+        asFlowTerminal(1, 'Plumbing Fixtures : LIB_Sanitary-P_Trap-Generic : 1-1/4" - 150mm - סיפון מתכת', 'NOTDEFINED'),
+        asFlowTerminal(2, 'Plumbing Fixtures : LIB_Drain-Floor_Trap-6x4 : 6x4 - מ.ר', 'NOTDEFINED'),
+        asFlowTerminal(3, 'Plumbing Fixtures : LIB_Drain-Floor_Drain-Drop-4inch : 4" - ק.ב.נ', 'NOTDEFINED'),
+        asSanitary(4, 'P-Trap 40mm', 'NOTDEFINED'),
+      ],
+    )
+    expect(await detectFixtures(api, 0, 1)).toEqual([])
+
+    const withDrains = await detectFixtures(api, 0, 1, { includeShowerFloorDrains: true })
+    expect(withDrains.map((fixture) => [fixture.expressId, fixture.kind])).toEqual([
+      [2, 'OTHER'],
+      [3, 'OTHER'],
+    ])
   })
 
   it('excludes shower keywords from proxy fixture detection', async () => {
@@ -531,5 +617,71 @@ describe('detectFixtures', () => {
 
     expect(result).toHaveLength(2)
     expect(result.map((fixture) => fixture.expressId)).toEqual([101, 102])
+  })
+})
+
+describe('classifyFixtureText (ordered name rules)', () => {
+  const fixture = (kind: string): FixtureTextClassification =>
+    ({ type: 'fixture', kind } as FixtureTextClassification)
+  const excluded = (reason: string): FixtureTextClassification =>
+    ({ type: 'excluded', reason } as FixtureTextClassification)
+  const unmatched: FixtureTextClassification = { type: 'unmatched' }
+
+  const cases: Array<[string, FixtureTextClassification]> = [
+    // basin/sink evidence wins over a bare WC token
+    ['LIB_Sanitary-Sink-WC-2D-NH', fixture('SINK')],
+    ['LIB_Sanitary-Sink-WC-2D-NH : כיור אובלי תלוי', fixture('WASHHANDBASIN')],
+    ['Basin WC', fixture('WASHHANDBASIN')],
+    ['Sink WC', fixture('SINK')],
+    // toilets, English and Hebrew (absolute + construct form)
+    ['LIB_Sanitary-WC-2D-NH : אסלה תלויה', fixture('TOILETPAN')],
+    ['LIB_Sanitary-WC-2D-NH : אסלת נכים', fixture('TOILETPAN')],
+    ['AR-Disabled-Toilet-3D : Type-01', fixture('TOILETPAN')],
+    ['AR-MMM-Chemical-WC-Wall-3D : Type 01', fixture('TOILETPAN')],
+    ['Toilet-Commercial-Wall-3D1 : 15" Seat Height', fixture('TOILETPAN')],
+    ['WC-Guest-01', fixture('TOILETPAN')],
+    // sinks: singular, plural, multi-bowl, slop/utility
+    ['Sinks', fixture('SINK')],
+    ['AR-Multi-Sinks-3D : 5 Sinks', fixture('SINK')],
+    ['AR-Multi-Sinks-3D : 4 Sinks', fixture('SINK')],
+    ['LIB_Sanitary-SlopSink-2D-NH : עביט שפכין', fixture('SINK')],
+    ['Kitchen sink', fixture('SINK')],
+    // accessories are not fixtures ...
+    ['AR-Flushing-Tank-for-Toilet-3D : Type 01', excluded('accessory')],
+    ['Flushing Tank', excluded('accessory')],
+    ['Flush-Tank', excluded('accessory')],
+    ['Cistern', excluded('accessory')],
+    ['Cistern for WC', excluded('accessory')],
+    ['ניאגרה', excluded('accessory')],
+    ['LIB_Sanitary-P_Trap-Generic : 1-1/4" - 150mm - סיפון מתכת', excluded('accessory')],
+    ['P-Trap 40mm', excluded('accessory')],
+    // ... unless the host fixture is named first (variant descriptor, not an accessory)
+    ['M_Water Closet - Flush Tank:Private - 6.1 Lpf', fixture('TOILETPAN')],
+    ['Toilet with cistern', fixture('TOILETPAN')],
+    ['Sink with bottle trap', fixture('SINK')],
+    // drainage points follow the floor-drain policy
+    ['LIB_Drain-Floor_Trap-6x4_8x4-NH : 6x4 - מ.ר', excluded('floor-drain')],
+    ['LIB_Drain-Floor_Drain-4x2-NH : 4x2 - ק.ב', excluded('floor-drain')],
+    ['LIB_Drain-Floor_Drain-Drop-4inch-NH : 4" - ק.ב.נ', excluded('floor-drain')],
+    ['Floor drain 50mm', excluded('floor-drain')],
+    ['LIB_Drain-Roof_Balcony_Vertical_Outlet : 70mm - נקז כפול למרפסת', excluded('floor-drain')],
+    // fire protection never becomes sanitary
+    ['Fire Protection : Sprinkler-Pendent : K5.6', excluded('fire-protection')],
+    ['SPR Head Upright', excluded('fire-protection')],
+    ['Fire Protection : AR-\uFEFF\uFEFFHydrant-Fire-Cabinet-3D : Type 02', excluded('fire-protection')],
+    ['Mechanical Equipment : LIB_Fire-Hose_Reel : Standard', excluded('fire-protection')],
+    ['LIB_Fire-Sprinkler_Station : 4"-ראש מערכת ספרינקלר', excluded('fire-protection')],
+    // other kinds
+    ['AR-Plumbing-Urinal-3D : Type 01', fixture('URINAL')],
+    ['Bathtub', fixture('BATH')],
+    ['Bidet', fixture('BIDET')],
+    // no evidence at all
+    ['Casework : AR-Metal-Cabinet-2-Wings-3D : M-302', unmatched],
+    ['Water heater:DOD:12013965', unmatched],
+    ['Structural column type A', unmatched],
+  ]
+
+  it.each(cases)('%s', (text, expected) => {
+    expect(classifyFixtureText(text)).toEqual(expected)
   })
 })

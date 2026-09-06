@@ -99,6 +99,8 @@ describe('FixturesPanel', () => {
             riserPosition: { x: 0, y: 0, z: 0 },
             planDistance: 0,
             units: 'mm',
+            assignedBy: 'nearest',
+            exceedsMaxBranchLength: false,
           },
           {
             fixtureExpressId: 2,

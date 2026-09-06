@@ -32,7 +32,7 @@ import {
 } from '@/shared/frame/modelFrame'
 import { serializeAdjustLog } from '@/domain/adjustLog'
 import { computeEngineerComparison } from '@/domain/engineerComparisonMetrics'
-import { isVerticalEngineerSegment } from '@/domain/engineerPipes'
+import { selectEngineerBranchSegments, storeySlabBandM } from '@/domain/engineerPipes'
 import { alignEngineerStacksToViewerPlan } from '@/shared/frame/ifcSourceFrame'
 import {
   getEngineerOverlayPresentation,
@@ -41,17 +41,21 @@ import {
 import { getContinuityOverlayPresentation } from '@/viewer/continuityOverlayPresentation'
 import {
   createInitialWorkspacePageState,
+  selectPreservedCoreIdsOnResuggest,
+  selectPreservedRisersOnResuggest,
   workspacePageReducer,
   type LinkedModelState,
 } from './workspacePageState'
 import { buildRiserStack } from '@/shared/routes/buildRiserStacks'
 import { classifyFloors } from '@/shared/routes/floorClassification'
 import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE } from '@/shared/routes/riserPlacementProfile'
-import { buildSuggestedRisersWithSnap } from '@/shared/routes/buildSuggestedRisers'
+import { buildSuggestedRisersWithSnap, buildWetCoreSuggestedRisers } from '@/shared/routes/buildSuggestedRisers'
+import { toStackExtentFixtures } from '@/domain/riserStackExtent'
 import { buildRiserValidationReport } from '@/shared/routes/buildRiserValidationReport'
 import { buildDemoModeUploadError, isStoreyIncludedInDemoScope } from '@/shared/demoConfig'
-import { buildSanitaryRoutingDemoPlan, buildSanitaryRoutingPlan } from '@/shared/routes/buildSanitaryRoutes'
+import { buildSanitaryRoutingDemoPlan, type SanitaryRoutingPlan } from '@/shared/routes/buildSanitaryRoutes'
 import { buildBranchRoutesFromAssignments } from '@/shared/routes/buildBranchRoutes'
+import { summarizeBranchRunsForDebug } from '@/shared/routes/branchRouteSummary'
 import { assignFixturesToRisers } from '@/domain/assignFixturesToRisers'
 
 let floorViewerModulePromise: Promise<typeof import('@/viewer/FloorViewer')> | null = null
@@ -64,6 +68,10 @@ let floorSelectionModulesPromise: Promise<
     typeof import('@/shared/ifc/resolveModelOrigin'),
   ]
 > | null = null
+
+// Stable empty plans so memoised consumers do not re-render in plain mode.
+const EMPTY_SANITARY_ROUTING_PLAN: SanitaryRoutingPlan = { routes: [], limitations: [], debugGroups: [] }
+const EMPTY_BRANCH_ROUTE_FLOORS: FloorRoutes[] = []
 
 function loadFloorViewerModule() {
   floorViewerModulePromise ??= import('@/viewer/FloorViewer')
@@ -167,6 +175,13 @@ export function WorkspacePage({
     continuityOverlayVisibleByStorey,
     continuitySnapEnabled,
     riserSnapOutcomes,
+    riserStackExtents,
+    wetCoreSuggestion,
+    autoStackCoreIds,
+    routingModel,
+    isSuggestingRisers,
+    suggestProgress,
+    suggestError,
   } = state
 
   // Imperative viewer/export plumbing that intentionally stays outside the
@@ -176,6 +191,11 @@ export function WorkspacePage({
   const sourceIfcBytesRef = useRef<Uint8Array | null>(null)
   const nextRiserLabelRef = useRef(1)
   const detectionDebugRef = useRef<Awaited<ReturnType<typeof aggregateStoreyDetections>> | null>(null)
+  // Model + linked-file key the cached aggregation was computed for (V3); a
+  // mismatch forces a rescan, so a new upload never reuses stale fixtures.
+  const detectionCacheKeyRef = useRef<string | null>(null)
+  // In-flight wet-core suggest (V3); aborting cancels the whole-building scan.
+  const suggestAbortRef = useRef<AbortController | null>(null)
   // Local-frame origin for rendering, mirrored from state so the async openStorey
   // flow can read the resolved frame across awaits. null = not resolved yet for
   // the current model (resolution happens on the first storey with geometry).
@@ -240,6 +260,11 @@ export function WorkspacePage({
     }
     sourceIfcBytesRef.current = null
     nextRiserLabelRef.current = 1
+    // A new model invalidates the cached whole-building scan and cancels an
+    // in-flight suggest (web-ifc may reuse model ids, so the key alone is not enough).
+    suggestAbortRef.current?.abort()
+    detectionDebugRef.current = null
+    detectionCacheKeyRef.current = null
     // Sync the refs alongside the state update so openStorey sees the cleared
     // count and unresolved frame when it runs after this transition is queued.
     risersRef.current = []
@@ -595,7 +620,7 @@ export function WorkspacePage({
             sourceFileName: candidate.fileName,
             systemPrefixes,
             network,
-            stacks: engineerPipes.groupEngineerRiserStacks(network),
+            riserClassification: engineerPipes.classifyEngineerRiserStacks(network),
           },
         })
         return
@@ -622,83 +647,79 @@ export function WorkspacePage({
   }, [])
 
   /**
-   * Builds the continuity map (W5) on demand from the loaded file with the
-   * most walls (host wins ties) — the host's own walls on single-file uploads,
-   * the linked architecture file on e.g. the 096 podium. Full-model build: on
-   * the largest real model (096-A, 13 storeys) extraction measures ~0.65 s, so
-   * no storey scoping is needed; progress still repaints between storeys.
+   * Builds ONE continuity map (W5 → V3) from every loaded file: the host's own
+   * geometry plus each linked file's walls / columns / slabs / openings /
+   * spaces remapped onto host storeys, so slab openings modelled only in a
+   * linked structural file become shaft candidates for the host's fixtures.
+   * Linked files are scoped to the storeys that align to the host (a 100+ MB
+   * architecture file is never walked in full); the host is built in full
+   * (the largest real host, 13 storeys, measures ~0.65 s). Files with an
+   * unknown length unit or no aligned storey are skipped with a visible reason.
    */
   async function handleBuildContinuityMap() {
     if (webIfcModelId === null || modelFileName === null || isBuildingContinuityMap) return
     dispatch({ type: 'continuity-build-started' })
     try {
-      const [api, { buildContinuityMapForModel }, { IFCWALL, IFCWALLSTANDARDCASE }] =
+      const [api, { buildContinuityMapForModels }, { IFCWALL, IFCWALLSTANDARDCASE }] =
         await Promise.all([
           getIfcApi(),
           import('@/shared/ifc/buildContinuityMapForModel'),
           import('web-ifc'),
         ])
 
-      const candidates = [
-        { fileName: modelFileName, webIfcModelId, lengthUnit: modelLengthUnit, isHost: true },
-        ...linkedModels.map((model) => ({
-          fileName: model.fileName,
-          webIfcModelId: model.webIfcModelId,
-          lengthUnit: model.lengthUnit,
-          isHost: false,
-        })),
+      const sources = [
+        {
+          fileName: modelFileName,
+          webIfcModelId,
+          lengthUnit: modelLengthUnit,
+          sourceToHostStoreyId: null,
+          storeyIds: undefined,
+        },
+        ...linkedModels.map((model) => {
+          const sourceToHostStoreyId = buildLinkedToHostStoreyIdMap(storeyAlignments, model.fileName)
+          return {
+            fileName: model.fileName,
+            webIfcModelId: model.webIfcModelId,
+            lengthUnit: model.lengthUnit,
+            sourceToHostStoreyId,
+            storeyIds: new Set(sourceToHostStoreyId.keys()),
+          }
+        }),
       ]
-      let source: (typeof candidates)[number] | null = null
-      let sourceWallCount = 0
-      for (const candidate of candidates) {
-        const wallCount =
-          api.GetLineIDsWithType(candidate.webIfcModelId, IFCWALL).size() +
-          api.GetLineIDsWithType(candidate.webIfcModelId, IFCWALLSTANDARDCASE).size()
-        if (wallCount > sourceWallCount) {
-          source = candidate
-          sourceWallCount = wallCount
-        }
-      }
-      if (source === null) {
+      const wallCount = sources.reduce(
+        (sum, source) =>
+          sum +
+          api.GetLineIDsWithType(source.webIfcModelId, IFCWALL).size() +
+          api.GetLineIDsWithType(source.webIfcModelId, IFCWALLSTANDARDCASE).size(),
+        0,
+      )
+      if (wallCount === 0) {
         dispatch({
           type: 'continuity-build-failed',
           message: 'No walls found in any loaded file — the continuity map needs architecture geometry.',
         })
         return
       }
-      if (source.lengthUnit === null) {
-        dispatch({
-          type: 'continuity-build-failed',
-          message: `${source.fileName} declares no supported length unit; storey elevations cannot be converted, so the continuity map was not built.`,
-        })
-        return
-      }
 
-      const sourceToHostStoreyId = source.isHost
-        ? null
-        : buildLinkedToHostStoreyIdMap(storeyAlignments, source.fileName)
-      if (sourceToHostStoreyId !== null && sourceToHostStoreyId.size === 0) {
-        dispatch({
-          type: 'continuity-build-failed',
-          message: `${source.fileName} has the walls but none of its storeys align to the host — the continuity map cannot be mapped onto host floors.`,
-        })
-        return
-      }
-
-      const result = await buildContinuityMapForModel({
+      const result = await buildContinuityMapForModels({
         api,
-        webIfcModelId: source.webIfcModelId,
-        lengthUnit: source.lengthUnit,
-        sourceToHostStoreyId,
-        onStoreyProgress: async (processed, total) => {
+        sources,
+        onProgress: async ({ processed, total }) => {
           dispatch({ type: 'continuity-build-progress', processed, total })
           await waitForNextPaint()
         },
       })
+      if (result.sourceFileNames.length === 0) {
+        dispatch({
+          type: 'continuity-build-failed',
+          message: `No loaded file could contribute to the continuity map: ${result.diagnostics.join(' ')}`,
+        })
+        return
+      }
       dispatch({
         type: 'continuity-map-loaded',
         continuityMap: {
-          sourceFileName: source.fileName,
+          sourceFileName: result.sourceFileNames.join(' + '),
           map: result.map,
           diagnostics: [...result.diagnostics, ...result.map.diagnostics],
           extractMs: Math.round(result.extractMs),
@@ -716,21 +737,31 @@ export function WorkspacePage({
 
   function handleSuggestRisers() {
     if (!selectedStoreyId || (fixtures.length === 0 && kitchens.length === 0)) return
-
     if (demoRuntime.enabled) {
-      const scopedStoreyIds = new Set(
-        storeys.filter((storey) => isStoreyIncludedInDemoScope(storey.name, demoRuntime.config)).map((storey) => storey.id),
-      )
-      const excludedFixtureCount = fixtures.filter((fixture) => !scopedStoreyIds.has(fixture.storeyId)).length
-      const excludedKitchenCount = kitchens.filter((kitchen) => !scopedStoreyIds.has(kitchen.storeyId)).length
-      if (excludedFixtureCount > 0 || excludedKitchenCount > 0) {
-        dispatch({
-          type: 'demo-asset-error-set',
-          message: `Demo scope excluded ${excludedFixtureCount} fixture(s) and ${excludedKitchenCount} kitchen area(s) outside included floors.`,
-        })
-      } else {
-        dispatch({ type: 'demo-asset-error-set', message: null })
-      }
+      suggestRisersDemoPath(selectedStoreyId)
+      return
+    }
+    void suggestRisersWetCorePath(selectedStoreyId)
+  }
+
+  /**
+   * Demo mode keeps the toilet-anchored suggestion byte-identical to the
+   * pre-V3 behaviour (parity-checked): synchronous suggest, whole-building
+   * aggregation only in the background for the debug JSON, snapping only with
+   * the advanced flag.
+   */
+  function suggestRisersDemoPath(sourceStoreyId: StoreyId) {
+    if (!demoRuntime.enabled) return
+    const scopedStoreyIds = new Set(
+      storeys.filter((storey) => isStoreyIncludedInDemoScope(storey.name, demoRuntime.config)).map((storey) => storey.id),
+    )
+    const excludedFixtureCount = fixtures.filter((fixture) => !scopedStoreyIds.has(fixture.storeyId)).length
+    const excludedKitchenCount = kitchens.filter((kitchen) => !scopedStoreyIds.has(kitchen.storeyId)).length
+    if (excludedFixtureCount > 0 || excludedKitchenCount > 0) {
+      dispatch({
+        type: 'demo-asset-error-set',
+        message: `Demo scope excluded ${excludedFixtureCount} fixture(s) and ${excludedKitchenCount} kitchen area(s) outside included floors.`,
+      })
     } else {
       dispatch({ type: 'demo-asset-error-set', message: null })
     }
@@ -750,15 +781,19 @@ export function WorkspacePage({
         })
     }
     // W5 advanced flag: only when it is ON and a map exists does the suggest
-    // flow snap to shafts/free cells. Off (the default) keeps suggestions
+    // flow snap to shafts/free cells. Off (the demo default) keeps suggestions
     // byte-identical to the flag-free path.
     const continuitySnap =
       continuitySnapEnabled && continuityMap !== null ? { map: continuityMap.map } : undefined
     startTransition(() => {
-      nextRiserLabelRef.current = 1
+      // Labels continue after the preserved (manual / moved) stacks; with none
+      // preserved this is 1, exactly as before.
+      nextRiserLabelRef.current = getNextRiserLabelNumber(
+        selectPreservedRisersOnResuggest({ risers: risersRef.current, adjustLog }),
+      )
       const suggestion = buildSuggestedRisersWithSnap(
         storeys,
-        selectedStoreyId,
+        sourceStoreyId,
         fixtures,
         kitchens,
         // Suggestion mixes plan bounds with source-frame fixture positions,
@@ -775,6 +810,125 @@ export function WorkspacePage({
       })
     })
   }
+
+  /**
+   * Plain mode (V3): one stack per wet core of the open floor, snapped through
+   * the continuity map when one is built (shaft → free cell → wall-side edge →
+   * flagged centroid), each stack bounded vertically by the V4 extent computed
+   * from the whole-building fixture scan. The scan is awaited with visible
+   * progress and can be cancelled; its result is cached per model so a
+   * re-suggest is instant. Manual and moved stacks survive the re-suggest
+   * (reducer merge rule).
+   */
+  async function suggestRisersWetCorePath(sourceStoreyId: StoreyId) {
+    if (suggestAbortRef.current !== null) return
+    dispatch({ type: 'demo-asset-error-set', message: null })
+    const controller = new AbortController()
+    suggestAbortRef.current = controller
+    dispatch({ type: 'suggest-started' })
+    try {
+      const modelId = webIfcModelIdRef.current
+      const cacheKey = buildDetectionCacheKey(modelId, linkedModelsRef.current)
+      let aggregation = detectionCacheKeyRef.current === cacheKey ? detectionDebugRef.current : null
+      if (aggregation === null && modelId !== null) {
+        const api = await getIfcApi()
+        const alignments = storeyAlignmentsRef.current
+        const linked = linkedModelsRef.current
+        aggregation = await aggregateStoreyDetections(
+          api,
+          modelId,
+          storeys,
+          DEFAULT_RISER_PLACEMENT_RULE_PROFILE,
+          undefined,
+          {
+            signal: controller.signal,
+            hostFileName: hostFileNameRef.current ?? 'host.ifc',
+            linkedTargetsFor: (hostStoreyId) => collectLinkedDetectionTargets(alignments, linked, hostStoreyId),
+            onProgress: async (processed, total, storey) => {
+              dispatch({ type: 'suggest-progress', processed, total, storeyName: storey.name })
+              await waitForNextPaint()
+            },
+          },
+        )
+        detectionDebugRef.current = aggregation
+        detectionCacheKeyRef.current = cacheKey
+      }
+      if (controller.signal.aborted) {
+        dispatch({ type: 'suggest-cancelled' })
+        return
+      }
+
+      const map = continuitySnapEnabled && continuityMap !== null ? continuityMap.map : null
+      const buildingFixtures =
+        aggregation === null
+          ? null
+          : toStackExtentFixtures(
+              Object.values(aggregation.fixturesByStoreyId).flat(),
+              Object.values(aggregation.kitchensByStoreyId).flat(),
+            )
+      // Labels continue after the preserved (manual / moved) stacks; cores
+      // already served by a moved stack are skipped inside the builder so no
+      // label is consumed for a stack the merge would drop anyway.
+      nextRiserLabelRef.current = getNextRiserLabelNumber(
+        selectPreservedRisersOnResuggest({ risers: risersRef.current, adjustLog }),
+      )
+      const preservedCoreIds = selectPreservedCoreIdsOnResuggest({
+        risers: risersRef.current,
+        adjustLog,
+        autoStackCoreIds,
+      })
+      const result = buildWetCoreSuggestedRisers({
+        storeys,
+        sourceStoreyId,
+        fixtures,
+        kitchens,
+        // Suggestion mixes plan bounds with source-frame fixture positions,
+        // so it must see the source-frame bounding box, not the local one.
+        floorMeshes: floorMeshes ? { ...floorMeshes, boundingBox: pickSourceBoundingBox(floorMeshes) } : null,
+        nextLabel: () => takeNextRiserLabel(nextRiserLabelRef),
+        // Fixture positions come from web-ifc geometry, which is metres
+        // regardless of the declared unit (see buildContinuityMapForModel).
+        wetCore: { planUnits: 'm', continuityMap: map },
+        stackExtent:
+          buildingFixtures === null
+            ? undefined
+            : { buildingFixtures, planUnits: 'm', continuityMap: map, collectorStoreyId: null },
+        preservedCoreIds,
+      })
+      startTransition(() => {
+        dispatch({
+          type: 'risers-suggested',
+          risers: result.risers,
+          snapOutcomes: map === null ? null : result.snapOutcomes,
+          stackExtents: buildingFixtures === null ? null : result.stackExtents,
+          stackCoreIds: result.stacks.flatMap((stack) =>
+            stack.anchor === 'wet-core' ? [{ stackId: stack.stackId, coreId: stack.core.id }] : [],
+          ),
+          wetCore: {
+            sourceStoreyId,
+            stacks: result.stacks,
+            cores: result.cores,
+            diagnostics: result.diagnostics,
+          },
+        })
+      })
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        dispatch({ type: 'suggest-cancelled' })
+      } else {
+        dispatch({
+          type: 'suggest-failed',
+          message: err instanceof Error ? err.message : 'Riser suggestion failed.',
+        })
+      }
+    } finally {
+      suggestAbortRef.current = null
+    }
+  }
+
+  const handleCancelSuggestRisers = useCallback(() => {
+    suggestAbortRef.current?.abort()
+  }, [])
 
   async function handleDownloadIfc() {
     if (
@@ -803,6 +957,7 @@ export function WorkspacePage({
           exportRunId,
           timestamp,
           sourceIfcName: modelFileName,
+          modelOrigin,
           storeys: storeys.map((storey) => ({
             id: storey.id,
             name: storey.name,
@@ -810,6 +965,7 @@ export function WorkspacePage({
           })),
         },
         sanitaryRoutesForExport,
+        branchRoutesForExport,
       )
 
       downloadBinary(
@@ -841,7 +997,7 @@ export function WorkspacePage({
                   sourceFileName: engineerBaseline.sourceFileName,
                   systemPrefixes: engineerBaseline.systemPrefixes,
                   segmentCount: engineerBaseline.network.segments.length,
-                  stackCount: engineerBaseline.stacks.length,
+                  stackCount: engineerBaseline.riserClassification.sanitaryStacks.length,
                 },
           engineerComparison,
           // Continuity map (W5); null until built from the Decisions tab.
@@ -858,6 +1014,29 @@ export function WorkspacePage({
                 },
           continuitySnapEnabled,
           riserSnapOutcomes,
+          // Wet-core placement (V3) + per-stack extents (V4); null in demo mode.
+          wetCoreSuggestion:
+            wetCoreSuggestion === null
+              ? null
+              : {
+                  sourceStoreyId: wetCoreSuggestion.sourceStoreyId,
+                  cores: wetCoreSuggestion.cores.map((core) => ({
+                    id: core.id,
+                    memberExpressIds: core.memberExpressIds,
+                    kindsFingerprint: core.kindsFingerprint,
+                    centroid: core.centroid,
+                    bbox: core.bbox,
+                  })),
+                  stacks: wetCoreSuggestion.stacks.map((stack) =>
+                    stack.anchor === 'wet-core'
+                      ? { stackLabel: stack.stackLabel, anchor: stack.anchor, coreId: stack.core.id, placement: stack.placement }
+                      : { stackLabel: stack.stackLabel, anchor: stack.anchor, kitchenExpressId: stack.kitchenExpressId, snap: stack.snap },
+                  ),
+                  supersededCoreIds: wetCoreSuggestion.supersededCoreIds,
+                  preservedStackIds: wetCoreSuggestion.preservedStackIds,
+                  diagnostics: wetCoreSuggestion.diagnostics,
+                },
+          riserStackExtents,
           floorClassification,
           validationReport: buildRiserValidationReport({
             exportRunId,
@@ -868,6 +1047,9 @@ export function WorkspacePage({
             detectionAggregation: detectionDebugRef.current,
             risers,
           }),
+          // V5: which horizontal routing model produced the exported runs.
+          routingModel,
+          branchRoutes: summarizeBranchRunsForDebug(branchRoutesForExport, fixtureAssignments, stackLabelByRiserId),
           sanitaryRouteDebugGroups: sanitaryRoutingPreview.debugGroups,
           sanitaryRouteLimitations: sanitaryRoutingPreview.limitations,
         },
@@ -895,33 +1077,57 @@ export function WorkspacePage({
   // ---------------------------------------------------------------------------
 
 
-  // Fixture-to-riser assignment for the active floor (toilets anchor risers,
-  // everything else attaches to the nearest in-range riser). Only computed once
-  // risers exist on the floor — before placement the panel shows detection state
-  // without misleading "unassigned" flags.
+  // Wet-core membership for the branch-runs routing model (V5): fixture → core
+  // from the last suggest run, stack → core from the reducer (auto stacks and
+  // the moved stacks that superseded them). Null in demo mode, where the
+  // toilet-anchored risers have no cores and nearest assignment is the rule.
+  const fixtureCoreMembership = useMemo(() => {
+    if (routingModel !== 'branch-runs' || wetCoreSuggestion === null) return undefined
+    const fixtureCoreIds = new Map<number, string>()
+    for (const core of wetCoreSuggestion.cores) {
+      for (const expressId of core.memberExpressIds) fixtureCoreIds.set(expressId, core.id)
+    }
+    return { fixtureCoreIds, stackCoreIds: autoStackCoreIds }
+  }, [routingModel, wetCoreSuggestion, autoStackCoreIds])
+
+  // Fixture-to-stack assignment for the active floor: a fixture routes to its
+  // wet core's stack (overrides win: a moved stack keeps its core), otherwise to
+  // the nearest in-range riser. Only computed once risers exist on the floor —
+  // before placement the panel shows detection state without misleading
+  // "unassigned" flags.
+  // Viewer coordinates are metres whenever the model declares its length unit
+  // (web-ifc normalizes them); only an unknown unit falls back to the
+  // coordinate-magnitude heuristic. Same rule as RisersPanel's coordinateUnit —
+  // without it a georeferenced model (|x| > 1000 m) is mistaken for millimetres.
   const fixtureAssignments = useMemo(() => {
     if (selectedStoreyId === null) return []
     if (!risers.some((riser) => riser.storeyId === selectedStoreyId)) return []
-    return assignFixturesToRisers(fixtures, risers)
-  }, [fixtures, risers, selectedStoreyId])
+    return assignFixturesToRisers(fixtures, risers, {
+      coreMembership: fixtureCoreMembership,
+      units: modelLengthUnit !== null ? 'm' : undefined,
+    })
+  }, [fixtures, risers, selectedStoreyId, fixtureCoreMembership, modelLengthUnit])
 
-  // Branch routes (T3): pure derivation from the T2 assignments above. The
-  // adapter drops unassigned entries — those stay visible in the fixtures panel
-  // with an explicit reason and have no riser to route toward.
+  // Branch runs: pure derivation from the assignments above. The adapter drops
+  // unassigned entries — those stay visible in the fixtures panel with an
+  // explicit reason and have no riser to route toward.
   const branchRouteFloors = useMemo(
     () => buildBranchRoutesFromAssignments(fixtureAssignments),
     [fixtureAssignments],
   )
 
+  // Riser-to-riser "main sanitary route" chains exist ONLY under the
+  // 'demo-chains' routing model (see `src/shared/routes/routingModel.ts`); the
+  // branch-runs model never builds them, so nothing downstream (viewer,
+  // sidebar, export, debug JSON) sees a chain in plain mode.
   const sanitaryRoutingPreview = useMemo(() => {
-    if (selectedStoreyId === null) return { routes: [], limitations: [], debugGroups: [] }
+    if (selectedStoreyId === null || routingModel !== 'demo-chains' || !demoRuntime.enabled) {
+      return EMPTY_SANITARY_ROUTING_PLAN
+    }
     const floorFixtures = fixtures.filter((fixture) => fixture.storeyId === selectedStoreyId)
     const floorRisers = risers.filter((riser) => riser.storeyId === selectedStoreyId)
-    if (demoRuntime.enabled) {
-      return buildSanitaryRoutingDemoPlan(floorFixtures, floorRisers, demoRuntime.config)
-    }
-    return buildSanitaryRoutingPlan(floorFixtures, floorRisers, modelFileName)
-  }, [demoRuntime, fixtures, modelFileName, risers, selectedStoreyId])
+    return buildSanitaryRoutingDemoPlan(floorFixtures, floorRisers, demoRuntime.config)
+  }, [demoRuntime, fixtures, risers, routingModel, selectedStoreyId])
 
   // Export the same selected-floor route plan currently shown in the viewer. Download IFC is scoped
   // to the active included demo floor (`selectedStoreyId`); `buildSanitaryRoutingDemoPlan` can still
@@ -929,6 +1135,21 @@ export function WorkspacePage({
   // recompute a separate all-demo-floor export plan here: duplicate/independent planning can drift
   // from the preview and hide missing routes in the downloaded IFC/debug JSON.
   const sanitaryRoutesForExport = sanitaryRoutingPreview.routes
+  // Branch runs are what the plain-mode export writes; demo export keeps chains only.
+  const branchRoutesForExport = routingModel === 'branch-runs' ? branchRouteFloors : EMPTY_BRANCH_ROUTE_FLOORS
+  const stackLabelByRiserId = useMemo(
+    () => new Map(risers.map((riser) => [riser.id, riser.stackLabel])),
+    [risers],
+  )
+  // Branch runs of the open floor for the routes panel (source frame: only
+  // lengths and diameters are read, so no local-frame conversion is needed).
+  const selectedFloorBranchRoutes = useMemo(
+    () =>
+      routingModel === 'branch-runs' && selectedStoreyId !== null
+        ? (branchRouteFloors.find((floor) => floor.storeyId === selectedStoreyId) ?? null)
+        : null,
+    [routingModel, branchRouteFloors, selectedStoreyId],
+  )
 
   const selectedStorey = storeys.find((storey) => storey.id === selectedStoreyId) ?? null
   const demoFloorOpened =
@@ -999,7 +1220,7 @@ export function WorkspacePage({
     if (engineerBaseline === null || engineerStoreyId === null || isExtractingGeometry) return null
     return getEngineerOverlayPresentation({
       network: engineerBaseline.network,
-      stacks: engineerBaseline.stacks,
+      stacks: engineerBaseline.riserClassification.sanitaryStacks,
       engineerStoreyId,
       frameOrigin: modelFrame.origin,
       visible: engineerOverlayVisibleOnSelectedFloor,
@@ -1013,22 +1234,38 @@ export function WorkspacePage({
   ])
   // W7 metrics: our proposal vs the engineer baseline, in a shared plan frame.
   // Both sides are source metres: state risers are source plan metres (viewer
-  // x/z), engineer stacks are aligned into that frame via z = -IFC Y. Branch
-  // totals compare our plan-projected runs on the open floor against the
-  // engineer's non-vertical segments' Pset lengths (model-wide).
+  // x/z), engineer stacks are aligned into that frame via z = -IFC Y. Riser
+  // counts and the nearest-riser distance are scoped to the open floor (our
+  // entries on the host storey vs engineer stacks intersecting the matching
+  // engineer storey's slab band). Branch totals use the same scope: our
+  // plan-projected runs on the open floor against the engineer's horizontal
+  // sanitary segments on the matching storey (Pset lengths); model-wide
+  // horizontal sanitary segments only when no floor is open.
   const engineerComparison = useMemo(() => {
     if (engineerBaseline === null || risers.length === 0) return null
+    const { riserClassification, network } = engineerBaseline
+    const engineerBandM =
+      selectedStoreyId === null || engineerStoreyId === null ? null : storeySlabBandM(network, engineerStoreyId)
     return computeEngineerComparison({
       ourRisers: risers,
       ourRiserUnits: 'm',
       ourBranchRoutes: branchRouteFloors,
       ourAssignments: fixtureAssignments,
-      engineerRisers: alignEngineerStacksToViewerPlan(engineerBaseline.stacks),
-      engineerSegments: engineerBaseline.network.segments.filter(
-        (segment) => !isVerticalEngineerSegment(segment),
-      ),
+      engineerRisers: {
+        ...riserClassification,
+        sanitaryStacks: alignEngineerStacksToViewerPlan(riserClassification.sanitaryStacks),
+        ventStacks: alignEngineerStacksToViewerPlan(riserClassification.ventStacks),
+        stubs: alignEngineerStacksToViewerPlan(riserClassification.stubs),
+      },
+      storeyScope: selectedStoreyId === null ? null : { ourStoreyId: selectedStoreyId, engineerBandM },
+      // Open floor without an engineer counterpart: no engineer population
+      // (the ratio reads n/a) rather than comparing one floor to the whole model.
+      engineerSegments:
+        selectedStoreyId !== null && engineerBandM === null
+          ? []
+          : selectEngineerBranchSegments(network, engineerBandM).segments,
     })
-  }, [engineerBaseline, risers, branchRouteFloors, fixtureAssignments])
+  }, [engineerBaseline, risers, branchRouteFloors, fixtureAssignments, selectedStoreyId, engineerStoreyId])
 
   // --- continuity map overlay (W5) ---
   // Map storeys are HOST storey IDs (linked models remapped at build time), so
@@ -1167,6 +1404,7 @@ export function WorkspacePage({
           onRiserMoveCommit={handleMoveRiserCommit}
           onSwitch3D={storeys.length > 0 ? handleSwitch3D : undefined}
           sanitaryRoutes={localSanitaryRoutes}
+          chainLegendVisible={routingModel === 'demo-chains'}
           demoFlowEnabled={demoRuntime.enabled}
           branchRouteSegments={localViewerBranchRouteSegments}
           branchRoutesVisible={branchRoutesVisibleOnSelectedFloor}
@@ -1215,10 +1453,11 @@ export function WorkspacePage({
       initialStoreyDecision={initialStoreyDecision}
       storeyAlignments={storeyAlignments}
       crossFileMerge={crossFileMerge}
-      sanitaryRouteLimitations={sanitaryRoutingPreview.limitations}
       demoFlowEnabled={demoRuntime.enabled}
       demoFloorOpened={demoFloorOpened}
       sanitaryRouteCount={sanitaryRoutesForExport.length}
+      routingModel={routingModel}
+      branchRouteFloor={selectedFloorBranchRoutes}
       modelLengthUnit={modelLengthUnit}
       engineerBaseline={
         engineerBaseline === null
@@ -1227,7 +1466,7 @@ export function WorkspacePage({
               sourceFileName: engineerBaseline.sourceFileName,
               systemPrefixes: engineerBaseline.systemPrefixes,
               segmentCount: engineerBaseline.network.segments.length,
-              stackCount: engineerBaseline.stacks.length,
+              stackCount: engineerBaseline.riserClassification.sanitaryStacks.length,
             }
       }
       isExtractingEngineerBaseline={isExtractingEngineerBaseline}
@@ -1257,6 +1496,13 @@ export function WorkspacePage({
       continuitySnapEnabled={continuitySnapEnabled}
       onToggleContinuitySnap={handleToggleContinuitySnap}
       riserSnapOutcomes={riserSnapOutcomes}
+      storeys={storeys}
+      wetCoreSuggestion={wetCoreSuggestion}
+      riserStackExtents={riserStackExtents}
+      isSuggestingRisers={isSuggestingRisers}
+      suggestProgress={suggestProgress}
+      suggestError={suggestError}
+      onCancelSuggestRisers={handleCancelSuggestRisers}
     />
   )
 
@@ -1416,6 +1662,11 @@ function buildLinkedToHostStoreyIdMap(
     }
   }
   return map
+}
+
+/** Cache key of the whole-building detection scan: host model + linked files. */
+function buildDetectionCacheKey(webIfcModelId: number | null, linkedModels: LinkedModelState[]): string {
+  return `${webIfcModelId ?? 'none'}|${linkedModels.map((model) => `${model.fileName}#${model.webIfcModelId}`).join(',')}`
 }
 
 function takeNextRiserLabel(nextRiserLabelRef: MutableRefObject<number>): string {
