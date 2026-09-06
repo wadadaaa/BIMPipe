@@ -6,11 +6,13 @@ import type {
 } from '@/domain/drawing/floorDrawingModel'
 import {
   classifyEngineerRunRoles,
+  decodeFittingConnectorExpressId,
   ENGINEER_FITTING_BRIDGE_TOLERANCE_M,
   ENGINEER_JUNCTION_TOLERANCE_M,
   ENGINEER_SANITARY_SYSTEM_PREFIXES,
   ENGINEER_VENT_SYSTEM_PREFIXES,
   engineerSegmentSlopePercent,
+  isFittingConnector,
   selectEngineerServedStacks,
   selectEngineerStoreyHorizontals,
   stacksIntersectingBand,
@@ -46,7 +48,10 @@ import { resolveRiserTag } from './riserTag'
  * - Pipes: horizontal SW-GRV (and VNT) runs ON the storey — Z in the storey
  *   band or in the hang band under its slab (`ENGINEER_HANG_DEPTH_M`); each
  *   rule's count is reported. Runs are oriented upstream → downstream (start
- *   is the higher end) so `slopePercent` is the fall along the run.
+ *   is the higher end) so `slopePercent` is the fall along the run. Fitting
+ *   connectors (R3: IfcFlowFitting body origin → port) are drawn as
+ *   `fitting: true` runs so the network is continuous where pipes meet through
+ *   elbow / tee / wye bodies; they carry no slope or label.
  * - Structure / fixtures / bounds are passed through from the continuity
  *   inputs, the merged storey detections and the floor plan bounds.
  *
@@ -54,7 +59,7 @@ import { resolveRiserTag } from './riserTag'
  * junction counts, skipped items) is returned in `diagnostics`.
  */
 export interface EngineerFloorDrawingInput {
-  network: Pick<EngineerPipeNetwork, 'segments' | 'storeys' | 'metersPerSourceUnit'>
+  network: Pick<EngineerPipeNetwork, 'segments' | 'storeys' | 'metersPerSourceUnit' | 'fittingConnectors'>
   classification: Pick<EngineerRiserClassification, 'sanitaryStacks' | 'ventStacks'>
   /** Engineer-model storey (express id in the plumbing file). */
   storeyId: StoreyId
@@ -73,6 +78,12 @@ export interface EngineerFloorDrawingInput {
   junctionToleranceM?: number
   /** Include VNT horizontals as `system: 'vent'` pipes (default true). */
   includeVentPipes?: boolean
+  /**
+   * Draw the network's fitting connectors (R3) as `fitting: true` pipe runs so
+   * the engineer's runs meet where the IFC joins them through elbow / tee /
+   * wye bodies (default true; false reproduces the pipe-only R2 drawing).
+   */
+  includeFittingConnectors?: boolean
   /** System-name prefixes; default the engineer network constants (must match the classification's). */
   sanitarySystemPrefixes?: readonly string[]
   ventSystemPrefixes?: readonly string[]
@@ -91,11 +102,12 @@ export interface EngineerFloorDrawingDiagnostics {
     tagsFromEngineer: number
   }
   pipes: {
-    /** Drawn sanitary + vent runs. */
+    /** Drawn sanitary + vent runs, fitting connectors included. */
     drawn: number
-    sanitary: { inBand: number; inHang: number; both: number; total: number; unresolved: number }
-    vent: { inBand: number; inHang: number; both: number; total: number; unresolved: number }
-    /** Runs whose original geometry rose from start to end and were flipped. */
+    /** PIPE runs by storey rule (connectors excluded); `fittingConnectors` = connectors drawn for the system. */
+    sanitary: { inBand: number; inHang: number; both: number; total: number; unresolved: number; fittingConnectors: number }
+    vent: { inBand: number; inHang: number; both: number; total: number; unresolved: number; fittingConnectors: number }
+    /** Runs whose original geometry rose from start to end and were flipped (pipes only). */
     flipped: number
     diametersMm: Record<string, number>
   }
@@ -133,7 +145,7 @@ export interface EngineerFloorDrawingResult {
 
 function countRules(horizontals: readonly EngineerStoreyHorizontal[]): Record<EngineerStoreyHorizontalRule, number> {
   const counts: Record<EngineerStoreyHorizontalRule, number> = { 'in-band': 0, 'in-hang': 0, both: 0 }
-  for (const entry of horizontals) counts[entry.rule] += 1
+  for (const entry of horizontals) if (!isFittingConnector(entry.segment)) counts[entry.rule] += 1
   return counts
 }
 
@@ -150,13 +162,16 @@ export function buildEngineerFloorDrawing(input: EngineerFloorDrawingInput): Eng
 
   // --- pipes (selected first: the served-stack rule needs the storey's horizontals) ---
   const hangDepthM = input.hangDepthM
+  const includeFittingConnectors = input.includeFittingConnectors ?? true
   const sanitary = selectEngineerStoreyHorizontals(network, band, {
     hangDepthM,
     systemPrefixes: input.sanitarySystemPrefixes ?? ENGINEER_SANITARY_SYSTEM_PREFIXES,
+    includeFittingConnectors,
   })
   const vent = selectEngineerStoreyHorizontals(network, band, {
     hangDepthM,
     systemPrefixes: input.ventSystemPrefixes ?? ENGINEER_VENT_SYSTEM_PREFIXES,
+    includeFittingConnectors,
   })
 
   // --- risers -------------------------------------------------------------
@@ -214,6 +229,20 @@ export function buildEngineerFloorDrawing(input: EngineerFloorDrawingInput): Eng
   const diametersMm: Record<string, number> = {}
   const pipes: DrawingPipeRun[] = drawnHorizontals.map(({ entry, system }) => {
     const segment = entry.segment
+    if (isFittingConnector(segment)) {
+      // Fitting body piece: continuous band, no slope, no label, no collar.
+      const decoded = decodeFittingConnectorExpressId(segment.expressId)
+      return {
+        id: `engineer-fitting-${decoded?.fittingExpressId ?? segment.fittingExpressId ?? 0}-${decoded?.portIndex ?? 0}`,
+        system,
+        diameterMm: segment.outerDiameterMm,
+        slopePercent: null,
+        start: ifcSourceToDrawing(segment.start!, scale),
+        end: ifcSourceToDrawing(segment.end!, scale),
+        role: 'branch',
+        fitting: true,
+      }
+    }
     const id = `engineer-pipe-${segment.expressId}`
     // Orient upstream → downstream: start is the higher end.
     let start = segment.start!
@@ -305,15 +334,17 @@ export function buildEngineerFloorDrawing(input: EngineerFloorDrawingInput): Eng
         inBand: sanitary.inBandCount,
         inHang: sanitary.inHangCount,
         both: sanitaryRules.both,
-        total: sanitary.horizontals.length,
+        total: sanitary.horizontals.length - sanitary.fittingConnectorCount,
         unresolved: sanitary.unresolvedCount,
+        fittingConnectors: sanitary.fittingConnectorCount,
       },
       vent: {
         inBand: vent.inBandCount,
         inHang: vent.inHangCount,
         both: ventRules.both,
-        total: vent.horizontals.length,
+        total: vent.horizontals.length - vent.fittingConnectorCount,
         unresolved: vent.unresolvedCount,
+        fittingConnectors: includeVent ? vent.fittingConnectorCount : 0,
       },
       flipped,
       diametersMm,

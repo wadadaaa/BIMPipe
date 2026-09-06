@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { WC_MIN_BRANCH_DIAMETER_MM } from '@/domain/branchDefaults'
 import { computeGauntletMetrics, computeSharedFixtureSet } from '@/domain/gauntletMetrics'
 import { drawingContentOutsideBounds, drawingLabelsContaining, drawingModelHasNonFinite } from './drawingModelChecks'
 import { parseGauntletFloorSpec, runGauntletFloorPipeline, type GauntletFloorSpec } from './gauntletFloorPipeline'
@@ -98,22 +99,28 @@ describe.skipIf(!ENABLED)('gauntlet floor export (GAUNTLET_EXPORT=1)', () => {
         const hardInput = gauntletMetricsInputFromPipeline(metricsInput)
         const metrics = computeGauntletMetrics(hardInput)
         writeJson(path.join(outDir, 'metrics.json'), metrics)
-        // Sensitivity of the shared-fixture rule to its one tolerance — printed, never used to pick it.
-        const sharedSensitivity = SHARED_SENSITIVITY_TOLERANCES_M.map((servesFixtureM) => {
-          const shared = computeSharedFixtureSet({ ...hardInput.sharedFixtures, servesFixtureM })
-          return {
-            servesFixtureM,
-            shared: shared.shared,
-            fixturesOnlyEngineerServes: shared.fixturesOnlyEngineerServes,
-            fixturesOnlyWeServe: shared.fixturesOnlyWeServe,
-            ourBranchSharedM: shared.ourBranchSharedM,
-            engineerBranchSharedM: shared.engineerBranchSharedM,
-            branchRatio: shared.engineerBranchSharedM > 0 ? shared.ourBranchSharedM / shared.engineerBranchSharedM : null,
-            engineerRunsUnattributed: shared.engineerRunsUnattributed,
-            engineerRunsUnattributedM: shared.engineerRunsUnattributedM,
-            engineerLeafEndsWithoutFixture: shared.engineerLeafEndsWithoutFixture,
-          }
-        })
+        // Sensitivity of the shared-fixture rule to its one tolerance — printed, never
+        // used to pick it — at the gate's diameter rule and with the rule off (R3 before/after).
+        const sharedSensitivity = SHARED_SENSITIVITY_TOLERANCES_M.flatMap((servesFixtureM) =>
+          [WC_MIN_BRANCH_DIAMETER_MM, 0].map((wcMinBranchDiameterMm) => {
+            const shared = computeSharedFixtureSet({ ...hardInput.sharedFixtures, servesFixtureM, wcMinBranchDiameterMm })
+            return {
+              servesFixtureM,
+              diameterRule: wcMinBranchDiameterMm > 0 ? `WC ≥ Ø${wcMinBranchDiameterMm}` : 'off',
+              shared: shared.shared,
+              fixturesOnlyEngineerServes: shared.fixturesOnlyEngineerServes,
+              fixturesOnlyWeServe: shared.fixturesOnlyWeServe,
+              ourBranchSharedM: shared.ourBranchSharedM,
+              engineerBranchSharedM: shared.engineerBranchSharedM,
+              branchRatio: shared.engineerBranchSharedM > 0 ? shared.ourBranchSharedM / shared.engineerBranchSharedM : null,
+              engineerRunsUnattributed: shared.engineerRunsUnattributed,
+              engineerRunsUnattributedM: shared.engineerRunsUnattributedM,
+              engineerRunsRejectedByDiameter: shared.engineerRunsRejectedByDiameter,
+              engineerRunsRejectedByDiameterM: shared.engineerRunsRejectedByDiameterM,
+              engineerLeafEndsWithoutFixture: shared.engineerLeafEndsWithoutFixture,
+            }
+          }),
+        )
         const summary = {
           floor: spec.floor,
           storeyLabel: spec.storeyLabel,

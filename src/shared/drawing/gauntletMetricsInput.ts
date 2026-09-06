@@ -53,7 +53,7 @@ export function gauntletMetricsInputFromPipeline(input: GauntletPipelineMetricsI
     // Unassigned entries carry no units; the fixtures were assigned in the same plan units as our risers.
     const units = assignment.unassigned ? comparisonInput.ourRiserUnits : assignment.units
     const plan = viewerPlanToDrawing({ x: toMeters(position.x, units), z: toMeters(position.z, units) })
-    fixtures.push({ expressId: assignment.fixtureExpressId, xM: plan.xM, yM: plan.yM })
+    fixtures.push({ expressId: assignment.fixtureExpressId, kind: assignment.kind, xM: plan.xM, yM: plan.yM })
   }
 
   const ourSegments: GauntletOurSegment[] = []
@@ -91,6 +91,7 @@ export function gauntletMetricsInputFromPipeline(input: GauntletPipelineMetricsI
       engineerRuns: input.engineerBranchRuns.runs.map((run) => ({
         id: run.expressId,
         upstream: run.upstream,
+        diameterMm: run.diameterMm,
         planLengthM: run.planLengthM,
         drainsInto: run.drainsInto,
       })),

@@ -65,6 +65,13 @@ export interface DrawingPipeRun {
   readonly end: DrawingPointM
   /** Set when the run is the collector of a fixture row (drawn heavier, labelled once). */
   readonly role: 'branch' | 'collector'
+  /**
+   * True for a fitting-body connector (elbow, tee, wye piece between two
+   * runs): drawn as pipe band so the network is continuous, but never
+   * labelled and never given a collar (the collar belongs to the pipe end
+   * that enters the body). Absent for real runs.
+   */
+  readonly fitting?: boolean
 }
 
 export interface DrawingRiser {

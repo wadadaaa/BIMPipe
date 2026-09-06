@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { WC_MIN_BRANCH_DIAMETER_MM } from './branchDefaults'
 import {
   BRANCH_RATIO_ENGINEER_SET,
   BRANCH_RATIO_MAX,
@@ -6,6 +7,7 @@ import {
   computeGauntletMetrics,
   computeSharedFixtureSet,
   ENGINEER_SERVES_FIXTURE_M,
+  runDiameterServesFixture,
   STACKS_RATIO_MAX,
   STACKS_RATIO_MIN,
   type GauntletMetricsInput,
@@ -23,9 +25,9 @@ import {
 function sharedInput(overrides: Partial<GauntletSharedFixtureInput> = {}): GauntletSharedFixtureInput {
   return {
     fixtures: [
-      { expressId: 1, xM: 0, yM: 0 },
-      { expressId: 2, xM: 4, yM: 0 },
-      { expressId: 3, xM: 20, yM: 0 },
+      { expressId: 1, kind: 'TOILETPAN', xM: 0, yM: 0 },
+      { expressId: 2, kind: 'WASHHANDBASIN', xM: 4, yM: 0 },
+      { expressId: 3, kind: 'TOILETPAN', xM: 20, yM: 0 },
     ],
     routedFixtureExpressIds: [1, 2, 3],
     ourSegments: [
@@ -35,10 +37,10 @@ function sharedInput(overrides: Partial<GauntletSharedFixtureInput> = {}): Gaunt
       { planLengthM: 2, servedFixtureExpressIds: [3] },
     ],
     engineerRuns: [
-      { id: 11, upstream: { xM: 0.3, yM: 0 }, planLengthM: 2, drainsInto: [13] },
-      { id: 12, upstream: { xM: 4, yM: 0.6 }, planLengthM: 3, drainsInto: [13] },
-      { id: 13, upstream: { xM: 2, yM: 2 }, planLengthM: 5, drainsInto: [] },
-      { id: 14, upstream: { xM: 10, yM: 3 }, planLengthM: 6, drainsInto: [13] },
+      { id: 11, upstream: { xM: 0.3, yM: 0 }, diameterMm: 110, planLengthM: 2, drainsInto: [13] },
+      { id: 12, upstream: { xM: 4, yM: 0.6 }, diameterMm: 110, planLengthM: 3, drainsInto: [13] },
+      { id: 13, upstream: { xM: 2, yM: 2 }, diameterMm: 110, planLengthM: 5, drainsInto: [] },
+      { id: 14, upstream: { xM: 10, yM: 3 }, diameterMm: 110, planLengthM: 6, drainsInto: [13] },
     ],
     ...overrides,
   }
@@ -107,15 +109,15 @@ describe('computeSharedFixtureSet', () => {
   it('attributes a run to the nearest fixture within the tolerance and follows the tolerance', () => {
     const base = sharedInput({
       fixtures: [
-        { expressId: 1, xM: 0, yM: 0 },
-        { expressId: 2, xM: 0.9, yM: 0 },
+        { expressId: 1, kind: 'TOILETPAN', xM: 0, yM: 0 },
+        { expressId: 2, kind: 'TOILETPAN', xM: 0.9, yM: 0 },
       ],
       routedFixtureExpressIds: [1, 2],
       ourSegments: [
         { planLengthM: 1, servedFixtureExpressIds: [1] },
         { planLengthM: 1, servedFixtureExpressIds: [2] },
       ],
-      engineerRuns: [{ id: 11, upstream: { xM: 0.8, yM: 0 }, planLengthM: 2, drainsInto: [] }],
+      engineerRuns: [{ id: 11, upstream: { xM: 0.8, yM: 0 }, diameterMm: 110, planLengthM: 2, drainsInto: [] }],
     })
     const at1 = computeSharedFixtureSet(base)
     expect(at1.sharedFixtureExpressIds).toEqual([2])
@@ -124,7 +126,7 @@ describe('computeSharedFixtureSet', () => {
     // 0.8 m from fixture 1, 0.1 m from fixture 2: still fixture 2 (nearest), unaffected.
     expect(at075.sharedFixtureExpressIds).toEqual([2])
     // 2.2 m from fixture 1, 1.3 m from fixture 2: outside 1.0 m, inside 1.5 m.
-    const farInput = { ...base, engineerRuns: [{ id: 11, upstream: { xM: 2.2, yM: 0 }, planLengthM: 2, drainsInto: [] }] }
+    const farInput = { ...base, engineerRuns: [{ id: 11, upstream: { xM: 2.2, yM: 0 }, diameterMm: 110, planLengthM: 2, drainsInto: [] }] }
     const far = computeSharedFixtureSet(farInput)
     expect(far.shared).toBe(0)
     expect(far.engineerRunsUnattributed).toBe(1)
@@ -134,13 +136,60 @@ describe('computeSharedFixtureSet', () => {
     expect(farWide.engineerLeafEndsWithoutFixture).toBe(0)
   })
 
+  it('diameter-compatible attribution (R3): a Ø50 run cannot serve a WC — nearest compatible fixture wins, else the run is a free end', () => {
+    expect(WC_MIN_BRANCH_DIAMETER_MM).toBe(110)
+    expect(runDiameterServesFixture(50, 'TOILETPAN')).toBe(false)
+    expect(runDiameterServesFixture(63, 'TOILETPAN')).toBe(false)
+    expect(runDiameterServesFixture(110, 'TOILETPAN')).toBe(true)
+    expect(runDiameterServesFixture(50, 'WASHHANDBASIN')).toBe(true)
+    expect(runDiameterServesFixture(null, 'TOILETPAN')).toBe(true)
+
+    // WC at 0, basin at 0.9; a Ø50 run ends 0.1 m from the WC and 0.8 m from the basin.
+    const base = sharedInput({
+      fixtures: [
+        { expressId: 1, kind: 'TOILETPAN', xM: 0, yM: 0 },
+        { expressId: 2, kind: 'WASHHANDBASIN', xM: 0.9, yM: 0 },
+      ],
+      routedFixtureExpressIds: [1, 2],
+      ourSegments: [
+        { planLengthM: 1, servedFixtureExpressIds: [1] },
+        { planLengthM: 1, servedFixtureExpressIds: [2] },
+      ],
+      engineerRuns: [{ id: 11, upstream: { xM: 0.1, yM: 0 }, diameterMm: 50, planLengthM: 2, drainsInto: [] }],
+    })
+    const narrow = computeSharedFixtureSet(base)
+    expect(narrow.sharedFixtureExpressIds).toEqual([2])
+    expect(narrow.engineerRunsRejectedByDiameter).toBe(0)
+    // Same run at Ø110: the WC is the nearest compatible fixture again.
+    const wide = computeSharedFixtureSet({ ...base, engineerRuns: [{ ...base.engineerRuns[0], diameterMm: 110 }] })
+    expect(wide.sharedFixtureExpressIds).toEqual([1])
+    // Rule off: nearest fixture regardless of diameter (the round-2 behaviour).
+    const off = computeSharedFixtureSet({ ...base, wcMinBranchDiameterMm: 0 })
+    expect(off.sharedFixtureExpressIds).toEqual([1])
+    expect(off.engineerRunsRejectedByDiameter).toBe(0)
+
+    // Only the WC within reach: the Ø50 run is unattributed — an engineer free end, counted as rejected.
+    const onlyWc = computeSharedFixtureSet({ ...base, fixtures: [base.fixtures[0]], routedFixtureExpressIds: [1] })
+    expect(onlyWc.shared).toBe(0)
+    expect(onlyWc.fixturesServedByEngineer).toBe(0)
+    expect(onlyWc.engineerRunsUnattributed).toBe(1)
+    expect(onlyWc.engineerRunsUnattributedM).toBe(2)
+    expect(onlyWc.engineerRunsRejectedByDiameter).toBe(1)
+    expect(onlyWc.engineerRunsRejectedByDiameterM).toBe(2)
+    expect(onlyWc.engineerLeafEndsWithoutFixture).toBe(1)
+    // A run without a diameter carries no evidence and still attributes to the WC.
+    const unknown = computeSharedFixtureSet({ ...base, fixtures: [base.fixtures[0]], routedFixtureExpressIds: [1], engineerRuns: [{ ...base.engineerRuns[0], diameterMm: null }] })
+    expect(unknown.sharedFixtureExpressIds).toEqual([1])
+    expect(unknown.engineerRunsRejectedByDiameter).toBe(0)
+  })
+
   it('survives connectivity cycles, unknown ids and ignores routed ids that are not positioned fixtures', () => {
     const shared = computeSharedFixtureSet(
       sharedInput({
         routedFixtureExpressIds: [1, 2, 3, 99],
         engineerRuns: [
-          { id: 11, upstream: { xM: 0, yM: 0 }, planLengthM: 2, drainsInto: [12, 500] },
-          { id: 12, upstream: { xM: 9, yM: 9 }, planLengthM: 3, drainsInto: [11] },
+          { id: 11, upstream: { xM: 0, yM: 0 }, diameterMm: 110, planLengthM: 2, drainsInto: [12, 500] },
+          { id: 12, upstream: { xM: 9, yM: 9 }, diameterMm: 110, planLengthM: 3, drainsInto: [11] },
         ],
       }),
     )

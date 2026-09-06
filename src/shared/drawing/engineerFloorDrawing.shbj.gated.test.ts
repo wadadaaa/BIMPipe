@@ -50,29 +50,43 @@ const PIN_SANITARY_TOTAL = 49
 // floor MISSES the 80 % target by one run; the measured value is pinned as-is
 // rather than tuned.
 const PIN_SLOPE_COVERAGE = 39 / 49
-// No two horizontal runs meet within 50 mm on this model (every joint is a fitting).
+// No two horizontal runs meet within 50 mm on this model (every joint is a
+// fitting); R3's connectors keep the collector role on the pipes, and no pipe
+// gathers two feeders through one body at the strict rule here.
 const PIN_COLLECTORS_STRICT = 0
+// R3 fitting census on the storey (band ∪ hang band, SW-GRV): 46 IfcFlowFitting
+// bodies — 5 single-port caps (skipped: nothing to bridge), 26 two-port, 14
+// three-port, 1 four-port — 97 connectors model-wide, 74 on this storey. Free
+// run ends within 50 mm of no other drawn run fell 98 → 25.
+const PIN_R3_FITTINGS = 46
+const PIN_R3_FITTINGS_BY_PORTS = { '1': 5, '2': 26, '3': 14, '4': 1 }
+const PIN_R3_FITTINGS_SKIPPED = 5
+const PIN_R3_FITTING_CONNECTORS_ON_STOREY = 74
 // Our side: 7 wet cores → 7 stacks on the storey (V3 pin).
 const PIN_OUR_STACKS = 7
 // Office typology (G3) through the harness: 5 row collectors → 70 route segments / 59.6 m.
 const PIN_OUR_OFFICE_SEGMENTS = 70
 const PIN_OUR_OFFICE_BRANCH_M = 59.6
-// R2 shared-fixture set (1.0 m serves-fixture rule on the union set; see the
-// 096 test for the attribution rule). 25 of the 33 detected fixtures have an
-// engineer upstream end within 1.0 m; 8 are served only by us (the engineer's
-// L04 slice has no run to them — the R1 audit's model gap), 0 only by the
-// engineer; every one of the 49 engineer runs is attributed. Our 45.21 m to
-// the shared fixtures over the engineer's 25.55 m → 1.77 (full union 2.33,
-// literal band 5.73). Sensitivity: 0.75 m → 1.97, 1.5 m → 1.77.
+// R2/R3 shared-fixture set (1.0 m serves-fixture rule on the union set; see the
+// 096 test for the attribution rule). R3 measured (2026-09-06): the 74 fitting
+// connectors add 7.6 m to the engineer's union set (25.55 → 33.17 m); under the
+// diameter rule one WC whose only engineer run within 1.0 m is Ø50 is no longer
+// served by the engineer (that run attributes to a compatible basin instead,
+// 0 rejected) → 24 of the 33 detected fixtures shared, 9 served only by us (the
+// engineer's L04 slice has no run to them — the R1 audit's model gap), 0 only
+// by the engineer; every one of the 123 drawn runs is attributed. Our 44.74 m
+// to the shared fixtures over the engineer's 33.17 m → 1.35 (R2: 1.77; full
+// union 1.80, literal band 5.73). Sensitivity 0.75 / 1.0 / 1.5 m: 1.35 each;
+// rule off 1.36 each.
 const PIN_R2_FIXTURES = 33
-const PIN_R2_SHARED = 25
+const PIN_R2_SHARED = 24
 const PIN_R2_ONLY_ENGINEER = 0
-const PIN_R2_ONLY_US = 8
-const PIN_R2_OUR_SHARED_M = 45.21
-const PIN_R2_ENGINEER_SHARED_M = 25.55
+const PIN_R2_ONLY_US = 9
+const PIN_R2_OUR_SHARED_M = 44.74
+const PIN_R2_ENGINEER_SHARED_M = 33.17
 const PIN_R2_ENGINEER_RUNS_UNATTRIBUTED = 0
-const PIN_R2_BRANCH_RATIO_SHARED = 1.77
-const PIN_R2_BRANCH_RATIO_UNION = 2.33
+const PIN_R2_BRANCH_RATIO_SHARED = 1.35
+const PIN_R2_BRANCH_RATIO_UNION = 1.8
 const PIN_R2_BRANCH_RATIO_LITERAL = 5.73
 
 const gated = describe.skipIf(!specFilesExist(SPEC))
@@ -116,7 +130,16 @@ gated('engineer + our floor drawings on the second project MEP storey (gated: re
         expect(sanitaryPipes.inHang).toBe(PIN_SANITARY_IN_HANG)
         expect(sanitaryPipes.both).toBe(PIN_SANITARY_BOTH)
         expect(sanitaryPipes.total).toBe(PIN_SANITARY_TOTAL)
-        expect(engineer.model.pipes.filter((pipe) => pipe.system === 'sanitary')).toHaveLength(PIN_SANITARY_TOTAL)
+        expect(engineer.model.pipes.filter((pipe) => pipe.system === 'sanitary' && !pipe.fitting)).toHaveLength(PIN_SANITARY_TOTAL)
+        // R3 fitting connectors: drawn apart from the runs, counted apart from the pins above.
+        expect(sanitaryPipes.fittingConnectors).toBe(PIN_R3_FITTING_CONNECTORS_ON_STOREY)
+        expect(engineer.model.pipes.filter((pipe) => pipe.fitting === true)).toHaveLength(PIN_R3_FITTING_CONNECTORS_ON_STOREY)
+        expect(metricsInput.engineerStoreyHorizontals.fittingConnectors).toBe(PIN_R3_FITTING_CONNECTORS_ON_STOREY)
+        expect(metricsInput.engineerStoreyHorizontals.fittingSummary.fittings).toBe(PIN_R3_FITTINGS)
+        expect(metricsInput.engineerStoreyHorizontals.fittingSummary.byPortCount).toEqual(PIN_R3_FITTINGS_BY_PORTS)
+        expect(metricsInput.engineerStoreyHorizontals.fittingSummary.skipped).toHaveLength(PIN_R3_FITTINGS_SKIPPED)
+        expect(metricsInput.engineerStoreyHorizontals.fittingSummary.skipped.every((entry) => entry.reason === 'single port')).toBe(true)
+        expect(metricsInput.engineerBranchRuns.union.fittingConnectors).toBe(PIN_R3_FITTING_CONNECTORS_ON_STOREY)
         // The 6 unresolved cut-face pipes (V1b) are vertical stacks, never
         // horizontals; R1 rejects the 5 whose invert contradicts the containment
         // and keeps the 1 that hangs 0.42 m under the slab.
@@ -182,6 +205,7 @@ gated('engineer + our floor drawings on the second project MEP storey (gated: re
         expect(shared.ourBranchSharedM).toBeCloseTo(PIN_R2_OUR_SHARED_M, 1)
         expect(shared.engineerBranchSharedM).toBeCloseTo(PIN_R2_ENGINEER_SHARED_M, 1)
         expect(shared.engineerRunsUnattributed).toBe(PIN_R2_ENGINEER_RUNS_UNATTRIBUTED)
+        expect(shared.engineerRunsRejectedByDiameter).toBe(0)
         expect(metrics.branchRatio).not.toBeNull()
         expect(metrics.branchRatio!).toBeCloseTo(PIN_R2_BRANCH_RATIO_SHARED, 2)
         expect(metrics.branchRatioFullUnion).toBeCloseTo(PIN_R2_BRANCH_RATIO_UNION, 2)

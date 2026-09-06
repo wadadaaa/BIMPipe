@@ -183,8 +183,8 @@ describe('buildEngineerFloorDrawing (synthetic)', () => {
     expect(diagnostics.storeyBandM).toEqual({ bottomM: 3, topM: null })
     expect(diagnostics.hangDepthM).toBe(ENGINEER_HANG_DEPTH_M)
     // h1, h2, h3, h5, h7 in band; h4 + h5 in hang; h5 both; h6 excluded; 19 unresolved.
-    expect(diagnostics.pipes.sanitary).toEqual({ inBand: 5, inHang: 2, both: 1, total: 6, unresolved: 1 })
-    expect(diagnostics.pipes.vent).toEqual({ inBand: 1, inHang: 0, both: 0, total: 1, unresolved: 0 })
+    expect(diagnostics.pipes.sanitary).toEqual({ inBand: 5, inHang: 2, both: 1, total: 6, unresolved: 1, fittingConnectors: 0 })
+    expect(diagnostics.pipes.vent).toEqual({ inBand: 1, inHang: 0, both: 0, total: 1, unresolved: 0, fittingConnectors: 0 })
     expect(diagnostics.pipes.drawn).toBe(7)
     expect(model.pipes.map((pipe) => pipe.id)).toEqual([
       'engineer-pipe-11',
@@ -201,7 +201,7 @@ describe('buildEngineerFloorDrawing (synthetic)', () => {
 
   it('hangDepthM = 0 reproduces the literal band scope; includeVentPipes = false drops vent runs', () => {
     const literal = build({ hangDepthM: 0, includeVentPipes: false })
-    expect(literal.diagnostics.pipes.sanitary).toEqual({ inBand: 5, inHang: 0, both: 0, total: 5, unresolved: 1 })
+    expect(literal.diagnostics.pipes.sanitary).toEqual({ inBand: 5, inHang: 0, both: 0, total: 5, unresolved: 1, fittingConnectors: 0 })
     expect(literal.model.pipes.every((pipe) => pipe.system === 'sanitary')).toBe(true)
   })
 
@@ -241,6 +241,56 @@ describe('buildEngineerFloorDrawing (synthetic)', () => {
     expect(diagnostics.collectors.count).toBe(1)
     expect(diagnostics.collectors.toleranceM).toBe(0.05)
     expect(diagnostics.collectors.bridged.count).toBeGreaterThanOrEqual(1)
+  })
+
+  it('draws fitting connectors as unlabelled fitting runs, counted apart from the pipes, and keeps roles through the body (R3)', () => {
+    // Move branch h2 6 cm short of h1 and close the gap with a tee body at (300, 100, 316):
+    // ports on h1's line either side and on the branch end.
+    const network = syntheticNetwork()
+    network.segments = network.segments.map((segment) =>
+      segment.expressId === 12 ? { ...segment, end: { x: 300, y: 106, z: 316.1 } } : segment,
+    )
+    const tee = (port: number, end: { x: number; y: number; z: number }): EngineerPipeSegment =>
+      seg({
+        expressId: -(777 * 8 + port + 1),
+        elementKind: 'fitting',
+        fittingExpressId: 777,
+        start: { x: 300, y: 100, z: 316 },
+        end,
+        endpointSource: 'distribution-ports',
+        outerDiameterMm: port === 2 ? 50 : 110,
+        lengthM: null,
+      })
+    network.fittingConnectors = [
+      tee(0, { x: 294, y: 100, z: 316 }),
+      tee(1, { x: 306, y: 100, z: 316 }),
+      tee(2, { x: 300, y: 106, z: 316 }),
+      // a vertical connector (elbow turning down) is never a horizontal
+      seg({ expressId: -(778 * 8 + 1), elementKind: 'fitting', fittingExpressId: 778, start: { x: 700, y: 100, z: 308 }, end: { x: 700, y: 100, z: 290 } }),
+      // a connector of another storey's band is left out
+      seg({ expressId: -(779 * 8 + 1), elementKind: 'fitting', fittingExpressId: 779, start: { x: 100, y: 500, z: 104 }, end: { x: 106, y: 500, z: 104 } }),
+    ]
+    const classification = classifyEngineerRiserStacks(network, CLASSES)
+    const { model, diagnostics } = build({ network, classification })
+    const connectors = model.pipes.filter((pipe) => pipe.fitting === true)
+    // Sorted by (negative) synthetic express id: the highest port first.
+    expect(connectors.map((pipe) => pipe.id)).toEqual(['engineer-fitting-777-2', 'engineer-fitting-777-1', 'engineer-fitting-777-0'])
+    for (const connector of connectors) {
+      expect(connector.system).toBe('sanitary')
+      expect(connector.slopePercent).toBeNull()
+      expect(connector.role).toBe('branch')
+    }
+    expect(connectors[0].diameterMm).toBe(50)
+    expect(diagnostics.pipes.sanitary).toEqual({ inBand: 5, inHang: 2, both: 1, total: 6, unresolved: 1, fittingConnectors: 3 })
+    expect(diagnostics.pipes.drawn).toBe(6 + 1 + 3)
+    // The branch still feeds h1 through the tee body, so h1 keeps its collector role.
+    expect(model.pipes.filter((pipe) => pipe.role === 'collector').map((pipe) => pipe.id)).toEqual(['engineer-pipe-11'])
+    // Slope coverage is computed on pipes only.
+    expect(diagnostics.slope.extrusionRuns).toBe(build().diagnostics.slope.extrusionRuns)
+    // Opting out reproduces the pipe-only drawing.
+    const pipeOnly = build({ network, classification, includeFittingConnectors: false })
+    expect(pipeOnly.model.pipes.some((pipe) => pipe.fitting)).toBe(false)
+    expect(pipeOnly.diagnostics.pipes.sanitary.fittingConnectors).toBe(0)
   })
 
   it('passes structure and fixtures through in the drawing frame and frames the sheet by the plan bounds', () => {

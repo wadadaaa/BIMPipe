@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { FloorDrawingModel } from './floorDrawingModel'
-import { fmt, formatDiameter, formatSlopePercent, renderFloorDrawingSvg } from './renderFloorDrawing'
-import { PIPE_STYLE, pipeBandWidthMm } from './drawingStyle'
+import { fmt, formatDiameter, formatSlopePercent, formatStackTagText, renderFloorDrawingSvg } from './renderFloorDrawing'
+import { PIPE_STYLE, PIPE_SYSTEM_STYLE, STACK_STYLE, pipeBandWidthMm } from './drawingStyle'
 import { buildSyntheticMiniModel, buildSyntheticToiletBlockModel } from './syntheticFloorModels'
 
 const OPTIONS = { scale: 100, dpi: 220, showUnderlay: true, anonymize: false } as const
@@ -17,7 +17,9 @@ describe('renderFloorDrawingSvg', () => {
     expect(svg.endsWith('</svg>')).toBe(true)
     // Snapshot history: G1 style iterations 1–8; G4 style re-check (sanitary-only
     // crops) — fixtures drawn as the sheet's plumbing fixtures (dark-green
-    // hairline #004000 / 0.12 mm) instead of pale-teal architecture outlines.
+    // hairline #004000 / 0.12 mm) instead of pale-teal architecture outlines;
+    // R3 — stack pill leads with the system code ("SW-GRV ø110 mm (2.1ק)") and
+    // the stack symbol carries data-system so vents are unmistakable.
     expect(svg).toMatchSnapshot()
   })
 
@@ -87,7 +89,7 @@ describe('renderFloorDrawingSvg', () => {
       ],
     }
     const svg = renderFloorDrawingSvg(model, OPTIONS)
-    const cy = (id: string) => Number(svg.match(new RegExp(`data-stack="${id}">.*?<circle cx="[\\d.]+" cy="([\\d.]+)"`))?.[1])
+    const cy = (id: string) => Number(svg.match(new RegExp(`data-stack="${id}"[^>]*>.*?<circle cx="[\\d.]+" cy="([\\d.]+)"`))?.[1])
     expect(cy('high')).toBeLessThan(cy('low'))
   })
 
@@ -140,12 +142,51 @@ describe('renderFloorDrawingSvg', () => {
     expect(count(at50, /data-label-for="wc-branch-/g)).toBeGreaterThan(count(svg, /data-label-for="wc-branch-/g))
   })
 
-  it('renders stacks as circle + crosshair with a tag pill and leader; tag text keeps the Hebrew suffix in visual order', () => {
+  it('renders stacks as circle + crosshair with a tag pill and leader; the pill leads with the system code and keeps the Hebrew suffix in visual order', () => {
     const svg = renderFloorDrawingSvg(buildSyntheticToiletBlockModel(), OPTIONS)
     expect(count(svg, /data-stack="/g)).toBe(2)
     expect(count(svg, /data-tag-for="/g)).toBe(2)
-    expect(svg).toContain('unicode-bidi="bidi-override">ø160 mm (1.3ק)</text>')
+    expect(svg).toContain('unicode-bidi="bidi-override">SW-GRV ø160 mm (1.3ק)</text>')
+    expect(svg).toContain('unicode-bidi="bidi-override">VNT ø75 mm (1.4ק)</text>')
     expect(svg).toContain('>00 – 03</text>')
+    expect(formatStackTagText({ system: 'sanitary', diameterMm: null, tag: '1.9ק' })).toBe('SW-GRV (1.9ק)')
+  })
+
+  it('draws a vent stack as an open circle with a centre dot, a sanitary stack as a solid disc (R3)', () => {
+    const svg = renderFloorDrawingSvg(buildSyntheticToiletBlockModel(), OPTIONS)
+    const sanitary = svg.match(/<g data-stack="stack-1" data-system="sanitary">(.*?)<\/g>/)?.[1] ?? ''
+    const vent = svg.match(/<g data-stack="vent-stack-1" data-system="vent">(.*?)<\/g>/)?.[1] ?? ''
+    expect(count(sanitary, /<circle /g)).toBe(1)
+    expect(sanitary).toContain(`fill="${PIPE_SYSTEM_STYLE.sanitary.fill}"`)
+    expect(count(vent, /<circle /g)).toBe(2)
+    expect(vent).toContain(`fill="${STACK_STYLE.ventOpenFill}"`)
+    expect(vent).toContain(`fill="${PIPE_SYSTEM_STYLE.vent.fill}"/>`)
+    // both keep the crosshair
+    expect(count(sanitary, /<path /g)).toBe(1)
+    expect(count(vent, /<path /g)).toBe(1)
+  })
+
+  it('draws fitting connectors as round-capped bands without labels or collars (R3)', () => {
+    const base = buildSyntheticMiniModel()
+    // Split run-1 short of the stack and close the gap with two connectors of one elbow body.
+    const model: FloorDrawingModel = {
+      ...base,
+      pipes: [
+        { ...base.pipes[0], id: 'run-a', end: { xM: 2.2, yM: 0.65 } },
+        { id: 'fit-1-0', system: 'sanitary', diameterMm: 110, slopePercent: null, start: { xM: 2.3, yM: 0.6 }, end: { xM: 2.2, yM: 0.65 }, role: 'branch', fitting: true },
+        { id: 'fit-1-1', system: 'sanitary', diameterMm: 110, slopePercent: null, start: { xM: 2.3, yM: 0.6 }, end: { xM: 2.5, yM: 0.5 }, role: 'branch', fitting: true },
+      ],
+    }
+    const svg = renderFloorDrawingSvg(model, OPTIONS)
+    expect(count(svg, /data-fitting="true"/g)).toBe(2)
+    expect(svg).toMatch(/data-pipe="fit-1-0"[^>]*stroke-linecap="round"/)
+    expect(svg).toMatch(/data-pipe="run-a"[^>]*stroke-linecap="butt"/)
+    expect(svg).not.toMatch(/data-label-for="fit-1-/)
+    // The run end entering the body gets the hub; the body itself emits no collar, so exactly
+    // one collar sits at the port (2.2, 0.65) and none at the body origin (2.3, 0.6).
+    const withoutFittings = renderFloorDrawingSvg({ ...model, pipes: [model.pipes[0]] }, OPTIONS)
+    const fittingsOf = (doc: string) => doc.match(/<g id="fittings">(.*?)<\/g>/)?.[1] ?? ''
+    expect(count(fittingsOf(svg), /<rect /g)).toBe(count(fittingsOf(withoutFittings), /<rect /g))
   })
 
   it('anonymize drops the title but keeps the scale note', () => {

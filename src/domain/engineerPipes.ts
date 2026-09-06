@@ -66,15 +66,63 @@ export interface EngineerPipeSegment {
   lengthM: number | null
   /** Pset_FlowSegmentPipeSegment.InvertElevation in metres; null when absent. */
   invertElevationM: number | null
+  /**
+   * `fitting` marks a synthetic connector derived from an IfcFlowFitting body
+   * (its placement origin → one of its IfcDistributionPorts, see
+   * {@link fittingConnectorExpressId}); absent or `pipe` for a real
+   * IfcFlowSegment / IfcPipeSegment centreline. Connectors have a negative
+   * synthetic `expressId`, `start` at the body origin and `end` at the port.
+   */
+  elementKind?: EngineerSegmentElementKind
+  /** Express ID of the owning IfcFlowFitting when `elementKind` is `fitting`. */
+  fittingExpressId?: number
 }
+
+/** Which IFC element a segment was derived from. Absent means `pipe`. */
+export type EngineerSegmentElementKind = 'pipe' | 'fitting'
 
 export interface EngineerPipeNetwork {
   /** Explicit source-unit conversion (metres per one source unit). */
   metersPerSourceUnit: number
   /** All building storeys, sorted by elevation ascending. */
   storeys: EngineerStoreyRef[]
-  /** Extracted segments, sorted by expressId ascending. */
+  /** Extracted pipe segments, sorted by expressId ascending. */
   segments: EngineerPipeSegment[]
+  /**
+   * Fitting connectors (R3): one segment per IfcFlowFitting port, from the
+   * body origin to that port, sorted by expressId ascending. Kept apart from
+   * `segments` so pipe-only consumers (riser classification, the V1 report)
+   * are unaffected; the drawing and metric pipelines merge them through
+   * `includeFittingConnectors`. Absent on networks built before R3.
+   */
+  fittingConnectors?: EngineerPipeSegment[]
+}
+
+/**
+ * Maximum number of ports one fitting connector id space reserves per
+ * fitting (a cross has 4; anything above is skipped with a reason).
+ */
+export const ENGINEER_FITTING_MAX_PORTS = 8
+
+/**
+ * Synthetic express ID of the connector from fitting `fittingExpressId` to
+ * its `portIndex`-th port (ascending port express ID): negative so it never
+ * collides with a real IFC express ID (always ≥ 1). Inverse:
+ * {@link decodeFittingConnectorExpressId}.
+ */
+export function fittingConnectorExpressId(fittingExpressId: number, portIndex: number): number {
+  return -(fittingExpressId * ENGINEER_FITTING_MAX_PORTS + portIndex + 1)
+}
+
+export function decodeFittingConnectorExpressId(expressId: number): { fittingExpressId: number; portIndex: number } | null {
+  if (!Number.isInteger(expressId) || expressId >= 0) return null
+  const raw = -expressId - 1
+  return { fittingExpressId: Math.floor(raw / ENGINEER_FITTING_MAX_PORTS), portIndex: raw % ENGINEER_FITTING_MAX_PORTS }
+}
+
+/** True for a synthetic fitting connector (see {@link EngineerPipeSegment.elementKind}). */
+export function isFittingConnector(segment: Pick<EngineerPipeSegment, 'elementKind'>): boolean {
+  return segment.elementKind === 'fitting'
 }
 
 /**
@@ -492,16 +540,21 @@ export interface EngineerStoreyHorizontal {
 }
 
 export interface EngineerStoreyHorizontalSelection {
-  /** Horizontal segments serving the storey, sorted by expressId. */
+  /**
+   * Horizontal segments serving the storey, sorted by expressId (fitting
+   * connectors, when included, carry negative ids and therefore sort first).
+   */
   horizontals: EngineerStoreyHorizontal[]
-  /** Segments whose Z-range touches the storey band `[bottom, top)` (V1 literal scope). */
+  /** PIPE segments whose Z-range touches the storey band `[bottom, top)` (V1 literal scope). */
   inBandCount: number
-  /** Segments whose Z-range touches the hang band `[bottom − hangDepthM, bottom)`. */
+  /** PIPE segments whose Z-range touches the hang band `[bottom − hangDepthM, bottom)`. */
   inHangCount: number
-  /** Segments counted in both (they cross the slab level). */
+  /** PIPE segments counted in both (they cross the slab level). */
   bothCount: number
-  /** Matching-system, non-vertical segments without a resolved centreline (cannot be drawn). */
+  /** Matching-system, non-vertical PIPE segments without a resolved centreline (cannot be drawn). */
   unresolvedCount: number
+  /** Non-vertical fitting connectors admitted by the same band rule (0 unless `includeFittingConnectors`). */
+  fittingConnectorCount: number
   hangDepthM: number
 }
 
@@ -510,6 +563,12 @@ export interface SelectEngineerStoreyHorizontalsOptions {
   verticalToleranceDeg?: number
   /** Overrides {@link ENGINEER_HANG_DEPTH_M}; 0 reproduces the literal band scope. */
   hangDepthM?: number
+  /**
+   * Also admit the network's `fittingConnectors` under the same system,
+   * verticality and band rules (R3). Counted in `fittingConnectorCount`, never
+   * in the pipe counts, so pipe-only pins keep their meaning.
+   */
+  includeFittingConnectors?: boolean
 }
 
 /**
@@ -521,7 +580,7 @@ export interface SelectEngineerStoreyHorizontalsOptions {
  * Segments without geometry are counted, never drawn.
  */
 export function selectEngineerStoreyHorizontals(
-  network: Pick<EngineerPipeNetwork, 'segments' | 'metersPerSourceUnit'>,
+  network: Pick<EngineerPipeNetwork, 'segments' | 'metersPerSourceUnit' | 'fittingConnectors'>,
   band: Pick<StoreySlabBandM, 'bottomM' | 'topM'>,
   options: SelectEngineerStoreyHorizontalsOptions = {},
 ): EngineerStoreyHorizontalSelection {
@@ -536,10 +595,15 @@ export function selectEngineerStoreyHorizontals(
   let inHangCount = 0
   let bothCount = 0
   let unresolvedCount = 0
-  for (const segment of network.segments) {
+  let fittingConnectorCount = 0
+  const candidates = options.includeFittingConnectors
+    ? [...network.segments, ...(network.fittingConnectors ?? [])]
+    : network.segments
+  for (const segment of candidates) {
     if (!matchesAnyPrefix(segment.systemName, prefixes)) continue
+    const fitting = isFittingConnector(segment)
     if (segment.start === null || segment.end === null) {
-      unresolvedCount += 1
+      if (!fitting) unresolvedCount += 1
       continue
     }
     if (isVerticalEngineerSegment(segment, verticalToleranceDeg)) continue
@@ -548,13 +612,17 @@ export function selectEngineerStoreyHorizontals(
     const inBand = !(zMaxM < band.bottomM || zMinM >= band.topM)
     const inHang = hangDepthM > 0 && !(zMaxM < hangBottomM || zMinM >= band.bottomM)
     if (!inBand && !inHang) continue
-    if (inBand) inBandCount += 1
-    if (inHang) inHangCount += 1
-    if (inBand && inHang) bothCount += 1
+    if (fitting) {
+      fittingConnectorCount += 1
+    } else {
+      if (inBand) inBandCount += 1
+      if (inHang) inHangCount += 1
+      if (inBand && inHang) bothCount += 1
+    }
     horizontals.push({ segment, rule: inBand && inHang ? 'both' : inBand ? 'in-band' : 'in-hang' })
   }
   horizontals.sort((a, b) => a.segment.expressId - b.segment.expressId)
-  return { horizontals, inBandCount, inHangCount, bothCount, unresolvedCount, hangDepthM }
+  return { horizontals, inBandCount, inHangCount, bothCount, unresolvedCount, fittingConnectorCount, hangDepthM }
 }
 
 // ---------------------------------------------------------------------------
@@ -707,6 +775,13 @@ export interface EngineerJunction {
    * pieces. Continuations never count towards the collector rule.
    */
   continuation: boolean
+  /**
+   * Set when the two PIPES meet through a fitting body (R3): each has an end
+   * within the tolerance of one of the fitting's ports. The fitting's own
+   * connectors also appear as junction endpoints, so flow can be walked
+   * pipe → connector → connector → pipe.
+   */
+  viaFittingExpressId?: number
 }
 
 /** Runs meeting end-to-end within this angle are one continued run, not a branch join. */
@@ -758,6 +833,13 @@ function segmentAngleDeg(a: Pick<EngineerPipeSegment, 'start' | 'end'>, b: Pick<
   return (Math.acos(cos) * 180) / Math.PI
 }
 
+type SegmentLowerEnd = 'start' | 'end' | 'both'
+
+function segmentLowerEnd(segment: EngineerPipeSegment, flatSource: number): SegmentLowerEnd {
+  const dz = segment.end!.z - segment.start!.z
+  return Math.abs(dz) < flatSource ? 'both' : dz < 0 ? 'end' : 'start'
+}
+
 /**
  * Classifies horizontal runs as `collector` (≥ 2 distinct upstream segments
  * drain into it, at its ends or along its interior) or `branch`, from
@@ -765,6 +847,20 @@ function segmentAngleDeg(a: Pick<EngineerPipeSegment, 'start' | 'end'>, b: Pick<
  * converted with `metersPerSourceUnit`). An end-to-end collinear join is a
  * continuation (one straight run split into pieces) and is excluded from the
  * upstream count. Deterministic: junctions are sorted by (into, from).
+ *
+ * Fitting connectors (R3, `elementKind: 'fitting'`) are transparent joints:
+ * - two pipes each ending within the tolerance of a port of the same fitting
+ *   are joined pipe → pipe (`viaFittingExpressId`), direction from the pipes'
+ *   own Z (the upstream pipe's lower end is at its port, the downstream pipe's
+ *   upper end at its), continuation by their angle — exactly as if they met
+ *   directly, so roles are comparable with and without connectors;
+ * - a pipe joins the connector at its port (pipe → connector when the pipe's
+ *   lower end is there, connector → pipe when its upper end is), and the
+ *   connectors of one fitting join each other both ways, so a flow walk over
+ *   `upstream` junctions reaches the fitting body from its feeders and
+ *   continues into its outlet without ever climbing back up a pipe;
+ * - connectors are always `branch` (a fitting is not a run), and their
+ *   junctions never count towards a pipe's collector rule.
  */
 export function classifyEngineerRunRoles(
   segments: readonly EngineerPipeSegment[],
@@ -774,18 +870,32 @@ export function classifyEngineerRunRoles(
   const resolved = segments
     .filter((segment) => segment.start !== null && segment.end !== null)
     .sort((a, b) => a.expressId - b.expressId)
+  const pipes = resolved.filter((segment) => !isFittingConnector(segment))
+  const connectors = resolved.filter((segment) => isFittingConnector(segment))
   const toleranceSource = toleranceM / metersPerSourceUnit
   const flatSource = ENGINEER_SLOPE_MIN_DATA_M / metersPerSourceUnit
 
   const junctions: EngineerJunction[] = []
+  const junctionKeys = new Set<string>()
   const upstreamJoins = new Map<number, Set<number>>()
-  for (const from of resolved) {
+  const pushJunction = (junction: EngineerJunction, countsForRole: boolean): void => {
+    const key = `${junction.fromExpressId}:${junction.intoExpressId}`
+    if (junctionKeys.has(key)) return
+    junctionKeys.add(key)
+    junctions.push(junction)
+    if (countsForRole && junction.upstream && !junction.continuation) {
+      const set = upstreamJoins.get(junction.intoExpressId) ?? new Set<number>()
+      set.add(junction.fromExpressId)
+      upstreamJoins.set(junction.intoExpressId, set)
+    }
+  }
+
+  // 1. Direct pipe ↔ pipe joints.
+  for (const from of pipes) {
     const start = from.start!
     const end = from.end!
-    const dz = end.z - start.z
-    const flat = Math.abs(dz) < flatSource
-    const lowerEnd: 'start' | 'end' | 'both' = flat ? 'both' : dz < 0 ? 'end' : 'start'
-    for (const into of resolved) {
+    const lowerEnd = segmentLowerEnd(from, flatSource)
+    for (const into of pipes) {
       if (into.expressId === from.expressId) continue
       let best: { distanceSource: number; which: 'start' | 'end' } | null = null
       for (const which of ['start', 'end'] as const) {
@@ -800,17 +910,105 @@ export function classifyEngineerRunRoles(
       const endToEnd =
         distance3(joiningPoint, into.start!) <= toleranceSource || distance3(joiningPoint, into.end!) <= toleranceSource
       const continuation = endToEnd && segmentAngleDeg(from, into) <= ENGINEER_CONTINUATION_ANGLE_DEG
-      junctions.push({
-        fromExpressId: from.expressId,
-        intoExpressId: into.expressId,
-        distanceM: best.distanceSource * metersPerSourceUnit,
-        upstream,
-        continuation,
-      })
-      if (upstream && !continuation) {
-        const set = upstreamJoins.get(into.expressId) ?? new Set<number>()
-        set.add(from.expressId)
-        upstreamJoins.set(into.expressId, set)
+      pushJunction(
+        {
+          fromExpressId: from.expressId,
+          intoExpressId: into.expressId,
+          distanceM: best.distanceSource * metersPerSourceUnit,
+          upstream,
+          continuation,
+        },
+        true,
+      )
+    }
+  }
+
+  // 2. Joints through fitting bodies.
+  const connectorsByFitting = new Map<number, EngineerPipeSegment[]>()
+  for (const connector of connectors) {
+    const fittingId = connector.fittingExpressId ?? connector.expressId
+    const list = connectorsByFitting.get(fittingId) ?? []
+    list.push(connector)
+    connectorsByFitting.set(fittingId, list)
+  }
+  interface AttachedPipe {
+    pipe: EngineerPipeSegment
+    connector: EngineerPipeSegment
+    /** Which end of the pipe sits at the port, or `interior` when the port sits on the pipe's body (saddle join). */
+    which: 'start' | 'end' | 'interior'
+    distanceSource: number
+    /** The pipe drains into the fitting here (its lower end, or flat). */
+    drainsIn: boolean
+    /** The fitting drains into the pipe here (its upper end, its interior, or flat). */
+    drainsOut: boolean
+  }
+  for (const [fittingId, members] of [...connectorsByFitting.entries()].sort((a, b) => a[0] - b[0])) {
+    const attached: AttachedPipe[] = []
+    for (const pipe of pipes) {
+      const lowerEnd = segmentLowerEnd(pipe, flatSource)
+      let best: AttachedPipe | null = null
+      for (const connector of members) {
+        const port = connector.end!
+        for (const which of ['start', 'end'] as const) {
+          const distanceSource = distance3(which === 'start' ? pipe.start! : pipe.end!, port)
+          if (distanceSource <= toleranceSource && (best === null || distanceSource < best.distanceSource)) {
+            best = {
+              pipe,
+              connector,
+              which,
+              distanceSource,
+              drainsIn: lowerEnd === 'both' || lowerEnd === which,
+              drainsOut: lowerEnd === 'both' || lowerEnd !== which,
+            }
+          }
+        }
+      }
+      if (best === null) {
+        // Port on the pipe's interior (an unsplit run under a tee): the fitting can only drain INTO it.
+        for (const connector of members) {
+          const distanceSource = pointToSegmentDistance(connector.end!, pipe.start!, pipe.end!)
+          if (distanceSource <= toleranceSource && (best === null || distanceSource < best.distanceSource)) {
+            best = { pipe, connector, which: 'interior', distanceSource, drainsIn: false, drainsOut: true }
+          }
+        }
+      }
+      if (best !== null) attached.push(best)
+    }
+    // pipe ↔ connector at the port
+    for (const entry of attached) {
+      const distanceM = entry.distanceSource * metersPerSourceUnit
+      pushJunction(
+        { fromExpressId: entry.pipe.expressId, intoExpressId: entry.connector.expressId, distanceM, upstream: entry.drainsIn, continuation: false },
+        false,
+      )
+      pushJunction(
+        { fromExpressId: entry.connector.expressId, intoExpressId: entry.pipe.expressId, distanceM, upstream: entry.drainsOut, continuation: false },
+        false,
+      )
+    }
+    // connector ↔ connector inside the body (both ways: one body)
+    for (const a of members) {
+      for (const b of members) {
+        if (a.expressId === b.expressId) continue
+        pushJunction({ fromExpressId: a.expressId, intoExpressId: b.expressId, distanceM: 0, upstream: true, continuation: false }, false)
+      }
+    }
+    // pipe → pipe through the body (what the role rule sees)
+    for (const from of attached) {
+      if (!from.drainsIn) continue
+      for (const into of attached) {
+        if (into.pipe.expressId === from.pipe.expressId || !into.drainsOut) continue
+        pushJunction(
+          {
+            fromExpressId: from.pipe.expressId,
+            intoExpressId: into.pipe.expressId,
+            distanceM: (from.distanceSource + into.distanceSource) * metersPerSourceUnit,
+            upstream: true,
+            continuation: segmentAngleDeg(from.pipe, into.pipe) <= ENGINEER_CONTINUATION_ANGLE_DEG,
+            viaFittingExpressId: fittingId,
+          },
+          true,
+        )
       }
     }
   }
@@ -819,7 +1017,7 @@ export function classifyEngineerRunRoles(
   const roles = new Map<number, EngineerRunRole>()
   let collectorCount = 0
   for (const segment of resolved) {
-    const upstreamCount = upstreamJoins.get(segment.expressId)?.size ?? 0
+    const upstreamCount = isFittingConnector(segment) ? 0 : (upstreamJoins.get(segment.expressId)?.size ?? 0)
     const role: EngineerRunRole = upstreamCount >= 2 ? 'collector' : 'branch'
     if (role === 'collector') collectorCount += 1
     roles.set(segment.expressId, role)

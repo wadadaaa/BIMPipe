@@ -183,6 +183,16 @@ export const STACK_STYLE = {
   /** Crosshair half-length as a multiple of the circle radius. */
   crosshairFactor: 1.5,
   crosshairMm: 0.18,
+  /**
+   * Vent stack symbol (R3): an OPEN circle (white) with a centre dot in the
+   * vent colour instead of the sanitary stack's solid fill, so a vent is told
+   * apart from a sanitary stack at a glance even in greyscale; the dot radius
+   * is this fraction of the circle radius.
+   */
+  ventOpenFill: '#ffffff',
+  ventDotFactor: 0.38,
+  /** Tag pill text carries the system code first ("SW-GRV ø110 mm (1.3ק)", "VNT ø110 mm (1.4ק)"). */
+  tagWithSystemCode: true,
   /** Tag pill. */
   pillStroke: '#000000',
   pillStrokeMm: 0.18,

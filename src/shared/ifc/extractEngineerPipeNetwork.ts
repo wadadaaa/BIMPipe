@@ -1,11 +1,14 @@
 import { Matrix4, Vector3 } from 'three'
 import type { IfcAPI } from 'web-ifc'
-import type {
-  EngineerEndpointSource,
-  EngineerPipeNetwork,
-  EngineerPipeSegment,
-  EngineerPoint3,
-  EngineerStoreyRef,
+import {
+  ENGINEER_FITTING_MAX_PORTS,
+  ENGINEER_JUNCTION_TOLERANCE_M,
+  fittingConnectorExpressId,
+  type EngineerEndpointSource,
+  type EngineerPipeNetwork,
+  type EngineerPipeSegment,
+  type EngineerPoint3,
+  type EngineerStoreyRef,
 } from '@/domain/engineerPipes'
 import type { StoreyId } from '@/domain/types'
 import { dropIsolatedOriginVertices } from '@/shared/frame/originArtifacts'
@@ -40,7 +43,11 @@ import { resolveModelLengthUnit } from './resolveModelLengthUnit'
  *   to metres; absent values surface as null, never fabricated),
  * - containing storey and owning IfcSystem name,
  * - a `geometrySummary` with segment counts per endpoint source and the
- *   express IDs of segments whose centreline could not be resolved.
+ *   express IDs of segments whose centreline could not be resolved,
+ * - (R3) `fittingConnectors`: matching-system IfcFlowFitting / IfcPipeFitting
+ *   occurrences (elbows, tees, wyes, reducers) rendered as one short connector
+ *   per port, body origin → port, so a drawn network is continuous where the
+ *   pipes meet through fitting bodies; with a `fittingSummary` census.
  *
  * Known approximations (documented, not silent):
  * - IfcMappedItem representations are resolved one level deep with the
@@ -77,9 +84,40 @@ export interface EngineerGeometrySummary {
 /** Outcome of one centreline strategy: geometry, or a one-line reason it did not apply. */
 type GeometryAttempt = { geometry: SegmentGeometry; reason: null } | { geometry: null; reason: string }
 
+/**
+ * Fitting connector census (R3): how many matching-system IfcFlowFitting /
+ * IfcPipeFitting occurrences were seen, how many connectors they yielded and
+ * why the rest were skipped. Counts only — no names leave this module.
+ */
+export interface EngineerFittingSummary {
+  /** Matching-system fitting occurrences. */
+  fittings: number
+  /** Connectors emitted (one per usable port). */
+  connectors: number
+  /** Fittings by number of ports (key = port count as text). */
+  byPortCount: Record<string, number>
+  /** Fittings whose placement origin was replaced by the port centroid (origin off the body). */
+  originReplacedByPortCentroid: number
+  /** Fittings (expressId ascending) that yielded no connector, each with a one-line reason. */
+  skipped: Array<{ expressId: number; reason: string }>
+}
+
 export interface ExtractedEngineerPipeNetwork extends EngineerPipeNetwork {
   geometrySummary: EngineerGeometrySummary
+  fittingConnectors: EngineerPipeSegment[]
+  fittingSummary: EngineerFittingSummary
 }
+
+/**
+ * A fitting whose placement origin lies farther than this from one of its
+ * ports is not modelled around its body (measured: origin → port ≤ 0.22 m on
+ * both client files, always inside the mesh box); the port centroid is used
+ * instead and the case is counted.
+ */
+export const ENGINEER_FITTING_MAX_ORIGIN_REACH_M = 0.5
+
+/** Connectors shorter than this (origin sitting on the port face) are not emitted. */
+const MIN_FITTING_CONNECTOR_LENGTH_M = 0.001
 
 export interface ExtractEngineerPipeNetworkOptions {
   /**
@@ -794,6 +832,105 @@ function extractMeshBoundsGeometry(
   return { geometry: { start, end, endpointSource: 'mesh-bounds', outerDiameterMm: null }, reason: null }
 }
 
+function readWorldPosition(api: IfcAPI, webIfcModelId: number, placementId: number): EngineerPoint3 | null {
+  const elements = resolveLocalPlacementWorldMatrix(api, webIfcModelId, placementId).elements
+  const position = { x: elements[12], y: elements[13], z: elements[14] }
+  return [position.x, position.y, position.z].every(Number.isFinite) ? position : null
+}
+
+/**
+ * Connectors of one fitting: body origin (ObjectPlacement) → each port
+ * (IfcDistributionPort placement), ports in ascending express-ID order. The
+ * diameter of a connector is borrowed from the pipe whose end lies within
+ * {@link ENGINEER_JUNCTION_TOLERANCE_M} of its port (null when none does).
+ * A fitting with fewer than two ports (a cap, an unresolved body) yields no
+ * connector and is reported with a reason.
+ */
+function extractFittingConnectors(
+  api: IfcAPI,
+  webIfcModelId: number,
+  fitting: { expressId: number; systemName: string },
+  portIds: readonly number[] | undefined,
+  pipeSegments: readonly EngineerPipeSegment[],
+  metersPerSourceUnit: number,
+  storey: { storeyId: StoreyId | null; storeyName: string | null },
+): { connectors: EngineerPipeSegment[]; reason: string | null; originReplaced: boolean; portCount: number } {
+  const portCount = portIds?.length ?? 0
+  if (portIds === undefined || portCount === 0) return { connectors: [], reason: 'no ports', originReplaced: false, portCount }
+  if (portCount === 1) return { connectors: [], reason: 'single port', originReplaced: false, portCount }
+  if (portCount > ENGINEER_FITTING_MAX_PORTS) {
+    return { connectors: [], reason: `${portCount} ports (more than ${ENGINEER_FITTING_MAX_PORTS})`, originReplaced: false, portCount }
+  }
+
+  const ports: EngineerPoint3[] = []
+  for (const portId of portIds) {
+    const port = api.GetLine(webIfcModelId, portId, false) as IfcLine
+    const placementId = (port?.ObjectPlacement as IfcHandle)?.value
+    if (typeof placementId !== 'number') return { connectors: [], reason: 'port without placement', originReplaced: false, portCount }
+    const position = readWorldPosition(api, webIfcModelId, placementId)
+    if (position === null) return { connectors: [], reason: 'port placement not finite', originReplaced: false, portCount }
+    ports.push(position)
+  }
+
+  const line = api.GetLine(webIfcModelId, fitting.expressId, false) as IfcLine
+  const placementId = (line?.ObjectPlacement as IfcHandle)?.value
+  let origin = typeof placementId === 'number' ? readWorldPosition(api, webIfcModelId, placementId) : null
+  let originReplaced = false
+  const reachSource = ENGINEER_FITTING_MAX_ORIGIN_REACH_M / metersPerSourceUnit
+  if (origin === null || ports.some((port) => distanceSource(port, origin!) > reachSource)) {
+    origin = {
+      x: ports.reduce((sum, port) => sum + port.x, 0) / ports.length,
+      y: ports.reduce((sum, port) => sum + port.y, 0) / ports.length,
+      z: ports.reduce((sum, port) => sum + port.z, 0) / ports.length,
+    }
+    originReplaced = true
+  }
+
+  const name: string | null = line?.Name?.value ?? null
+  const tagValue: unknown = line?.Tag?.value
+  const tag: string | null =
+    typeof tagValue === 'string' ? tagValue : typeof tagValue === 'number' ? String(tagValue) : null
+  const junctionSource = ENGINEER_JUNCTION_TOLERANCE_M / metersPerSourceUnit
+  const minLengthSource = MIN_FITTING_CONNECTOR_LENGTH_M / metersPerSourceUnit
+
+  const connectors: EngineerPipeSegment[] = []
+  ports.forEach((port, portIndex) => {
+    if (distanceSource(port, origin!) < minLengthSource) return
+    let diameterMm: number | null = null
+    let nearest = Infinity
+    for (const pipe of pipeSegments) {
+      if (pipe.start === null || pipe.end === null || pipe.outerDiameterMm === null) continue
+      const distance = Math.min(distanceSource(pipe.start, port), distanceSource(pipe.end, port))
+      if (distance <= junctionSource && distance < nearest) {
+        nearest = distance
+        diameterMm = pipe.outerDiameterMm
+      }
+    }
+    connectors.push({
+      expressId: fittingConnectorExpressId(fitting.expressId, portIndex),
+      name,
+      tag,
+      systemName: fitting.systemName,
+      storeyId: storey.storeyId,
+      storeyName: storey.storeyName,
+      start: origin!,
+      end: port,
+      endpointSource: 'distribution-ports',
+      outerDiameterMm: diameterMm,
+      lengthM: null,
+      invertElevationM: null,
+      elementKind: 'fitting',
+      fittingExpressId: fitting.expressId,
+    })
+  })
+  if (connectors.length === 0) return { connectors, reason: 'every port coincides with the origin', originReplaced, portCount }
+  return { connectors, reason: null, originReplaced, portCount }
+}
+
+function distanceSource(a: EngineerPoint3, b: EngineerPoint3): number {
+  return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2)
+}
+
 /**
  * Extracts the engineer pipe network from an already-opened plumbing IFC,
  * filtered to the requested system prefixes. See module doc for guarantees.
@@ -804,8 +941,15 @@ export async function extractEngineerPipeNetwork(
   webIfcModelId: number,
   options: ExtractEngineerPipeNetworkOptions,
 ): Promise<ExtractedEngineerPipeNetwork> {
-  const { IFCFLOWSEGMENT, IFCPIPESEGMENT, IFCEXTRUDEDAREASOLID, IFCMAPPEDITEM, IFCCIRCLEPROFILEDEF } =
-    await import('web-ifc')
+  const {
+    IFCFLOWSEGMENT,
+    IFCPIPESEGMENT,
+    IFCFLOWFITTING,
+    IFCPIPEFITTING,
+    IFCEXTRUDEDAREASOLID,
+    IFCMAPPEDITEM,
+    IFCCIRCLEPROFILEDEF,
+  } = await import('web-ifc')
 
   const metersPerSourceUnit = await resolveMetersPerSourceUnit(api, webIfcModelId)
   const storeys = await readStoreys(api, webIfcModelId)
@@ -836,9 +980,24 @@ export async function extractEngineerPipeNetwork(
   }
   candidates.sort((a, b) => a.expressId - b.expressId)
 
+  const fittingCandidates: Array<{ expressId: number; systemName: string }> = []
+  for (const typeConstant of [IFCFLOWFITTING, IFCPIPEFITTING]) {
+    const ids = api.GetLineIDsWithType(webIfcModelId, typeConstant)
+    for (let i = 0; i < ids.size(); i++) {
+      const expressId = ids.get(i)
+      const systemName = matchSystemName(expressId)
+      if (systemName !== null) fittingCandidates.push({ expressId, systemName })
+    }
+  }
+  fittingCandidates.sort((a, b) => a.expressId - b.expressId)
+
   const candidateIdSet = new Set(candidates.map((candidate) => candidate.expressId))
   const psetMap = await buildPipePsetMap(api, webIfcModelId, candidateIdSet)
-  const portsMap = await buildElementPortsMap(api, webIfcModelId, candidateIdSet)
+  const portsMap = await buildElementPortsMap(
+    api,
+    webIfcModelId,
+    new Set([...candidateIdSet, ...fittingCandidates.map((fitting) => fitting.expressId)]),
+  )
 
   const geometryTypeIds = { IFCEXTRUDEDAREASOLID, IFCMAPPEDITEM, IFCCIRCLEPROFILEDEF }
   const endpointSourceCounts: EngineerGeometrySummary['endpointSourceCounts'] = {
@@ -914,10 +1073,46 @@ export async function extractEngineerPipeNetwork(
     }
   })
 
+  // --- fitting connectors (R3) -------------------------------------------------
+  const fittingConnectors: EngineerPipeSegment[] = []
+  const fittingSummary: EngineerFittingSummary = {
+    fittings: fittingCandidates.length,
+    connectors: 0,
+    byPortCount: {},
+    originReplacedByPortCentroid: 0,
+    skipped: [],
+  }
+  for (const fitting of fittingCandidates) {
+    const storeyId = elementToStorey.get(fitting.expressId) ?? null
+    let outcome: ReturnType<typeof extractFittingConnectors>
+    try {
+      outcome = extractFittingConnectors(api, webIfcModelId, fitting, portsMap.get(fitting.expressId), segments, metersPerSourceUnit, {
+        storeyId,
+        storeyName: storeyId !== null ? (storeyNameById.get(storeyId) ?? null) : null,
+      })
+    } catch (error) {
+      outcome = {
+        connectors: [],
+        reason: `fitting unreadable (${error instanceof Error ? error.message : String(error)})`,
+        originReplaced: false,
+        portCount: portsMap.get(fitting.expressId)?.length ?? 0,
+      }
+    }
+    const portKey = String(outcome.portCount)
+    fittingSummary.byPortCount[portKey] = (fittingSummary.byPortCount[portKey] ?? 0) + 1
+    if (outcome.originReplaced) fittingSummary.originReplacedByPortCentroid += 1
+    if (outcome.reason !== null) fittingSummary.skipped.push({ expressId: fitting.expressId, reason: outcome.reason })
+    fittingConnectors.push(...outcome.connectors)
+  }
+  fittingConnectors.sort((a, b) => a.expressId - b.expressId)
+  fittingSummary.connectors = fittingConnectors.length
+
   return {
     metersPerSourceUnit,
     storeys,
     segments,
+    fittingConnectors,
     geometrySummary: { endpointSourceCounts, unresolvedSegments },
+    fittingSummary,
   }
 }

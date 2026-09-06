@@ -27,7 +27,11 @@ import {
   selectEngineerServedStacks,
   classifyEngineerRiserStacks,
   classifyEngineerRunRoles,
+  decodeFittingConnectorExpressId,
   deriveStoreyPitchM,
+  ENGINEER_FITTING_MAX_PORTS,
+  fittingConnectorExpressId,
+  isFittingConnector,
   engineerSegmentHorizontalLengthM,
   engineerSegmentSlopePercent,
   isVerticalEngineerSegment,
@@ -833,5 +837,162 @@ describe('classifyEngineerRunRoles', () => {
     expect(a.roles.has(13)).toBe(false)
     expect([...a.roles.entries()]).toEqual([...b.roles.entries()])
     expect(a.junctions).toEqual(b.junctions)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Fitting connectors (R3)
+// ---------------------------------------------------------------------------
+
+/** Connector of fitting `fittingId`: body origin → port `portIndex`. */
+function connector(
+  fittingId: number,
+  portIndex: number,
+  origin: [number, number, number],
+  port: [number, number, number],
+  overrides: Partial<EngineerPipeSegment> = {},
+): EngineerPipeSegment {
+  return segment({
+    expressId: fittingConnectorExpressId(fittingId, portIndex),
+    elementKind: 'fitting',
+    fittingExpressId: fittingId,
+    start: { x: origin[0], y: origin[1], z: origin[2] },
+    end: { x: port[0], y: port[1], z: port[2] },
+    endpointSource: 'distribution-ports',
+    lengthM: null,
+    ...overrides,
+  })
+}
+
+describe('fittingConnectorExpressId', () => {
+  it('is negative, unique per (fitting, port) and decodable', () => {
+    const seen = new Set<number>()
+    for (const fittingId of [1, 2, 4093, 1_000_003]) {
+      for (let port = 0; port < ENGINEER_FITTING_MAX_PORTS; port++) {
+        const id = fittingConnectorExpressId(fittingId, port)
+        expect(id).toBeLessThan(0)
+        expect(Number.isInteger(id)).toBe(true)
+        expect(seen.has(id)).toBe(false)
+        seen.add(id)
+        expect(decodeFittingConnectorExpressId(id)).toEqual({ fittingExpressId: fittingId, portIndex: port })
+      }
+    }
+    expect(decodeFittingConnectorExpressId(17)).toBeNull()
+    expect(decodeFittingConnectorExpressId(0)).toBeNull()
+    expect(isFittingConnector(connector(9, 0, [0, 0, 0], [1, 0, 0]))).toBe(true)
+    expect(isFittingConnector(horizontal(1, 0, 0, 1, 0, 0))).toBe(false)
+  })
+})
+
+describe('selectEngineerStoreyHorizontals with fitting connectors', () => {
+  const band = { bottomM: 3, topM: 6 }
+  const options = { systemPrefixes: ['XX-GRV'] }
+  const net: EngineerPipeNetwork = {
+    ...network([horizontal(1, 0, 0, 200, 0, 350), horizontal(2, 0, 0, 200, 0, 275)]),
+    fittingConnectors: [
+      connector(50, 0, [200, 0, 350], [205, 0, 350]), // horizontal, in band
+      connector(50, 1, [200, 0, 350], [200, 0, 340]), // vertical (elbow turning down): never a horizontal
+      connector(51, 0, [0, 0, 275], [-5, 0, 275]), // in hang band
+      connector(52, 0, [0, 0, 100], [-5, 0, 100]), // below the hang band
+      connector(53, 0, [0, 0, 350], [-5, 0, 350], { systemName: 'XX-VNT 1' }), // other system
+    ],
+  }
+
+  it('leaves connectors out by default (pipe-only pins keep their meaning)', () => {
+    const selection = selectEngineerStoreyHorizontals(net, band, options)
+    expect(selection.horizontals.map((entry) => entry.segment.expressId)).toEqual([1, 2])
+    expect(selection.fittingConnectorCount).toBe(0)
+  })
+
+  it('admits connectors under the same system, verticality and band rules, counted apart from the pipes', () => {
+    const selection = selectEngineerStoreyHorizontals(net, band, { ...options, includeFittingConnectors: true })
+    expect(selection.horizontals.map((entry) => [entry.segment.expressId, entry.rule])).toEqual([
+      [fittingConnectorExpressId(51, 0), 'in-hang'],
+      [fittingConnectorExpressId(50, 0), 'in-band'],
+      [1, 'in-band'],
+      [2, 'in-hang'],
+    ])
+    expect(selection.fittingConnectorCount).toBe(2)
+    expect(selection.inBandCount).toBe(1)
+    expect(selection.inHangCount).toBe(1)
+    expect(selection.bothCount).toBe(0)
+    expect(selection.unresolvedCount).toBe(0)
+  })
+})
+
+describe('classifyEngineerRunRoles through fitting bodies', () => {
+  // Main run in two pieces (U upstream, D downstream) meeting at a tee at x = 300;
+  // branch B enters the tee's side port. Bodies: tee T (id 70) origin (300, 0, 94),
+  // ports 6 cm out along each arm. Nothing touches directly (gaps ≥ 6 cm > 5 cm tolerance).
+  const upstreamRun = horizontal(10, 0, 0, 294, 0, 100, 94.1)
+  const downstreamRun = horizontal(20, 306, 0, 600, 0, 93.9, 88)
+  const branch = horizontal(30, 300, 300, 300, 6, 100, 94.1)
+  const tee = [
+    connector(70, 0, [300, 0, 94], [294, 0, 94]),
+    connector(70, 1, [300, 0, 94], [306, 0, 94]),
+    connector(70, 2, [300, 0, 94], [300, 6, 94]),
+  ]
+  const c = (port: number) => fittingConnectorExpressId(70, port)
+
+  it('joins the pipes pipe → pipe through the body with the pipes\' own flow direction', () => {
+    const roles = classifyEngineerRunRoles([...tee, branch, downstreamRun, upstreamRun], 0.01)
+    const viaTee = roles.junctions.filter((junction) => junction.viaFittingExpressId === 70)
+    expect(viaTee.map((junction) => [junction.fromExpressId, junction.intoExpressId, junction.continuation])).toEqual([
+      [10, 20, true], // U continues into D through the tee
+      [30, 20, false], // the branch joins D laterally
+    ])
+    // U → D is a continuation and the branch is one lateral feed: D collects nothing yet.
+    expect(roles.roles.get(20)).toBe('branch')
+    expect(roles.roles.get(10)).toBe('branch')
+    for (const member of tee) expect(roles.roles.get(member.expressId)).toBe('branch')
+  })
+
+  it('a second lateral feed through another tee makes the downstream run a collector', () => {
+    const branch2 = horizontal(40, 500, -300, 500, -6, 99, 93)
+    const tee2 = [
+      connector(80, 0, [500, 0, 92], [494, 0, 92]),
+      connector(80, 1, [500, 0, 92], [506, 0, 92]),
+      connector(80, 2, [500, 0, 92], [500, -6, 92]),
+    ]
+    // Split D so tee2 sits between two pieces of it.
+    const dA = horizontal(20, 306, 0, 494, 0, 93.9, 92.1)
+    const dB = horizontal(21, 506, 0, 800, 0, 91.9, 88)
+    const roles = classifyEngineerRunRoles([...tee, ...tee2, branch, branch2, dA, dB, upstreamRun], 0.01)
+    expect(roles.roles.get(21)).toBe('branch') // only branch2 feeds dB laterally (dA continues)
+    expect(roles.roles.get(20)).toBe('branch') // only branch feeds dA laterally
+    // Add a third branch straight onto dB's interior (a direct joint): dB now has 2 lateral feeds.
+    const branch3 = horizontal(50, 700, 200, 700, 0, 95, 89.6)
+    const withThird = classifyEngineerRunRoles([...tee, ...tee2, branch, branch2, branch3, dA, dB, upstreamRun], 0.01)
+    expect(withThird.roles.get(21)).toBe('collector')
+    expect(withThird.collectorCount).toBe(1)
+  })
+
+  it('flow junctions run feeder → connector → connector → outlet and never back up a pipe', () => {
+    const roles = classifyEngineerRunRoles([...tee, branch, downstreamRun, upstreamRun], 0.01)
+    const flow = new Map<number, number[]>()
+    for (const junction of roles.junctions) {
+      if (!junction.upstream) continue
+      flow.set(junction.fromExpressId, [...(flow.get(junction.fromExpressId) ?? []), junction.intoExpressId].sort((a, b) => a - b))
+    }
+    // U and the branch drain into their connectors (and, via the body, into D).
+    expect(flow.get(10)).toEqual([c(0), 20].sort((a, b) => a - b))
+    expect(flow.get(30)).toEqual([c(2), 20].sort((a, b) => a - b))
+    // Connectors of one body drain into each other; the outlet connector drains into D.
+    expect(flow.get(c(0))).toEqual([c(1), c(2)].sort((a, b) => a - b))
+    expect(flow.get(c(1))).toEqual([c(0), c(2), 20].sort((a, b) => a - b))
+    // Nothing drains from a connector back into the feeders U or the branch.
+    expect(flow.get(c(1))).not.toContain(10)
+    expect(flow.get(c(2))).not.toContain(30)
+    // D drains nowhere (its lower end is free).
+    expect(flow.get(20)).toBeUndefined()
+  })
+
+  it('behaves exactly as before on a pipe-only input', () => {
+    const collector = horizontal(10, 0, 0, 600, 0, 100, 88)
+    const branchA = horizontal(11, 200, 300, 200, 0, 102, 96)
+    const branchB = horizontal(12, 400, -300, 400, 0, 98, 92)
+    const roles = classifyEngineerRunRoles([branchB, collector, branchA], 0.01)
+    expect(roles.roles.get(10)).toBe('collector')
+    expect(roles.junctions.every((junction) => junction.viaFittingExpressId === undefined)).toBe(true)
   })
 })

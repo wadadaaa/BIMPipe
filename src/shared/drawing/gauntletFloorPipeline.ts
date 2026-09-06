@@ -21,6 +21,7 @@ import {
   classifyEngineerRiserStacks,
   classifyEngineerRunRoles,
   ENGINEER_FITTING_BRIDGE_TOLERANCE_M,
+  isFittingConnector,
   selectEngineerBranchSegments,
   selectEngineerServedStacks,
   selectEngineerStoreyHorizontals,
@@ -43,7 +44,11 @@ import {
 } from '@/shared/ifc/buildContinuityMapForModel'
 import { detectMergedStoreyFixtures } from '@/shared/ifc/detectMergedStoreyFixtures'
 import { extractContinuityStoreyInputs } from '@/shared/ifc/extractContinuityInputs'
-import { extractEngineerPipeNetwork, type ExtractedEngineerPipeNetwork } from '@/shared/ifc/extractEngineerPipeNetwork'
+import {
+  extractEngineerPipeNetwork,
+  type EngineerFittingSummary,
+  type ExtractedEngineerPipeNetwork,
+} from '@/shared/ifc/extractEngineerPipeNetwork'
 import { extractFloorMeshes } from '@/shared/ifc/extractFloorMeshes'
 import { parseStoreys } from '@/shared/ifc/parseStoreys'
 import { readBuildingPlacementSourcePoint } from '@/shared/ifc/readBuildingPlacement'
@@ -146,8 +151,11 @@ export interface GauntletHangBandRunEvidence {
  * shared-fixture branch ratio (`computeSharedFixtureSet`).
  */
 export interface GauntletEngineerRunGeometry {
+  /** Segment express id; negative for a fitting connector (`fittingConnectorExpressId`). */
   expressId: number
   rule: EngineerStoreyHorizontalRule
+  /** True for a fitting-body connector (R3); its length counts like a run's, its ends are ports. */
+  fitting: boolean
   diameterMm: number | null
   planLengthM: number
   /** Higher endpoint (where a fixture drop meets the run). */
@@ -174,8 +182,19 @@ export interface GauntletEngineerBranchRuns {
    * `buildEngineerFloorDrawing` draws. `totalM` sums plan-projected lengths,
    * the same measure as our branch runs.
    */
-  union: { segments: number; inBandOnly: number; inHangOnly: number; both: number; totalM: number }
-  /** Per hang-band run (rule `in-hang` or `both`): nearest-fixture distances of its upstream end. */
+  union: {
+    /** Pipe runs + fitting connectors in the set. */
+    segments: number
+    inBandOnly: number
+    inHangOnly: number
+    both: number
+    /** Plan length of pipes + connectors. */
+    totalM: number
+    /** (R3) Fitting connectors in the set and their plan length (included in `segments` / `totalM`). */
+    fittingConnectors: number
+    fittingConnectorsM: number
+  }
+  /** Per hang-band PIPE run (rule `in-hang` or `both`): nearest-fixture distances of its upstream end. */
   hangBandRuns: GauntletHangBandRunEvidence[]
   /** Every union-set run with geometry and connectivity (sorted by expressId). */
   runs: GauntletEngineerRunGeometry[]
@@ -197,7 +216,11 @@ export interface GauntletMetricsInput {
     inBand: number
     inHang: number
     both: number
+    /** Pipe runs of the union set (connectors excluded). */
     total: number
+    /** (R3) Fitting connectors admitted by the same band rule, with the extractor's census. */
+    fittingConnectors: number
+    fittingSummary: EngineerFittingSummary
     literalBandSelection: {
       segments: number
       byGeometry: number
@@ -327,27 +350,36 @@ function buildEngineerBranchRuns(
   let inBandOnly = 0
   let inHangOnly = 0
   let both = 0
+  let fittingConnectors = 0
+  let fittingConnectorsM = 0
   const hangBandRuns: GauntletHangBandRunEvidence[] = []
   const runs: GauntletEngineerRunGeometry[] = []
   for (const entry of hangSelection.horizontals) {
+    const fitting = isFittingConnector(entry.segment)
     const start = ifcSourceToDrawing(entry.segment.start!, metersPerSourceUnit)
     const end = ifcSourceToDrawing(entry.segment.end!, metersPerSourceUnit)
     const planLengthM = Math.hypot(end.xM - start.xM, end.yM - start.yM)
     unionTotalM += planLengthM
-    if (entry.rule === 'in-band') inBandOnly += 1
+    if (fitting) {
+      fittingConnectors += 1
+      fittingConnectorsM += planLengthM
+    } else if (entry.rule === 'in-band') inBandOnly += 1
     else if (entry.rule === 'in-hang') inHangOnly += 1
     else both += 1
-    const upstream = entry.segment.start!.z >= entry.segment.end!.z ? start : end
+    // A connector's "upstream" end is its port (where a pipe or a drop meets
+    // the body), never the body origin.
+    const upstream = fitting ? end : entry.segment.start!.z >= entry.segment.end!.z ? start : end
     runs.push({
       expressId: entry.segment.expressId,
       rule: entry.rule,
+      fitting,
       diameterMm: entry.segment.outerDiameterMm,
       planLengthM,
       upstream,
       downstream: upstream === start ? end : start,
       drainsInto: [...(drainsIntoByRun.get(entry.segment.expressId) ?? [])].sort((a, b) => a - b),
     })
-    if (entry.rule === 'in-band') continue
+    if (fitting || entry.rule === 'in-band') continue
     hangBandRuns.push({
       expressId: entry.segment.expressId,
       rule: entry.rule,
@@ -360,7 +392,15 @@ function buildEngineerBranchRuns(
   for (const segment of literalBand.segments) literalTotalM += segment.lengthM ?? 0
   return {
     literalBand: { segments: literalBand.segments.length, byContainment: literalBand.byContainmentCount, totalM: literalTotalM },
-    union: { segments: hangSelection.horizontals.length, inBandOnly, inHangOnly, both, totalM: unionTotalM },
+    union: {
+      segments: hangSelection.horizontals.length,
+      inBandOnly,
+      inHangOnly,
+      both,
+      totalM: unionTotalM,
+      fittingConnectors,
+      fittingConnectorsM,
+    },
     hangBandRuns,
     runs,
     connectivityToleranceM: connectivity.toleranceM,
@@ -560,7 +600,9 @@ export async function runGauntletFloorPipeline(
 
   // --- comparison metrics (as the page computes them) -------------------------
   const literalBand = selectEngineerBranchSegments(network, band)
-  const hangSelection = selectEngineerStoreyHorizontals(network, band)
+  // The compared / drawn set (R3): pipes AND fitting connectors of the storey
+  // band ∪ hang band — the same set `buildEngineerFloorDrawing` draws.
+  const hangSelection = selectEngineerStoreyHorizontals(network, band, { includeFittingConnectors: true })
   // Served-stack rule (R1): the compared engineer stacks are those a horizontal
   // of the storey joins; pass-through stacks are recorded, not compared.
   const servedStacks = selectEngineerServedStacks(
@@ -665,7 +707,9 @@ export async function runGauntletFloorPipeline(
       inBand: hangSelection.inBandCount,
       inHang: hangSelection.inHangCount,
       both: hangSelection.bothCount,
-      total: hangSelection.horizontals.length,
+      total: hangSelection.horizontals.length - hangSelection.fittingConnectorCount,
+      fittingConnectors: hangSelection.fittingConnectorCount,
+      fittingSummary: network.fittingSummary,
       literalBandSelection: {
         segments: literalBand.segments.length,
         byGeometry: literalBand.byGeometryCount,

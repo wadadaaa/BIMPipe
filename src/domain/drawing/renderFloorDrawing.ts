@@ -344,8 +344,13 @@ function renderPipeBand(pipe: DrawingPipeRun, frame: Frame): string {
   const style = PIPE_SYSTEM_STYLE[pipe.system]
   const { band, edge } = pipeBandPx(pipe, frame)
   const line = `x1="${fmt(a.x)}" y1="${fmt(a.y)}" x2="${fmt(b.x)}" y2="${fmt(b.y)}"`
+  // A fitting-body piece is capped round so the connectors of one body close
+  // their corner (elbow, tee) instead of leaving a mitre notch; pipes are drawn
+  // after connectors (id order) and their square ends cover the port side.
+  const linecap = pipe.fitting ? 'round' : 'butt'
+  const fittingAttr = pipe.fitting ? ' data-fitting="true"' : ''
   return [
-    `<g data-pipe="${escapeXml(pipe.id)}" data-role="${pipe.role}" stroke-linecap="butt">`,
+    `<g data-pipe="${escapeXml(pipe.id)}" data-role="${pipe.role}"${fittingAttr} stroke-linecap="${linecap}">`,
     // Edges sit inside the true-scale band so the overall width stays ø / scale.
     `<line ${line} stroke="${style.edge}" stroke-width="${fmt(band)}"/>`,
     `<line ${line} stroke="${style.fill}" stroke-width="${fmt(Math.max(band * 0.4, band - 2 * edge))}"/>`,
@@ -364,6 +369,9 @@ function renderFittings(pipes: readonly DrawingPipeRun[], risers: readonly Drawi
   const hubs = new Map<string, Collar>()
   const sockets: Collar[] = []
   for (const pipe of pipes) {
+    // A connector's ends are the body origin and a port: the collar belongs to
+    // the pipe end that enters the body, so connectors emit none.
+    if (pipe.fitting) continue
     const { band } = pipeBandPx(pipe, frame)
     const dx = pipe.end.xM - pipe.start.xM
     const dy = pipe.end.yM - pipe.start.yM
@@ -449,6 +457,7 @@ function renderPipeLabel(
   placed: readonly Quad[],
   labelBoxes: readonly Quad[],
 ): Placed | null {
+  if (pipe.fitting) return null // a fitting body carries no run label
   const a = frame.toSvg(pipe.start)
   const b = frame.toSvg(pipe.end)
   const dx = b.x - a.x
@@ -754,12 +763,24 @@ function renderStackSymbol(riser: DrawingRiser, frame: Frame): Placed {
   const r = stackRadiusPx(riser, frame)
   const cross = r * STACK_STYLE.crosshairFactor
   const style = PIPE_SYSTEM_STYLE[riser.system]
+  // Sanitary: solid disc in the system colour. Vent: open (white) circle with
+  // a centre dot in the vent colour — a different symbol, not only a colour.
+  const vent = riser.system === 'vent'
+  const disc = `<circle cx="${fmt(c.x)}" cy="${fmt(c.y)}" r="${fmt(r)}" fill="${vent ? STACK_STYLE.ventOpenFill : style.fill}" stroke="${STACK_STYLE.outline}" stroke-width="${fmt(frame.mm(STACK_STYLE.outlineMm))}"/>`
+  const dot = vent ? `<circle cx="${fmt(c.x)}" cy="${fmt(c.y)}" r="${fmt(r * STACK_STYLE.ventDotFactor)}" fill="${style.fill}"/>` : ''
   const svg =
-    `<g data-stack="${escapeXml(riser.id)}">` +
+    `<g data-stack="${escapeXml(riser.id)}" data-system="${riser.system}">` +
     `<path d="M${fmt(c.x - cross)} ${fmt(c.y)}H${fmt(c.x + cross)}M${fmt(c.x)} ${fmt(c.y - cross)}V${fmt(c.y + cross)}" stroke="${STACK_STYLE.outline}" stroke-width="${fmt(frame.mm(STACK_STYLE.crosshairMm))}"/>` +
-    `<circle cx="${fmt(c.x)}" cy="${fmt(c.y)}" r="${fmt(r)}" fill="${style.fill}" stroke="${STACK_STYLE.outline}" stroke-width="${fmt(frame.mm(STACK_STYLE.outlineMm))}"/>` +
+    disc +
+    dot +
     `</g>`
   return { svg, box: quadFromAabb(c.x - cross, c.y - cross, c.x + cross, c.y + cross) }
+}
+
+/** Pill text: system code, diameter, sheet tag — e.g. "VNT ø110 mm (1.4ק)". */
+export function formatStackTagText(riser: Pick<DrawingRiser, 'system' | 'diameterMm' | 'tag'>): string {
+  const code = STACK_STYLE.tagWithSystemCode ? `${PIPE_SYSTEM_STYLE[riser.system].code} ` : ''
+  return riser.diameterMm === null ? `${code}(${riser.tag})` : `${code}${formatDiameter(riser.diameterMm)} (${riser.tag})`
 }
 
 const TAG_OFFSETS: ReadonlyArray<readonly [number, number]> = [
@@ -780,7 +801,7 @@ function renderStackTag(riser: DrawingRiser, frame: Frame, placed: readonly Quad
   const r = stackRadiusPx(riser, frame)
   const fontPx = frame.mm(TEXT_STYLE.tagMm)
   const cap = fontPx * TEXT_STYLE.capHeightEm
-  const content = riser.diameterMm === null ? `(${riser.tag})` : `${formatDiameter(riser.diameterMm)} (${riser.tag})`
+  const content = formatStackTagText(riser)
   const padX = frame.mm(STACK_STYLE.pillPaddingXMm)
   const padY = frame.mm(STACK_STYLE.pillPaddingYMm)
   const pillW = textWidthPx(content, fontPx) + 2 * padX

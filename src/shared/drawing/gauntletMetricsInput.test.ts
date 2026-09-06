@@ -140,19 +140,21 @@ function pipelineInput(): GauntletMetricsInput {
       inHang: 4,
       both: 1,
       total: 5,
+      fittingConnectors: 0,
+      fittingSummary: { fittings: 0, connectors: 0, byPortCount: {}, originReplacedByPortCentroid: 0, skipped: [] },
       literalBandSelection: { segments: 2, byGeometry: 2, byContainment: 0, byContainmentRejected: 0, byContainmentRejectedLengthM: 0 },
     },
     engineerStacks: { intersecting: 2, served: 2, passThrough: [], joinToleranceM: 0.5 },
     engineerBranchRuns: {
       literalBand: { segments: 2, byContainment: 0, totalM: 6 },
-      union: { segments: 5, inBandOnly: 1, inHangOnly: 3, both: 1, totalM: 30 },
+      union: { segments: 5, inBandOnly: 1, inHangOnly: 3, both: 1, totalM: 30, fittingConnectors: 0, fittingConnectorsM: 0 },
       hangBandRuns: [],
       // Fixture 1 sits at viewer (1, z 0) → drawing (1, 0): run 101 starts 0.5 m from it and
       // drains into collector 102; run 103 starts far from every fixture.
       runs: [
-        { expressId: 101, rule: 'in-hang', diameterMm: 110, planLengthM: 2, upstream: { xM: 1.5, yM: 0 }, downstream: { xM: 1.5, yM: -2 }, drainsInto: [102] },
-        { expressId: 102, rule: 'in-hang', diameterMm: 110, planLengthM: 6, upstream: { xM: 1.5, yM: -2 }, downstream: { xM: 1.5, yM: -8 }, drainsInto: [] },
-        { expressId: 103, rule: 'both', diameterMm: 50, planLengthM: 22, upstream: { xM: 30, yM: 30 }, downstream: { xM: 30, yM: 8 }, drainsInto: [] },
+        { expressId: 101, rule: 'in-hang', fitting: false, diameterMm: 110, planLengthM: 2, upstream: { xM: 1.5, yM: 0 }, downstream: { xM: 1.5, yM: -2 }, drainsInto: [102] },
+        { expressId: 102, rule: 'in-hang', fitting: false, diameterMm: 110, planLengthM: 6, upstream: { xM: 1.5, yM: -2 }, downstream: { xM: 1.5, yM: -8 }, drainsInto: [] },
+        { expressId: 103, rule: 'both', fitting: false, diameterMm: 50, planLengthM: 22, upstream: { xM: 30, yM: 30 }, downstream: { xM: 30, yM: 8 }, drainsInto: [] },
       ],
       connectivityToleranceM: 0.15,
     },
@@ -191,13 +193,13 @@ describe('gauntletMetricsInputFromPipeline', () => {
     expect(input.fixtures).toEqual({ positioned: 2, routed: 1 })
     // Shared-set input in the drawing frame: viewer (x, z) → (xM, −z); only positioned fixtures, only storey-41 segments.
     expect(input.sharedFixtures.fixtures).toEqual([
-      { expressId: 1, xM: 1, yM: 0 },
-      { expressId: 2, xM: 9, yM: 0 },
+      { expressId: 1, kind: 'TOILETPAN', xM: 1, yM: 0 },
+      { expressId: 2, kind: 'SINK', xM: 9, yM: 0 },
     ])
     expect(input.sharedFixtures.routedFixtureExpressIds).toEqual([1])
     expect(input.sharedFixtures.ourSegments).toEqual([{ planLengthM: 1, servedFixtureExpressIds: [1] }])
     expect(input.sharedFixtures.engineerRuns.map((run) => run.id)).toEqual([101, 102, 103])
-    expect(input.sharedFixtures.engineerRuns[0]).toEqual({ id: 101, upstream: { xM: 1.5, yM: 0 }, planLengthM: 2, drainsInto: [102] })
+    expect(input.sharedFixtures.engineerRuns[0]).toEqual({ id: 101, upstream: { xM: 1.5, yM: 0 }, diameterMm: 110, planLengthM: 2, drainsInto: [102] })
 
     const metrics = computeGauntletMetrics(input)
     expect(metrics.obstruction).toBe(1)
@@ -254,8 +256,8 @@ describe('gauntletMetricsInputFromPipeline', () => {
     ]
     const input = gauntletMetricsInputFromPipeline(base)
     expect(input.sharedFixtures.fixtures).toEqual([
-      { expressId: 1, xM: 1, yM: 0.5 },
-      { expressId: 2, xM: 9, yM: 0 },
+      { expressId: 1, kind: 'TOILETPAN', xM: 1, yM: 0.5 },
+      { expressId: 2, kind: 'SINK', xM: 9, yM: 0 },
     ])
     expect(input.sharedFixtures.ourSegments).toEqual([{ planLengthM: 1, servedFixtureExpressIds: [1] }])
   })
@@ -263,7 +265,7 @@ describe('gauntletMetricsInputFromPipeline', () => {
   it('turns empty engineer sets into null totals and an empty engineer stack list without a band', () => {
     const base = pipelineInput()
     base.comparisonInput.storeyScope = null
-    base.engineerBranchRuns.union = { segments: 0, inBandOnly: 0, inHangOnly: 0, both: 0, totalM: 0 }
+    base.engineerBranchRuns.union = { segments: 0, inBandOnly: 0, inHangOnly: 0, both: 0, totalM: 0, fittingConnectors: 0, fittingConnectorsM: 0 }
     base.engineerBranchRuns.literalBand = { segments: 0, byContainment: 0, totalM: 0 }
     const input = gauntletMetricsInputFromPipeline(base)
     expect(input.engineerStacks).toEqual([])

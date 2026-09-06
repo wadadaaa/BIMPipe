@@ -70,14 +70,23 @@
  *   reached by no attribution (free ends far from every detected fixture, or
  *   joined through fittings longer than the bridge) are excluded from the
  *   shared denominator and counted in `engineerRunsUnattributed`.
- * Approximations, stated: the nearest-fixture rule cannot tell a Ø50 run
- * ending 0.9 m from a WC (really serving an unmodelled basin) from a WC drop;
- * the bridge tolerance misses joints through long fittings (reducer + wye),
- * which then look like free ends; both effects are visible through the
- * tolerance sensitivity the harness prints and the unattributed count.
+ * Diameter-compatible attribution (round 3). A run of nominal diameter below
+ * `WC_MIN_BRANCH_DIAMETER_MM` (110, `branchDefaults`) cannot serve a toilet:
+ * the direct attribution takes the nearest COMPATIBLE fixture within the
+ * tolerance; a Ø50/Ø63 run whose only fixtures within reach are WCs is
+ * unattributed (an engineer free end — the unmodelled basin/trap it really
+ * serves), counted in `engineerRunsRejectedByDiameter`. Runs without a
+ * diameter are compatible with every fixture (no evidence either way). The
+ * rule is the same on both floors; `wcMinBranchDiameterMm: 0` switches it off
+ * for the before/after comparison the harness prints.
+ * Approximations, stated: the bridge tolerance misses joints through long
+ * fittings (reducer + wye), which then look like free ends; the effect is
+ * visible through the tolerance sensitivity and the unattributed count.
  */
 
+import { WC_MIN_BRANCH_DIAMETER_MM } from './branchDefaults'
 import type { PlanPointM } from './engineerComparisonMetrics'
+import type { FixtureKind } from './types'
 
 export const OBSTRUCTION_MAX = 0
 export const STACKS_RATIO_MIN = 0.6
@@ -100,6 +109,8 @@ export const ENGINEER_SERVES_FIXTURE_M = 1.0
 /** A positioned fixture of the storey, drawing plan frame (metres). */
 export interface GauntletFixturePoint extends PlanPointM {
   expressId: number
+  /** Canonical fixture kind; decides which run diameters can serve it. */
+  kind: FixtureKind
 }
 
 /** One engineer horizontal run of the compared set, drawing plan frame (metres). */
@@ -108,6 +119,8 @@ export interface GauntletEngineerRun {
   id: number
   /** Upstream end: the higher endpoint, where a fixture drop meets the run. */
   upstream: PlanPointM
+  /** Nominal diameter; null when the file carries none (compatible with every fixture). */
+  diameterMm: number | null
   planLengthM: number
   /**
    * Ids of the runs this one drains into (its lower end touches them within
@@ -130,6 +143,19 @@ export interface GauntletSharedFixtureInput {
   engineerRuns: readonly GauntletEngineerRun[]
   /** Overrides {@link ENGINEER_SERVES_FIXTURE_M} (sensitivity runs). */
   servesFixtureM?: number
+  /** Overrides {@link WC_MIN_BRANCH_DIAMETER_MM}; 0 disables the diameter rule (before/after runs). */
+  wcMinBranchDiameterMm?: number
+}
+
+/**
+ * Can a run of this nominal diameter serve the fixture? Only the WC rule
+ * exists: a run narrower than {@link WC_MIN_BRANCH_DIAMETER_MM} cannot carry a
+ * toilet. Unknown diameters are compatible with everything.
+ */
+export function runDiameterServesFixture(diameterMm: number | null, kind: FixtureKind, wcMinBranchDiameterMm = WC_MIN_BRANCH_DIAMETER_MM): boolean {
+  if (diameterMm === null) return true
+  if (kind === 'TOILETPAN') return diameterMm >= wcMinBranchDiameterMm
+  return true
 }
 
 export interface GauntletSharedFixtureMetrics {
@@ -154,6 +180,13 @@ export interface GauntletSharedFixtureMetrics {
   /** Engineer runs no attribution reaches (excluded from the shared denominator). */
   engineerRunsUnattributed: number
   engineerRunsUnattributedM: number
+  /**
+   * Engineer runs whose upstream end lies within the tolerance of a fixture
+   * but of no diameter-compatible one (a Ø50/Ø63 run ending near a WC): left
+   * without a direct attribution by the diameter rule.
+   */
+  engineerRunsRejectedByDiameter: number
+  engineerRunsRejectedByDiameterM: number
   /** Engineer runs with no feeder whose upstream end has no detected fixture within the tolerance. */
   engineerLeafEndsWithoutFixture: number
 }
@@ -164,21 +197,36 @@ export interface GauntletSharedFixtureMetrics {
  */
 export function computeSharedFixtureSet(input: GauntletSharedFixtureInput): GauntletSharedFixtureMetrics {
   const servesFixtureM = input.servesFixtureM ?? ENGINEER_SERVES_FIXTURE_M
+  const wcMinBranchDiameterMm = input.wcMinBranchDiameterMm ?? WC_MIN_BRANCH_DIAMETER_MM
   const fixtureIds = new Set(input.fixtures.map((fixture) => fixture.expressId))
   const servedByUs = new Set(input.routedFixtureExpressIds.filter((id) => fixtureIds.has(id)))
 
-  // 1. Direct attribution: each run → nearest fixture within the tolerance of its upstream end.
+  // 1. Direct attribution: each run → nearest diameter-compatible fixture within
+  //    the tolerance of its upstream end. A run with fixtures in reach but none
+  //    compatible is rejected by the diameter rule (stays unattributed).
   const runById = new Map(input.engineerRuns.map((run) => [run.id, run]))
   const directFixtureByRun = new Map<number, number>()
+  let engineerRunsRejectedByDiameter = 0
+  let engineerRunsRejectedByDiameterM = 0
   for (const run of input.engineerRuns) {
     let nearest: { expressId: number; distance: number } | null = null
+    let incompatibleInReach = false
     for (const fixture of input.fixtures) {
       const distance = Math.hypot(fixture.xM - run.upstream.xM, fixture.yM - run.upstream.yM)
-      if (distance <= servesFixtureM && (nearest === null || distance < nearest.distance || (distance === nearest.distance && fixture.expressId < nearest.expressId))) {
+      if (distance > servesFixtureM) continue
+      if (!runDiameterServesFixture(run.diameterMm, fixture.kind, wcMinBranchDiameterMm)) {
+        incompatibleInReach = true
+        continue
+      }
+      if (nearest === null || distance < nearest.distance || (distance === nearest.distance && fixture.expressId < nearest.expressId)) {
         nearest = { expressId: fixture.expressId, distance }
       }
     }
     if (nearest !== null) directFixtureByRun.set(run.id, nearest.expressId)
+    else if (incompatibleInReach) {
+      engineerRunsRejectedByDiameter += 1
+      engineerRunsRejectedByDiameterM += run.planLengthM
+    }
   }
   const servedByEngineer = new Set(directFixtureByRun.values())
 
@@ -246,6 +294,8 @@ export function computeSharedFixtureSet(input: GauntletSharedFixtureInput): Gaun
     engineerRunsAttributed,
     engineerRunsUnattributed,
     engineerRunsUnattributedM,
+    engineerRunsRejectedByDiameter,
+    engineerRunsRejectedByDiameterM,
     engineerLeafEndsWithoutFixture,
   }
 }

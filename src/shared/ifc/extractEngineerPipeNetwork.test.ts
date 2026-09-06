@@ -4,7 +4,7 @@ import {
   filterOriginArtifacts,
   resolveMetersPerSourceUnit,
 } from './extractEngineerPipeNetwork'
-import { classifyEngineerRiserStacks } from '@/domain/engineerPipes'
+import { classifyEngineerRiserStacks, fittingConnectorExpressId } from '@/domain/engineerPipes'
 import type { IfcAPI } from 'web-ifc'
 
 /**
@@ -86,6 +86,8 @@ interface SyntheticModelOptions {
   derivedUnitLengthUnits?: boolean
   /** SI prefixes of stray LENGTHUNIT lines referenced by nothing (fallback-scan cases). */
   strayLengthUnitPrefixes?: Array<'MILLI' | 'CENTI' | 'DECI' | null>
+  /** Add an elbow IfcFlowFitting at the end of Branch 1, a single-port cap and a foreign-system elbow (R3). */
+  withFittings?: boolean
   /**
    * Revit "vertical pipe" export: a Ø110 cut face (IfcFaceBasedSurfaceModel,
    * 16-gon disc) with two IfcDistributionPorts spanning 100..450 cm.
@@ -295,6 +297,69 @@ function buildSyntheticPlumbingIfc(options: SyntheticModelOptions = {}): Synthet
     pipesByStorey.set(spec.storey, [...(pipesByStorey.get(spec.storey) ?? []), pipe])
     pipesBySystem.set(spec.system, [...(pipesBySystem.get(spec.system) ?? []), pipe])
     return pipe
+  }
+
+  /**
+   * A body-less IfcFlowFitting (Revit exports carry a mesh; only placement and
+   * ports matter here) with ports at local points relative to its placement.
+   */
+  const addFitting = (spec: {
+    name: string
+    locationCm: [number, number, number]
+    portsCm: Array<[number, number, number]>
+    system: string
+    storey: string
+  }): number => {
+    const location = b.add(`IFCCARTESIANPOINT((${spec.locationCm.map(formatStepNumber).join(',')}))`)
+    const placementAxis = b.add(`IFCAXIS2PLACEMENT3D(#${location},$,$)`)
+    const placement = b.add(`IFCLOCALPLACEMENT(#${buildingPlacement},#${placementAxis})`)
+    const fitting = b.add(`IFCFLOWFITTING('${b.guid()}',#${ownerHistory},'${spec.name}',$,$,#${placement},$,$)`)
+    for (const [index, portCm] of spec.portsCm.entries()) {
+      const portPoint = b.add(`IFCCARTESIANPOINT((${portCm.map(formatStepNumber).join(',')}))`)
+      const portAxis = b.add(`IFCAXIS2PLACEMENT3D(#${portPoint},$,$)`)
+      const portPlacement = b.add(`IFCLOCALPLACEMENT(#${placement},#${portAxis})`)
+      const port = b.add(
+        `IFCDISTRIBUTIONPORT('${b.guid()}',#${ownerHistory},'Port ${index}',$,$,#${portPlacement},$,.SOURCEANDSINK.)`,
+      )
+      b.add(`IFCRELCONNECTSPORTTOELEMENT('${b.guid()}',#${ownerHistory},$,$,#${port},#${fitting})`)
+    }
+    pipesByStorey.set(spec.storey, [...(pipesByStorey.get(spec.storey) ?? []), fitting])
+    pipesBySystem.set(spec.system, [...(pipesBySystem.get(spec.system) ?? []), fitting])
+    return fitting
+  }
+
+  if (options.withFittings) {
+    // Elbow at the downstream end of Branch 1 (which ends at ≈ (350, 200, 15)):
+    // body origin 5 cm past the pipe end, one port on the pipe end, one port
+    // turning +y. A single-port cap elsewhere yields no connector.
+    addFitting({
+      name: 'XX-GRV Elbow',
+      locationCm: [355, 200, 15],
+      portsCm: [
+        [-5, 0, 0],
+        [0, 5, 0],
+      ],
+      system: 'XX-GRV 1',
+      storey: 'Level A',
+    })
+    addFitting({
+      name: 'XX-GRV Cap',
+      locationCm: [800, 800, 15],
+      portsCm: [[0, 0, -3]],
+      system: 'XX-GRV 1',
+      storey: 'Level A',
+    })
+    // A fitting of another system is ignored entirely.
+    addFitting({
+      name: 'XX-CW Elbow',
+      locationCm: [50, 50, 300],
+      portsCm: [
+        [-5, 0, 0],
+        [0, 5, 0],
+      ],
+      system: 'XX-CW 1',
+      storey: 'Level A',
+    })
   }
 
   if (options.withCutFaceStack) {
@@ -616,6 +681,66 @@ describe('resolveMetersPerSourceUnit: project unit assignment first', () => {
     )
     try {
       await expect(resolveMetersPerSourceUnit(api, modelId)).rejects.toThrow(/ambiguous length unit/i)
+    } finally {
+      api.CloseModel(modelId)
+    }
+  })
+})
+
+describe('extractEngineerPipeNetwork: fitting connectors (R3)', () => {
+  it('turns a two-port IfcFlowFitting into origin → port connectors with the neighbouring pipe diameter; caps and foreign systems yield none', async () => {
+    const { api, modelId } = await openModel(buildSyntheticPlumbingIfc({ withFittings: true }).text)
+    try {
+      const network = await extractEngineerPipeNetwork(api, modelId, { systemPrefixes: ['XX-GRV'] })
+      const pipeOnly = await extractEngineerPipeNetwork(api, modelId, { systemPrefixes: ['XX-GRV'] })
+      // Pipe extraction is untouched by fittings (same segments, no fitting among them).
+      expect(pipeOnly.segments).toEqual(network.segments)
+      expect(network.segments.every((segment) => segment.elementKind === undefined)).toBe(true)
+
+      expect(network.fittingSummary.fittings).toBe(2)
+      expect(network.fittingSummary.connectors).toBe(2)
+      expect(network.fittingSummary.byPortCount).toEqual({ '1': 1, '2': 1 })
+      expect(network.fittingSummary.originReplacedByPortCentroid).toBe(0)
+      expect(network.fittingSummary.skipped).toHaveLength(1)
+      expect(network.fittingSummary.skipped[0].reason).toBe('single port')
+
+      const elbow = network.fittingConnectors
+      expect(elbow).toHaveLength(2)
+      const fittingId = elbow[0].fittingExpressId!
+      expect(elbow.map((c) => c.expressId)).toEqual(
+        [fittingConnectorExpressId(fittingId, 0), fittingConnectorExpressId(fittingId, 1)].sort((a, b) => a - b),
+      )
+      for (const connector of elbow) {
+        expect(connector.elementKind).toBe('fitting')
+        expect(connector.systemName).toBe('XX-GRV 1')
+        expect(connector.storeyName).toBe('Level A')
+        expect(connector.endpointSource).toBe('distribution-ports')
+        expect(connector.lengthM).toBeNull()
+        // start = body origin (355, 200, 15) in cm
+        expect(connector.start!.x).toBeCloseTo(355, 3)
+        expect(connector.start!.y).toBeCloseTo(200, 3)
+        expect(connector.start!.z).toBeCloseTo(15, 3)
+      }
+      const ports = elbow.map((c) => [c.end!.x, c.end!.y, c.end!.z].map((v) => Math.round(v * 1000) / 1000)).sort()
+      expect(ports).toEqual([
+        [350, 200, 15],
+        [355, 205, 15],
+      ])
+      // Ø50 borrowed from Branch 1, whose downstream end sits on the first port; the free port has no neighbour.
+      const byPort = new Map(elbow.map((c) => [Math.round(c.end!.y), c.outerDiameterMm]))
+      expect(byPort.get(200)).toBe(50)
+      expect(byPort.get(205)).toBeNull()
+    } finally {
+      api.CloseModel(modelId)
+    }
+  })
+
+  it('reports an empty fitting census on a model without fittings', async () => {
+    const { api, modelId } = await openModel(buildSyntheticPlumbingIfc().text)
+    try {
+      const network = await extractEngineerPipeNetwork(api, modelId, { systemPrefixes: ['XX-GRV'] })
+      expect(network.fittingConnectors).toEqual([])
+      expect(network.fittingSummary).toEqual({ fittings: 0, connectors: 0, byPortCount: {}, originReplacedByPortCentroid: 0, skipped: [] })
     } finally {
       api.CloseModel(modelId)
     }

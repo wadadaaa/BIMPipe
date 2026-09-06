@@ -43,6 +43,13 @@ export const BRANCH_SLOPE_RATIO = DEFAULT_BRANCH_SLOPE_DROP_MM / DEFAULT_BRANCH_
 /** Diameter written when a segment carries no served-fixture information. */
 export const BRANCH_FALLBACK_DIAMETER_MM = BRANCH_DIAMETER_MM_BY_FIXTURE_KIND.TOILETPAN
 
+/**
+ * Smallest nominal diameter a run can have and still carry a WC: a Ø50/Ø63
+ * run cannot serve a toilet, whatever fixture it happens to end nearest to.
+ * Used by the gauntlet's diameter-compatible attribution (R3).
+ */
+export const WC_MIN_BRANCH_DIAMETER_MM = BRANCH_DIAMETER_MM_BY_FIXTURE_KIND.TOILETPAN
+
 export function branchDiameterForFixtureKind(kind: FixtureKind): number {
   return BRANCH_DIAMETER_MM_BY_FIXTURE_KIND[kind]
 }

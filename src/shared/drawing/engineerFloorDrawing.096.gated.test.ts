@@ -43,33 +43,48 @@ const PIN_SANITARY_TOTAL = 125
 // pieces at ~100 %, one at 15.6 %) drawn without a slope.
 const MIN_SLOPE_COVERAGE = 0.8
 const PIN_SLOPE_COVERAGE = 0.896
-// Collector role at the strict 50 mm endpoint-coincidence rule (Revit joins
-// pipes through fittings, so most junctions are not endpoint-coincident).
-const PIN_COLLECTORS_STRICT = 2
+// Collector role at the strict 50 mm endpoint-coincidence rule. R3 draws the
+// IfcFlowFitting bodies as port connectors, so a pipe end now meets a
+// connector end at the port and most junctions ARE endpoint-coincident
+// (R2 pinned 2 with the fittings missing).
+const PIN_COLLECTORS_STRICT = 17
+// R3 fitting census on the storey (band ∪ hang band, SW-GRV): 237 IfcFlowFitting
+// bodies — 200 two-port (elbows/offsets) and 37 three-port (tees/wyes), none
+// skipped — drawn as 503 connectors model-wide, 160 on this storey. Free run
+// ends within 50 mm of no other drawn run fell 210 → 72 (the remainder are
+// fixture drops and the Ø50/Ø63 legs to unmodelled fixtures).
+const PIN_R3_FITTINGS = 237
+const PIN_R3_FITTINGS_BY_PORTS = { '2': 200, '3': 37 }
+const PIN_R3_FITTING_CONNECTORS_ON_STOREY = 160
 // Our side: 10 wet cores → 8 stacks on the storey (R1: the two cores whose
 // snap window is fully obstructed are gathered into a neighbour's stack through
 // a core collector instead of a flagged stack on a blocked cell; V3 pinned 10).
 const PIN_OUR_STACKS = 8
 const PIN_OUR_CORE_COLLECTORS = 2
-// R2 shared-fixture set (1.0 m serves-fixture rule on the union set, engineer
-// length attributed to the nearest served fixture of each run's upstream end and
-// walked downstream through the 150 mm fitting-bridged connectivity). All 13
-// detected fixtures (11 WC + 2 basins) are served by both sides; 55 of the 125
-// engineer runs (32.6 m, 22 leaf ends) end more than 1.0 m from any detected
-// fixture — the Ø50/Ø63 network to basins, showers and machines that neither
-// file models on this storey (R2 investigation; input limitation, not a
-// detection bug). Gated ratio 19.92 / 39.09 = 0.51 — marginal; the same rule at
-// 0.75 m gives 0.65 and at 1.5 m 0.44 (see `summary.json.sharedSensitivity`).
-// Full-set union 0.28 and literal-band 3.23 are R1's values, unchanged.
+// R2/R3 shared-fixture set (1.0 m serves-fixture rule on the union set, engineer
+// length attributed to the nearest DIAMETER-COMPATIBLE served fixture of each
+// run's upstream end and walked downstream through the 150 mm fitting-bridged
+// connectivity). All 13 detected fixtures (11 WC + 2 basins) are served by both
+// sides. R3 measured (2026-09-06): the 160 fitting connectors add 9.9 m to the
+// engineer's union set (71.7 → 81.6 m) and, attributed like runs, pushed the R2
+// ratio 0.51 → 0.43; the diameter rule (a Ø50/Ø63 run cannot serve a WC) then
+// rejects 56 runs / 9.2 m that R2 had attributed to WCs, leaving 36.47 m on the
+// shared set → 19.92 / 36.47 = 0.55 (0.61 at 0.75 m, 0.55 at 1.5 m: the rule
+// removes the tolerance sensitivity R2 had, 0.65 / 0.51 / 0.44). 164 of the
+// 285 drawn runs (45.1 m, 24 leaf ends) stay unattributed — the Ø50/Ø63
+// network to basins, showers and machines no file models on this storey.
+// Full-set union 0.24 (0.28 before the connectors); literal band 3.23 unchanged.
 const PIN_R2_FIXTURES = 13
 const PIN_R2_SHARED = 13
 const PIN_R2_ONLY_ENGINEER = 0
 const PIN_R2_ONLY_US = 0
 const PIN_R2_OUR_SHARED_M = 19.92
-const PIN_R2_ENGINEER_SHARED_M = 39.09
-const PIN_R2_ENGINEER_RUNS_UNATTRIBUTED = 55
-const PIN_R2_BRANCH_RATIO_SHARED = 0.51
-const PIN_R2_BRANCH_RATIO_UNION = 0.28
+const PIN_R2_ENGINEER_SHARED_M = 36.47
+const PIN_R2_ENGINEER_RUNS_UNATTRIBUTED = 164
+const PIN_R3_ENGINEER_RUNS_REJECTED_BY_DIAMETER = 56
+const PIN_R3_ENGINEER_RUNS_REJECTED_BY_DIAMETER_M = 9.19
+const PIN_R2_BRANCH_RATIO_SHARED = 0.55
+const PIN_R2_BRANCH_RATIO_UNION = 0.24
 const PIN_R2_BRANCH_RATIO_LITERAL = 3.23
 
 const gated = describe.skipIf(!specFilesExist(SPEC))
@@ -118,7 +133,15 @@ gated('engineer + our floor drawings on 096 storey 01 (gated: requires local cli
         expect(sanitaryPipes.both).toBe(PIN_SANITARY_BOTH)
         expect(sanitaryPipes.total).toBe(PIN_SANITARY_TOTAL)
         expect(sanitaryPipes.total).toBe(sanitaryPipes.inBand + sanitaryPipes.inHang - sanitaryPipes.both)
-        expect(engineer.model.pipes.filter((pipe) => pipe.system === 'sanitary')).toHaveLength(PIN_SANITARY_TOTAL)
+        expect(engineer.model.pipes.filter((pipe) => pipe.system === 'sanitary' && !pipe.fitting)).toHaveLength(PIN_SANITARY_TOTAL)
+        // R3 fitting connectors: drawn apart from the runs, counted apart from the pins above.
+        expect(sanitaryPipes.fittingConnectors).toBe(PIN_R3_FITTING_CONNECTORS_ON_STOREY)
+        expect(engineer.model.pipes.filter((pipe) => pipe.fitting === true)).toHaveLength(PIN_R3_FITTING_CONNECTORS_ON_STOREY)
+        expect(metricsInput.engineerStoreyHorizontals.fittingConnectors).toBe(PIN_R3_FITTING_CONNECTORS_ON_STOREY)
+        expect(metricsInput.engineerStoreyHorizontals.fittingSummary.fittings).toBe(PIN_R3_FITTINGS)
+        expect(metricsInput.engineerStoreyHorizontals.fittingSummary.byPortCount).toEqual(PIN_R3_FITTINGS_BY_PORTS)
+        expect(metricsInput.engineerStoreyHorizontals.fittingSummary.skipped).toEqual([])
+        expect(metricsInput.engineerBranchRuns.union.fittingConnectors).toBe(PIN_R3_FITTING_CONNECTORS_ON_STOREY)
         expect(metricsInput.engineerStoreyHorizontals.literalBandSelection.segments).toBe(PIN_SANITARY_IN_BAND)
         // Every SW-GRV segment of this file has a centreline: the containment rule never engages here.
         expect(metricsInput.engineerStoreyHorizontals.literalBandSelection.byContainmentRejected).toBe(0)
@@ -182,6 +205,8 @@ gated('engineer + our floor drawings on 096 storey 01 (gated: requires local cli
         expect(shared.ourBranchSharedM).toBeCloseTo(PIN_R2_OUR_SHARED_M, 1)
         expect(shared.engineerBranchSharedM).toBeCloseTo(PIN_R2_ENGINEER_SHARED_M, 1)
         expect(shared.engineerRunsUnattributed).toBe(PIN_R2_ENGINEER_RUNS_UNATTRIBUTED)
+        expect(shared.engineerRunsRejectedByDiameter).toBe(PIN_R3_ENGINEER_RUNS_REJECTED_BY_DIAMETER)
+        expect(shared.engineerRunsRejectedByDiameterM).toBeCloseTo(PIN_R3_ENGINEER_RUNS_REJECTED_BY_DIAMETER_M, 1)
         expect(metrics.branchRatio).not.toBeNull()
         expect(metrics.branchRatio!).toBeCloseTo(PIN_R2_BRANCH_RATIO_SHARED, 2)
         expect(metrics.branchRatioFullUnion).toBeCloseTo(PIN_R2_BRANCH_RATIO_UNION, 2)
