@@ -852,6 +852,9 @@ export async function extractEngineerPipeNetwork(
   const segments: EngineerPipeSegment[] = candidates.map(({ expressId, systemName }) => {
     const line = api.GetLine(webIfcModelId, expressId, false) as IfcLine
     const name: string | null = line?.Name?.value ?? null
+    const tagValue: unknown = line?.Tag?.value
+    const tag: string | null =
+      typeof tagValue === 'string' ? tagValue : typeof tagValue === 'number' ? String(tagValue) : null
 
     let geometry: SegmentGeometry | null = null
     try {
@@ -895,6 +898,7 @@ export async function extractEngineerPipeNetwork(
     return {
       expressId,
       name,
+      tag,
       systemName,
       storeyId,
       storeyName: storeyId !== null ? (storeyNameById.get(storeyId) ?? null) : null,

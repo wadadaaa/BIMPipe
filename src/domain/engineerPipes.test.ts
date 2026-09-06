@@ -12,10 +12,26 @@ import {
   ENGINEER_RISER_XY_GROUPING_TOLERANCE_MM,
   ENGINEER_STACK_STOREY_OVERLAP_MIN_M,
   ENGINEER_STACK_STOREY_OVERLAP_MIN_MM,
+  ENGINEER_FITTING_BRIDGE_TOLERANCE_M,
+  ENGINEER_FITTING_BRIDGE_TOLERANCE_MM,
+  ENGINEER_HANG_DEPTH_M,
+  ENGINEER_HANG_DEPTH_MM,
+  ENGINEER_JUNCTION_TOLERANCE_M,
+  ENGINEER_JUNCTION_TOLERANCE_MM,
+  ENGINEER_SLOPE_MAX_REPORTED_PERCENT,
+  ENGINEER_SLOPE_MIN_DATA_M,
+  ENGINEER_SLOPE_MIN_DATA_MM,
+  ENGINEER_SLOPE_MIN_RUN_M,
+  ENGINEER_SLOPE_MIN_RUN_MM,
   classifyEngineerRiserStacks,
+  classifyEngineerRunRoles,
   deriveStoreyPitchM,
+  engineerSegmentHorizontalLengthM,
+  engineerSegmentSlopePercent,
   isVerticalEngineerSegment,
   selectEngineerBranchSegments,
+  selectEngineerStoreyHorizontals,
+  slopePercentFromInvertElevations,
   stackIntersectsBand,
   stacksIntersectingBand,
   storeySlabBandM,
@@ -531,5 +547,220 @@ describe('classifyEngineerRiserStacks on a synthetic 5-storey tower (3 m pitch)'
     const partialStacks = classifyEngineerRiserStacks(partial, SYNTHETIC_CLASSES).sanitaryStacks
     expect(partialStacks[0].spannedStoreyIds).toEqual([1, 2, 3])
     expect(stacksIntersectingBand(partialStacks, storeySlabBandM(partial, 5)!)).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// G2: storey horizontals (band + hang), slope, run roles
+// ---------------------------------------------------------------------------
+
+/** Horizontal cm-unit segment from (x0, y0) to (x1, y1) at heights z0 → z1. */
+function horizontal(
+  expressId: number,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  z0: number,
+  z1: number = z0,
+  overrides: Partial<EngineerPipeSegment> = {},
+): EngineerPipeSegment {
+  return segment({ expressId, start: { x: x0, y: y0, z: z0 }, end: { x: x1, y: y1, z: z1 }, ...overrides })
+}
+
+describe('selectEngineerStoreyHorizontals', () => {
+  const band = { bottomM: 3, topM: 6 }
+  const options = { systemPrefixes: ['XX-GRV'] }
+
+  it('admits runs in the storey band, in the hang band under the slab, or both, and counts each rule', () => {
+    const net = network([
+      horizontal(1, 0, 0, 200, 0, 350), // in band (3.5 m)
+      horizontal(2, 0, 0, 200, 0, 275), // hangs 0.25 m under the slab
+      horizontal(3, 0, 0, 200, 0, 290, 310), // crosses the slab level: both
+      horizontal(4, 0, 0, 200, 0, 170), // 1.3 m under the slab: below the hang band
+      horizontal(5, 0, 0, 200, 0, 600), // exactly at the next slab: next storey's band
+      horizontal(6, 0, 0, 200, 0, 400, undefined, { systemName: 'XX-VNT 1' }), // other system
+      vertical(7, 0, 0, 300, 600), // vertical: never a horizontal
+      segment({ expressId: 8, start: null, end: null }), // unresolved
+    ])
+    const selection = selectEngineerStoreyHorizontals(net, band, options)
+    expect(selection.horizontals.map((entry) => [entry.segment.expressId, entry.rule])).toEqual([
+      [1, 'in-band'],
+      [2, 'in-hang'],
+      [3, 'both'],
+    ])
+    expect(selection.inBandCount).toBe(2)
+    expect(selection.inHangCount).toBe(2)
+    expect(selection.bothCount).toBe(1)
+    expect(selection.unresolvedCount).toBe(1)
+    expect(selection.hangDepthM).toBe(ENGINEER_HANG_DEPTH_M)
+  })
+
+  it('hangDepthM = 0 reproduces the literal band scope', () => {
+    const net = network([horizontal(1, 0, 0, 200, 0, 350), horizontal(2, 0, 0, 200, 0, 275)])
+    const selection = selectEngineerStoreyHorizontals(net, band, { ...options, hangDepthM: 0 })
+    expect(selection.horizontals.map((entry) => entry.segment.expressId)).toEqual([1])
+    expect(selection.inHangCount).toBe(0)
+  })
+
+  it('the hang band is half-open: a run exactly at the slab is in the band, not hanging', () => {
+    const net = network([horizontal(1, 0, 0, 200, 0, 300)])
+    const selection = selectEngineerStoreyHorizontals(net, band, options)
+    expect(selection.horizontals[0].rule).toBe('in-band')
+  })
+
+  it('an open-ended top band admits everything above the slab', () => {
+    const net = network([horizontal(1, 0, 0, 200, 0, 5000)])
+    const selection = selectEngineerStoreyHorizontals(net, { bottomM: 3, topM: Infinity }, options)
+    expect(selection.horizontals).toHaveLength(1)
+  })
+
+  it('exports consistent hang-depth constants', () => {
+    expect(ENGINEER_HANG_DEPTH_M).toBeCloseTo(ENGINEER_HANG_DEPTH_MM / 1000, 12)
+  })
+})
+
+describe('slope math', () => {
+  it('endpoint Z over horizontal length: a 2 % fall over 3 m', () => {
+    const result = engineerSegmentSlopePercent(horizontal(1, 0, 0, 300, 0, 100, 94), 0.01)
+    expect(result).toEqual({ slopePercent: 2, source: 'endpoint-z', outlier: false, flat: false })
+  })
+
+  it('is negative when the run rises from start to end (caller flips)', () => {
+    const result = engineerSegmentSlopePercent(horizontal(1, 0, 0, 300, 0, 94, 100), 0.01)
+    expect(result.slopePercent).toBeCloseTo(-2, 9)
+  })
+
+  it('uses the horizontal (plan) length, not the 3D length', () => {
+    // 3-4-5 in plan (5 m horizontal), 0.1 m fall → 2 %.
+    const result = engineerSegmentSlopePercent(horizontal(1, 0, 0, 300, 400, 10, 0), 0.01)
+    expect(result.slopePercent).toBeCloseTo(2, 9)
+    expect(engineerSegmentHorizontalLengthM(horizontal(1, 0, 0, 300, 400, 10, 0), 0.01)).toBeCloseTo(5, 9)
+  })
+
+  it('a sub-millimetre fall on a run ≥ 100 mm is a measured 0 % (flat)', () => {
+    const result = engineerSegmentSlopePercent(horizontal(1, 0, 0, 50, 0, 100, 100.05), 0.01)
+    expect(result).toEqual({ slopePercent: 0, source: 'endpoint-z', outlier: false, flat: true })
+  })
+
+  it('a sub-millimetre fall on a run < 100 mm is null (unresolvable at 1 mm)', () => {
+    const result = engineerSegmentSlopePercent(horizontal(1, 0, 0, 5, 0, 100, 100.05), 0.01)
+    expect(result.slopePercent).toBeNull()
+    expect(result.outlier).toBe(false)
+  })
+
+  it('a horizontal length below 1 mm is null, never a division blow-up', () => {
+    const result = engineerSegmentSlopePercent(horizontal(1, 0, 0, 0.05, 0, 100, 90), 0.01)
+    expect(result.slopePercent).toBeNull()
+    expect(result.outlier).toBe(false)
+  })
+
+  it('flags |slope| > 10 % as an outlier with the raw value, without a drawn slope', () => {
+    const result = engineerSegmentSlopePercent(horizontal(1, 0, 0, 100, 0, 100, 0), 0.01)
+    expect(result.slopePercent).toBeNull()
+    expect(result.outlier).toBe(true)
+    if (result.outlier) expect(result.rawPercent).toBeCloseTo(100, 9)
+    expect(engineerSegmentSlopePercent(horizontal(2, 0, 0, 100, 0, 100, 90), 0.01).slopePercent).toBeCloseTo(10, 9)
+  })
+
+  it('missing geometry is null with a reason', () => {
+    const result = engineerSegmentSlopePercent(segment({ expressId: 1, start: null, end: null }), 0.01)
+    expect(result).toEqual({ slopePercent: null, source: null, outlier: false, reason: 'no resolved centreline' })
+  })
+
+  it('prefers invert elevations when both ends are known', () => {
+    const result = engineerSegmentSlopePercent(horizontal(1, 0, 0, 400, 0, 100, 100), 0.01, { startM: 1.08, endM: 1.0 })
+    expect(result.slopePercent).toBeCloseTo(2, 9)
+    expect(result.source).toBe('invert-elevations')
+    expect(result.outlier).toBe(false)
+    expect(slopePercentFromInvertElevations(null, 1, 4).slopePercent).toBeNull()
+    expect(slopePercentFromInvertElevations(1.08, 1, null).slopePercent).toBeNull()
+  })
+
+  it('exports consistent slope constants', () => {
+    expect(ENGINEER_SLOPE_MIN_DATA_M).toBeCloseTo(ENGINEER_SLOPE_MIN_DATA_MM / 1000, 12)
+    expect(ENGINEER_SLOPE_MIN_RUN_M).toBeCloseTo(ENGINEER_SLOPE_MIN_RUN_MM / 1000, 12)
+    expect(ENGINEER_SLOPE_MAX_REPORTED_PERCENT).toBe(10)
+  })
+})
+
+describe('classifyEngineerRunRoles', () => {
+  it('a run joined by two upstream branches is a collector; the branches stay branches', () => {
+    // Collector along X at y = 0, falling towards +x; two branches drop onto its interior.
+    const collector = horizontal(10, 0, 0, 600, 0, 100, 88)
+    const branchA = horizontal(11, 200, 300, 200, 0, 102, 96)
+    const branchB = horizontal(12, 400, -300, 400, 0, 98, 92)
+    const roles = classifyEngineerRunRoles([branchB, collector, branchA], 0.01)
+    expect(roles.roles.get(10)).toBe('collector')
+    expect(roles.roles.get(11)).toBe('branch')
+    expect(roles.roles.get(12)).toBe('branch')
+    expect(roles.collectorCount).toBe(1)
+    expect(roles.toleranceM).toBe(ENGINEER_JUNCTION_TOLERANCE_M)
+    expect(roles.junctions.map((junction) => [junction.fromExpressId, junction.intoExpressId, junction.upstream])).toEqual([
+      [11, 10, true],
+      [12, 10, true],
+    ])
+  })
+
+  it('one upstream branch is not enough', () => {
+    const collector = horizontal(10, 0, 0, 600, 0, 100, 88)
+    const branchA = horizontal(11, 200, 300, 200, 0, 102, 96)
+    expect(classifyEngineerRunRoles([collector, branchA], 0.01).roles.get(10)).toBe('branch')
+  })
+
+  it('a downstream continuation joining at the collector end does not count as upstream', () => {
+    // Run 10 falls into run 20 (its lower end meets 20's start); 20 continues away at an angle.
+    const run = horizontal(10, 0, 0, 300, 0, 100, 94)
+    const next = horizontal(20, 300, 0, 300, 300, 94, 88)
+    const roles = classifyEngineerRunRoles([run, next], 0.01)
+    const into10 = roles.junctions.filter((junction) => junction.intoExpressId === 10)
+    expect(into10).toHaveLength(1)
+    expect(into10[0].upstream).toBe(false) // 20 joins 10 with its HIGHER end
+    expect(roles.roles.get(10)).toBe('branch')
+    expect(roles.roles.get(20)).toBe('branch')
+  })
+
+  it('a straight flat run split into three collinear pieces is not a collector', () => {
+    const pieces = [
+      horizontal(1, 0, 0, 200, 0, 100),
+      horizontal(2, 200, 0, 400, 0, 100),
+      horizontal(3, 400, 0, 600, 0, 100),
+    ]
+    const roles = classifyEngineerRunRoles(pieces, 0.01)
+    expect(roles.roles.get(2)).toBe('branch')
+    expect(roles.junctions.filter((junction) => junction.intoExpressId === 2).every((junction) => junction.continuation)).toBe(
+      true,
+    )
+  })
+
+  it('flat branches joining a flat collector count as upstream at both ends', () => {
+    const collector = horizontal(10, 0, 0, 600, 0, 100)
+    const branchA = horizontal(11, 200, 300, 200, 0, 100)
+    const branchB = horizontal(12, 400, -300, 400, 0, 100)
+    expect(classifyEngineerRunRoles([collector, branchA, branchB], 0.01).roles.get(10)).toBe('collector')
+  })
+
+  it('respects the tolerance: a 100 mm gap is bridged only at the fitting tolerance', () => {
+    const collector = horizontal(10, 0, 0, 600, 0, 100, 88)
+    const branchA = horizontal(11, 200, 300, 200, 10, 102, 96) // ends 100 mm short of the axis
+    const branchB = horizontal(12, 400, -300, 400, -10, 98, 92)
+    expect(classifyEngineerRunRoles([collector, branchA, branchB], 0.01).roles.get(10)).toBe('branch')
+    expect(
+      classifyEngineerRunRoles([collector, branchA, branchB], 0.01, ENGINEER_FITTING_BRIDGE_TOLERANCE_M).roles.get(10),
+    ).toBe('collector')
+    expect(ENGINEER_FITTING_BRIDGE_TOLERANCE_M).toBeCloseTo(ENGINEER_FITTING_BRIDGE_TOLERANCE_MM / 1000, 12)
+    expect(ENGINEER_JUNCTION_TOLERANCE_M).toBeCloseTo(ENGINEER_JUNCTION_TOLERANCE_MM / 1000, 12)
+  })
+
+  it('ignores segments without geometry and is deterministic in input order', () => {
+    const collector = horizontal(10, 0, 0, 600, 0, 100, 88)
+    const branchA = horizontal(11, 200, 300, 200, 0, 102, 96)
+    const branchB = horizontal(12, 400, -300, 400, 0, 98, 92)
+    const ghost = segment({ expressId: 13, start: null, end: null })
+    const a = classifyEngineerRunRoles([ghost, branchB, collector, branchA], 0.01)
+    const b = classifyEngineerRunRoles([collector, branchA, branchB, ghost], 0.01)
+    expect(a.roles.has(13)).toBe(false)
+    expect([...a.roles.entries()]).toEqual([...b.roles.entries()])
+    expect(a.junctions).toEqual(b.junctions)
   })
 })
