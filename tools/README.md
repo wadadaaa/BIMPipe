@@ -92,7 +92,8 @@ node tools/gauntlet/export-floor-models.ts --floor 096-01
 node tools/gauntlet/export-floor-models.ts --spec /tmp/my-floor.json --out /tmp/gauntlet
 ```
 
-Writes `<out>/<floor>/engineer.json`, `ours.json`, `metrics-input.json` and
+Writes `<out>/<floor>/engineer.json`, `ours.json`, `metrics-input.json`,
+`metrics.json` (hard metrics + verdict, `src/domain/gauntletMetrics.ts`) and
 `summary.json`; the default `--out` is `external/gauntlet/models` (gitignored — the
 output is client-derived geometry and must stay there).
 
@@ -106,8 +107,41 @@ output is client-derived geometry and must stay there).
   continuity map → wet-core stacks → fixture assignment → branch routes).
 - Spec shape (`gauntletFloorSpecSchema`): `floor`, `host {path, fileName}`,
   `linked [...]`, `storey {name | elevationSource}`, `storeyLabel`, optional
-  `typology` (`residential | office`) and `wholeBuildingExtent`. Built-in keys:
-  `096-01`, `shbj-L04`.
+  `typology` (`residential | office` — applied as the app does: `wetCore.typology`
+  at suggest time, then the suggestion's typology and fixture rows drive assignment
+  and routing) and `wholeBuildingExtent`. Built-in keys: `096-01`, `shbj-L04`.
+
+## `gauntlet/run-round.ts`, `gauntlet/tally-round.ts`, `gauntlet/CRITIC.md`
+
+One gauntlet round: export both sides → hard metrics → anonymized renders → blind
+A/B pairs; then tally the critic replies.
+
+```sh
+node tools/gauntlet/run-round.ts --round 00                       # both floors, 10 trials each
+node tools/gauntlet/run-round.ts --round 03 --floors F2 --trials 10 --seed 42
+node tools/gauntlet/run-round.ts --round 00 --force-trials        # pairs even on red metrics
+node tools/gauntlet/tally-round.ts --round 00                     # after the critics answered
+```
+
+- Floor codes `F1` (residential storey, spec `096-01`) and `F2` (office storey, spec
+  `shbj-L04`) are the only names a critic ever sees in a path.
+- Writes `external/gauntlet/rounds/NN/<F>/`: `models/` (the export), `metrics.json`
+  (`computeGauntletMetrics` — obstruction, stacks ratio, mean distance to the
+  engineer's stacks, branch-length ratio on the drawn union set, routed fraction,
+  verdict + reds), `engineer.png` / `ours.png` (`render-drawing.mjs --anonymize`, same
+  scale/dpi), `verdict.json`, `key.json` (which side is ours — hidden, outside the trial
+  folders), `prompts.json` (exact critic prompt per trial) and `trial-<t>/A.png, B.png`
+  in a seeded random order (mulberry32; default seed derived from the round number).
+- A red metric writes `verdict.json = { result: 'loss', reason }` and no trial folders;
+  `--force-trials` writes them anyway (verdict unchanged) so the gap can still be named.
+- `tally-round.ts` parses `critic/trial-<t>.txt` (WINNER / CONFIDENCE / GAP), maps
+  sides through `key.json`, writes `verdicts.json` and `summary.json` (engineer
+  preferred x/N, confidence spread, gap histogram, `gapToFixNext`).
+- The critic protocol (fresh-context agent per trial, exact prompt, what never enters a
+  prompt) is in `gauntlet/CRITIC.md`.
+- Runs on Node ≥ 22.18; imports nothing from `src/` (delegates to
+  `export-floor-models.ts` and `render-drawing.mjs`). Everything it writes is
+  client-derived and stays under the gitignored `external/`.
 
 ## `render-drawing.mjs`
 
