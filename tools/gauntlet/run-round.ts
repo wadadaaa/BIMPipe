@@ -217,8 +217,10 @@ function runFloor(repoRoot: string, roundDir: string, code: string, args: CliArg
       : { result: 'pending-critic' },
   )
 
-  // 5. blind A/B pairs: copies only, seeded order, key outside the trial folders
-  const random = seededRandom(seed)
+  // 5. blind A/B pairs: copies only, seeded order (per floor, so the two floors
+  //    do not share one A/B sequence), key outside the trial folders
+  const floorSeed = seed + Object.keys(FLOORS).indexOf(code) * 1_000_003
+  const random = seededRandom(floorSeed)
   const key: Array<{ trial: string; ours: 'A' | 'B' }> = []
   const prompts: Array<{ trial: string; prompt: string }> = []
   for (let t = 1; t <= args.trials; t += 1) {
@@ -232,7 +234,7 @@ function runFloor(repoRoot: string, roundDir: string, code: string, args: CliArg
     key.push({ trial, ours: oursIsA ? 'A' : 'B' })
     prompts.push({ trial, prompt: CRITIC_PROMPT(path.resolve(trialDir)) })
   }
-  writeJson(path.join(floorDir, 'key.json'), { round: args.round, floor: code, seed, trials: key })
+  writeJson(path.join(floorDir, 'key.json'), { round: args.round, floor: code, seed, floorSeed, trials: key })
   writeJson(path.join(floorDir, 'prompts.json'), prompts)
   return { metrics, trials: args.trials }
 }
