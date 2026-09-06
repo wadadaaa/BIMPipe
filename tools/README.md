@@ -108,3 +108,28 @@ output is client-derived geometry and must stay there).
   `linked [...]`, `storey {name | elevationSource}`, `storeyLabel`, optional
   `typology` (`residential | office`) and `wholeBuildingExtent`. Built-in keys:
   `096-01`, `shbj-L04`.
+
+## `render-drawing.mjs`
+
+Renders a `FloorDrawingModel` JSON (the renderer contract in
+`src/domain/drawing/floorDrawingModel.ts`) to an SVG sheet in the reference graphic
+language, and optionally to PNG, with the same renderer the app's "Drawing preview"
+button uses:
+
+```sh
+node tools/render-drawing.mjs external/gauntlet/models/<floor>/ours.json /tmp/ours.svg \
+    --png /tmp/ours.png --anonymize
+node tools/render-drawing.mjs synthetic:toilet-block /tmp/synthetic.svg --png /tmp/synthetic.png
+```
+
+- Options: `--png <out.png>`, `--anonymize` (drops the title strip), `--scale 50|100`
+  (default 100), `--dpi N` (default 220, the raster density of the reference rasters),
+  `--no-underlay`.
+- `<model.json>` may be `synthetic:toilet-block` or `synthetic:mini` to render the
+  built-in synthetic models (`src/domain/drawing/syntheticFloorModels.ts`).
+- No build step: the TypeScript sources are loaded through Vite's SSR module loader
+  (`createServer` + `ssrLoadModule`, Vite is already a devDependency), so the `@/`
+  alias resolves. PNG rasterisation uses the `@resvg/resvg-js` devDependency
+  (`src/domain/drawing/renderFloorDrawingPng.ts`, Node-only; the app bundle only
+  imports the SVG renderer).
+- Renders of client-derived models belong under `external/` or `/tmp`.
