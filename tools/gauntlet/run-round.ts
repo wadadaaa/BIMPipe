@@ -158,8 +158,17 @@ interface HardMetrics {
   ourStackCount: number
   engineerStackCount: number
   meanDistToEngineerStackM: number | null
+  /** Gated: on the fixtures both sides serve. */
   branchRatio: number | null
+  branchRatioFullUnion: number | null
   branchRatioLiteralBand: number | null
+  sharedFixtures: {
+    fixtures: number
+    shared: number
+    fixturesOnlyEngineerServes: number
+    fixturesOnlyWeServe: number
+    engineerLeafEndsWithoutFixture: number
+  }
   routedFraction: number | null
   verdict: 'green' | 'red'
   reds: string[]
@@ -269,7 +278,8 @@ function main(): number {
         `obstruction ${metrics.obstruction} (unknown ${metrics.unknownProbes})`,
         `stacks ${metrics.ourStackCount}/${metrics.engineerStackCount} = ${formatNumber(metrics.stacksRatio)}`,
         `mean dist ${formatNumber(metrics.meanDistToEngineerStackM)} m`,
-        `branch ${formatNumber(metrics.branchRatio)} (literal band ${formatNumber(metrics.branchRatioLiteralBand)})`,
+        `branch ${formatNumber(metrics.branchRatio)} on ${metrics.sharedFixtures.shared}/${metrics.sharedFixtures.fixtures} shared fixtures (full union ${formatNumber(metrics.branchRatioFullUnion)}, literal band ${formatNumber(metrics.branchRatioLiteralBand)})`,
+        `coverage: only engineer serves ${metrics.sharedFixtures.fixturesOnlyEngineerServes}, only we serve ${metrics.sharedFixtures.fixturesOnlyWeServe}, engineer free ends without a detected fixture ${metrics.sharedFixtures.engineerLeafEndsWithoutFixture}`,
         `routed ${formatNumber(metrics.routedFraction)}`,
         trials > 0 ? `${trials} trial pair(s) → run the critic (CRITIC.md), then tally-round.ts` : 'no trials (loss by metrics)',
       ].join(' · '),

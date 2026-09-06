@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { computeGauntletMetrics } from '@/domain/gauntletMetrics'
 import {
   drawingContentOutsideBounds,
   drawingLabelsContaining,
@@ -6,6 +7,7 @@ import {
 } from './drawingModelChecks'
 import { runGauntletFloorPipeline } from './gauntletFloorPipeline'
 import { closeSpecModels, GAUNTLET_BUILTIN_FLOOR_SPECS, openSpecModels, specFilesExist } from './gauntletFloorSpecs'
+import { gauntletMetricsInputFromPipeline } from './gauntletMetricsInput'
 
 /**
  * Gated G2 regression on the first project's storey 01 (plumbing host + linked
@@ -49,6 +51,26 @@ const PIN_COLLECTORS_STRICT = 2
 // a core collector instead of a flagged stack on a blocked cell; V3 pinned 10).
 const PIN_OUR_STACKS = 8
 const PIN_OUR_CORE_COLLECTORS = 2
+// R2 shared-fixture set (1.0 m serves-fixture rule on the union set, engineer
+// length attributed to the nearest served fixture of each run's upstream end and
+// walked downstream through the 150 mm fitting-bridged connectivity). All 13
+// detected fixtures (11 WC + 2 basins) are served by both sides; 55 of the 125
+// engineer runs (32.6 m, 22 leaf ends) end more than 1.0 m from any detected
+// fixture — the Ø50/Ø63 network to basins, showers and machines that neither
+// file models on this storey (R2 investigation; input limitation, not a
+// detection bug). Gated ratio 19.92 / 39.09 = 0.51 — marginal; the same rule at
+// 0.75 m gives 0.65 and at 1.5 m 0.44 (see `summary.json.sharedSensitivity`).
+// Full-set union 0.28 and literal-band 3.23 are R1's values, unchanged.
+const PIN_R2_FIXTURES = 13
+const PIN_R2_SHARED = 13
+const PIN_R2_ONLY_ENGINEER = 0
+const PIN_R2_ONLY_US = 0
+const PIN_R2_OUR_SHARED_M = 19.92
+const PIN_R2_ENGINEER_SHARED_M = 39.09
+const PIN_R2_ENGINEER_RUNS_UNATTRIBUTED = 55
+const PIN_R2_BRANCH_RATIO_SHARED = 0.51
+const PIN_R2_BRANCH_RATIO_UNION = 0.28
+const PIN_R2_BRANCH_RATIO_LITERAL = 3.23
 
 const gated = describe.skipIf(!specFilesExist(SPEC))
 
@@ -148,6 +170,23 @@ gated('engineer + our floor drawings on 096 storey 01 (gated: requires local cli
           floor.segments.filter((segment) => segment.coreCollectorId !== undefined),
         )
         expect(new Set(collectorRuns.map((segment) => segment.coreCollectorId)).size).toBe(PIN_OUR_CORE_COLLECTORS)
+
+        // R2 shared-fixture set (`computeSharedFixtureSet`, 1.0 m rule) — the
+        // gauntlet's gated branch ratio. Measured 2026-09-06 on the union set.
+        const metrics = computeGauntletMetrics(gauntletMetricsInputFromPipeline(metricsInput))
+        const shared = metrics.sharedFixtures
+        expect(shared.fixtures).toBe(PIN_R2_FIXTURES)
+        expect(shared.shared).toBe(PIN_R2_SHARED)
+        expect(shared.fixturesOnlyEngineerServes).toBe(PIN_R2_ONLY_ENGINEER)
+        expect(shared.fixturesOnlyWeServe).toBe(PIN_R2_ONLY_US)
+        expect(shared.ourBranchSharedM).toBeCloseTo(PIN_R2_OUR_SHARED_M, 1)
+        expect(shared.engineerBranchSharedM).toBeCloseTo(PIN_R2_ENGINEER_SHARED_M, 1)
+        expect(shared.engineerRunsUnattributed).toBe(PIN_R2_ENGINEER_RUNS_UNATTRIBUTED)
+        expect(metrics.branchRatio).not.toBeNull()
+        expect(metrics.branchRatio!).toBeCloseTo(PIN_R2_BRANCH_RATIO_SHARED, 2)
+        expect(metrics.branchRatioFullUnion).toBeCloseTo(PIN_R2_BRANCH_RATIO_UNION, 2)
+        expect(metrics.branchRatioLiteralBand).toBeCloseTo(PIN_R2_BRANCH_RATIO_LITERAL, 2)
+        expect(metrics.verdict).toBe('green')
       } finally {
         closeSpecModels(api, models)
       }

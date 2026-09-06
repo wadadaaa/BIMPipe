@@ -47,11 +47,13 @@ const TEST_TIMEOUT_MS = 600_000
  * the two core collectors add 6.64 + 5.21 m of run plus the members' legs to
  * their junctions). Engineer: 6.16 m over 12 horizontal SW-GRV segments in
  * the literal storey band → 3.23; 71.66 m over 125 runs in the union with the
- * 1.2 m hang band (the harness's gating set) → 0.28. The union ratio stays red
- * on this storey: 58 m of the engineer's 71.7 m are Ø50/Ø63 runs to basins,
- * showers and machines that the architect's podium file does not model as
- * fixtures (13 detected: 11 WC + 2 basins), so our side has nothing to route
- * there — a fixture-coverage gap, reported as such, not tuned away.
+ * 1.2 m hang band → 0.28 (reported as the full-set ratio). The union ratio is
+ * far below 0.5 on this storey: 58 m of the engineer's 71.7 m are Ø50/Ø63 runs
+ * to basins, showers and machines that neither file models as fixtures on this
+ * storey (13 detected: 11 WC + 2 basins; R2 investigation), so our side has
+ * nothing to route there — a fixture-coverage gap, reported as such, not tuned
+ * away. Since R2 the harness gates the shared-fixture ratio instead
+ * (`computeSharedFixtureSet`, pinned in `engineerFloorDrawing.096.gated.test.ts`).
  */
 const RATIO_096_STOREY_01_LITERAL_PIN = 3.23
 const RATIO_096_STOREY_01_UNION_PIN = 0.28

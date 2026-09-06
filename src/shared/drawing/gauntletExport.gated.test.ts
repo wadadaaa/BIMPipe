@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { computeGauntletMetrics } from '@/domain/gauntletMetrics'
+import { computeGauntletMetrics, computeSharedFixtureSet } from '@/domain/gauntletMetrics'
 import { drawingContentOutsideBounds, drawingLabelsContaining, drawingModelHasNonFinite } from './drawingModelChecks'
 import { parseGauntletFloorSpec, runGauntletFloorPipeline, type GauntletFloorSpec } from './gauntletFloorPipeline'
 import { closeSpecModels, GAUNTLET_BUILTIN_FLOOR_SPECS, openSpecModels, resolveSpecPaths, specFilesExist } from './gauntletFloorSpecs'
@@ -28,6 +28,8 @@ import { gauntletMetricsInputFromPipeline } from './gauntletMetricsInput'
 const ENABLED = process.env.GAUNTLET_EXPORT === '1'
 const DEFAULT_OUT_DIR = 'external/gauntlet/models'
 const TEST_TIMEOUT_MS = 900_000
+/** Tolerances the shared-fixture sensitivity is printed at (`summary.json`); the gate uses `ENGINEER_SERVES_FIXTURE_M`. */
+const SHARED_SENSITIVITY_TOLERANCES_M = [0.75, 1.0, 1.5]
 
 function resolveSpecFromEnv(): GauntletFloorSpec {
   const specFile = process.env.GAUNTLET_EXPORT_SPEC
@@ -93,8 +95,25 @@ describe.skipIf(!ENABLED)('gauntlet floor export (GAUNTLET_EXPORT=1)', () => {
         writeJson(path.join(outDir, 'engineer.json'), engineer.model)
         writeJson(path.join(outDir, 'ours.json'), ours.model)
         writeJson(path.join(outDir, 'metrics-input.json'), metricsInput)
-        const metrics = computeGauntletMetrics(gauntletMetricsInputFromPipeline(metricsInput))
+        const hardInput = gauntletMetricsInputFromPipeline(metricsInput)
+        const metrics = computeGauntletMetrics(hardInput)
         writeJson(path.join(outDir, 'metrics.json'), metrics)
+        // Sensitivity of the shared-fixture rule to its one tolerance — printed, never used to pick it.
+        const sharedSensitivity = SHARED_SENSITIVITY_TOLERANCES_M.map((servesFixtureM) => {
+          const shared = computeSharedFixtureSet({ ...hardInput.sharedFixtures, servesFixtureM })
+          return {
+            servesFixtureM,
+            shared: shared.shared,
+            fixturesOnlyEngineerServes: shared.fixturesOnlyEngineerServes,
+            fixturesOnlyWeServe: shared.fixturesOnlyWeServe,
+            ourBranchSharedM: shared.ourBranchSharedM,
+            engineerBranchSharedM: shared.engineerBranchSharedM,
+            branchRatio: shared.engineerBranchSharedM > 0 ? shared.ourBranchSharedM / shared.engineerBranchSharedM : null,
+            engineerRunsUnattributed: shared.engineerRunsUnattributed,
+            engineerRunsUnattributedM: shared.engineerRunsUnattributedM,
+            engineerLeafEndsWithoutFixture: shared.engineerLeafEndsWithoutFixture,
+          }
+        })
         const summary = {
           floor: spec.floor,
           storeyLabel: spec.storeyLabel,
@@ -119,6 +138,7 @@ describe.skipIf(!ENABLED)('gauntlet floor export (GAUNTLET_EXPORT=1)', () => {
           },
           report: metricsInput.report,
           metrics,
+          sharedSensitivity,
           pipelineDiagnostics: metricsInput.diagnostics,
           files: ['engineer.json', 'ours.json', 'metrics-input.json', 'metrics.json', 'summary.json'],
         }

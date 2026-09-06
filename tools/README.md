@@ -127,8 +127,10 @@ node tools/gauntlet/tally-round.ts --round 00                     # after the cr
   `shbj-L04`) are the only names a critic ever sees in a path.
 - Writes `external/gauntlet/rounds/NN/<F>/`: `models/` (the export), `metrics.json`
   (`computeGauntletMetrics` — obstruction, stacks ratio, mean distance to the
-  engineer's stacks, branch-length ratio on the drawn union set, routed fraction,
-  verdict + reds), `engineer.png` / `ours.png` (`render-drawing.mjs --anonymize`, same
+  engineer's stacks, branch-length ratio on the fixtures both sides serve (gated;
+  the full-set ratios on the drawn union set and the literal band are reported
+  alongside), coverage counts, routed fraction, verdict + reds; `models/summary.json`
+  adds the shared-set sensitivity at 0.75 / 1.0 / 1.5 m), `engineer.png` / `ours.png` (`render-drawing.mjs --anonymize`, same
   scale/dpi), `verdict.json`, `key.json` (which side is ours — hidden, outside the trial
   folders), `prompts.json` (exact critic prompt per trial) and `trial-<t>/A.png, B.png`
   in a seeded random order (mulberry32; default seed derived from the round number).

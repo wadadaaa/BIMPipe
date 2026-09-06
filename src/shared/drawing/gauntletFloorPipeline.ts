@@ -19,6 +19,8 @@ import {
 } from '@/domain/engineerComparisonMetrics'
 import {
   classifyEngineerRiserStacks,
+  classifyEngineerRunRoles,
+  ENGINEER_FITTING_BRIDGE_TOLERANCE_M,
   selectEngineerBranchSegments,
   selectEngineerServedStacks,
   selectEngineerStoreyHorizontals,
@@ -137,6 +139,28 @@ export interface GauntletHangBandRunEvidence {
   toStoreyBelowFixtureM: number | null
 }
 
+/**
+ * One engineer horizontal run of the union set with its plan geometry
+ * (drawing frame, metres — the frame our fixtures and route segments map to
+ * through `viewerPlanToDrawing`) and its downstream connectivity, for the
+ * shared-fixture branch ratio (`computeSharedFixtureSet`).
+ */
+export interface GauntletEngineerRunGeometry {
+  expressId: number
+  rule: EngineerStoreyHorizontalRule
+  diameterMm: number | null
+  planLengthM: number
+  /** Higher endpoint (where a fixture drop meets the run). */
+  upstream: { xM: number; yM: number }
+  downstream: { xM: number; yM: number }
+  /**
+   * Runs this one drains into: its lower end touches them within the 150 mm
+   * fitting-bridged tolerance (`classifyEngineerRunRoles` upstream junctions,
+   * continuations included — flow continues along a split straight run).
+   */
+  drainsInto: number[]
+}
+
 export interface GauntletEngineerBranchRuns {
   /**
    * V1 literal storey band (`selectEngineerBranchSegments`): resolved runs
@@ -153,6 +177,10 @@ export interface GauntletEngineerBranchRuns {
   union: { segments: number; inBandOnly: number; inHangOnly: number; both: number; totalM: number }
   /** Per hang-band run (rule `in-hang` or `both`): nearest-fixture distances of its upstream end. */
   hangBandRuns: GauntletHangBandRunEvidence[]
+  /** Every union-set run with geometry and connectivity (sorted by expressId). */
+  runs: GauntletEngineerRunGeometry[]
+  /** Junction tolerance the `drainsInto` edges were built with. */
+  connectivityToleranceM: number
 }
 
 /** Everything `engineerComparisonMetrics` needs, plus the report and the scope facts, JSON-ready. */
@@ -281,11 +309,26 @@ function buildEngineerBranchRuns(
 ): GauntletEngineerBranchRuns {
   const hostPoints = fixturePlanPoints(hostFixtures)
   const belowPoints = storeyBelowFixtures === null ? null : fixturePlanPoints(storeyBelowFixtures)
+  // Downstream connectivity at the fitting-bridged tolerance (G2): `from`
+  // drains into `into` when the junction is an upstream join.
+  const connectivity = classifyEngineerRunRoles(
+    hangSelection.horizontals.map((entry) => entry.segment),
+    metersPerSourceUnit,
+    ENGINEER_FITTING_BRIDGE_TOLERANCE_M,
+  )
+  const drainsIntoByRun = new Map<number, number[]>()
+  for (const junction of connectivity.junctions) {
+    if (!junction.upstream) continue
+    const list = drainsIntoByRun.get(junction.fromExpressId) ?? []
+    list.push(junction.intoExpressId)
+    drainsIntoByRun.set(junction.fromExpressId, list)
+  }
   let unionTotalM = 0
   let inBandOnly = 0
   let inHangOnly = 0
   let both = 0
   const hangBandRuns: GauntletHangBandRunEvidence[] = []
+  const runs: GauntletEngineerRunGeometry[] = []
   for (const entry of hangSelection.horizontals) {
     const start = ifcSourceToDrawing(entry.segment.start!, metersPerSourceUnit)
     const end = ifcSourceToDrawing(entry.segment.end!, metersPerSourceUnit)
@@ -294,8 +337,17 @@ function buildEngineerBranchRuns(
     if (entry.rule === 'in-band') inBandOnly += 1
     else if (entry.rule === 'in-hang') inHangOnly += 1
     else both += 1
-    if (entry.rule === 'in-band') continue
     const upstream = entry.segment.start!.z >= entry.segment.end!.z ? start : end
+    runs.push({
+      expressId: entry.segment.expressId,
+      rule: entry.rule,
+      diameterMm: entry.segment.outerDiameterMm,
+      planLengthM,
+      upstream,
+      downstream: upstream === start ? end : start,
+      drainsInto: [...(drainsIntoByRun.get(entry.segment.expressId) ?? [])].sort((a, b) => a - b),
+    })
+    if (entry.rule === 'in-band') continue
     hangBandRuns.push({
       expressId: entry.segment.expressId,
       rule: entry.rule,
@@ -310,6 +362,8 @@ function buildEngineerBranchRuns(
     literalBand: { segments: literalBand.segments.length, byContainment: literalBand.byContainmentCount, totalM: literalTotalM },
     union: { segments: hangSelection.horizontals.length, inBandOnly, inHangOnly, both, totalM: unionTotalM },
     hangBandRuns,
+    runs,
+    connectivityToleranceM: connectivity.toleranceM,
   }
 }
 

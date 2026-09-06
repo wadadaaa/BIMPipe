@@ -41,7 +41,41 @@ function pipelineInput(): GauntletMetricsInput {
         { id: 'c-37', stackId: 'stack-c', storeyId: 37, position: { x: 50, y: 0, z: 50 } },
       ],
       ourRiserUnits: 'm',
-      ourBranchRoutes: [],
+      ourBranchRoutes: [
+        {
+          storeyId: 41,
+          planUnits: 'm',
+          segments: [
+            {
+              id: 'branch-seg|41|a-41|0',
+              start: { x: 1, z: 0, elevation: 0.02 },
+              end: { x: 0, z: 0, elevation: 0 },
+              axis: 'x',
+              kind: 'fixture-branch',
+              servedFixtureExpressIds: [1],
+              diameterMm: 110,
+              riserId: 'a-41',
+            },
+          ],
+        },
+        // Another storey's routes never enter the storey's shared set.
+        {
+          storeyId: 37,
+          planUnits: 'mm',
+          segments: [
+            {
+              id: 'branch-seg|37|a-37|0',
+              start: { x: 3000, z: 0, elevation: 60 },
+              end: { x: 0, z: 0, elevation: 0 },
+              axis: 'x',
+              kind: 'fixture-branch',
+              servedFixtureExpressIds: [7],
+              diameterMm: 110,
+              riserId: 'a-37',
+            },
+          ],
+        },
+      ],
       ourAssignments: [
         {
           fixtureExpressId: 1,
@@ -113,6 +147,14 @@ function pipelineInput(): GauntletMetricsInput {
       literalBand: { segments: 2, byContainment: 0, totalM: 6 },
       union: { segments: 5, inBandOnly: 1, inHangOnly: 3, both: 1, totalM: 30 },
       hangBandRuns: [],
+      // Fixture 1 sits at viewer (1, z 0) → drawing (1, 0): run 101 starts 0.5 m from it and
+      // drains into collector 102; run 103 starts far from every fixture.
+      runs: [
+        { expressId: 101, rule: 'in-hang', diameterMm: 110, planLengthM: 2, upstream: { xM: 1.5, yM: 0 }, downstream: { xM: 1.5, yM: -2 }, drainsInto: [102] },
+        { expressId: 102, rule: 'in-hang', diameterMm: 110, planLengthM: 6, upstream: { xM: 1.5, yM: -2 }, downstream: { xM: 1.5, yM: -8 }, drainsInto: [] },
+        { expressId: 103, rule: 'both', diameterMm: 50, planLengthM: 22, upstream: { xM: 30, yM: 30 }, downstream: { xM: 30, yM: 8 }, drainsInto: [] },
+      ],
+      connectivityToleranceM: 0.15,
     },
     storeyBelow: { id: 37, name: 'GF', fixtures: 0 },
     cores: [],
@@ -147,16 +189,75 @@ describe('gauntletMetricsInputFromPipeline', () => {
     expect(input.engineerBranchTotalM).toEqual({ union: 30, literalBand: 6 })
     // Fixture 3 has no plan position: not "positioned"; fixture 2 is positioned but unrouted.
     expect(input.fixtures).toEqual({ positioned: 2, routed: 1 })
+    // Shared-set input in the drawing frame: viewer (x, z) → (xM, −z); only positioned fixtures, only storey-41 segments.
+    expect(input.sharedFixtures.fixtures).toEqual([
+      { expressId: 1, xM: 1, yM: 0 },
+      { expressId: 2, xM: 9, yM: 0 },
+    ])
+    expect(input.sharedFixtures.routedFixtureExpressIds).toEqual([1])
+    expect(input.sharedFixtures.ourSegments).toEqual([{ planLengthM: 1, servedFixtureExpressIds: [1] }])
+    expect(input.sharedFixtures.engineerRuns.map((run) => run.id)).toEqual([101, 102, 103])
+    expect(input.sharedFixtures.engineerRuns[0]).toEqual({ id: 101, upstream: { xM: 1.5, yM: 0 }, planLengthM: 2, drainsInto: [102] })
 
     const metrics = computeGauntletMetrics(input)
     expect(metrics.obstruction).toBe(1)
     expect(metrics.stacksRatio).toBe(1)
     expect(metrics.meanDistToEngineerStackM).toBeCloseTo(2, 6)
-    expect(metrics.branchRatio).toBeCloseTo(0.25, 6)
+    // Shared: fixture 1 only → ours 1 m / engineer 2 + 6 m (run 103 unattributed).
+    expect(metrics.sharedFixtures.sharedFixtureExpressIds).toEqual([1])
+    expect(metrics.sharedFixtures.engineerRunsUnattributed).toBe(1)
+    expect(metrics.branchRatio).toBeCloseTo(0.125, 6)
+    expect(metrics.branchRatioFullUnion).toBeCloseTo(0.25, 6)
     expect(metrics.branchRatioLiteralBand).toBeCloseTo(1.25, 6)
     expect(metrics.routedFraction).toBe(0.5)
     expect(metrics.verdict).toBe('red')
     expect(metrics.reds.map((line) => line.split(':')[0])).toEqual(['obstruction', 'branch length', 'routed'])
+  })
+
+  it('converts millimetre plan units of fixtures and segments to metres', () => {
+    const base = pipelineInput()
+    base.comparisonInput.ourRiserUnits = 'mm'
+    base.comparisonInput.ourAssignments = [
+      {
+        fixtureExpressId: 1,
+        kind: 'TOILETPAN',
+        storeyId: 41,
+        unassigned: false,
+        riserId: 'a-41',
+        stackId: 'stack-a',
+        fixturePosition: { x: 1000, y: 3000, z: -500 },
+        riserPosition: { x: 0, y: 3000, z: 0 },
+        planDistance: 1118,
+        units: 'mm',
+        assignedBy: 'wet-core',
+        exceedsMaxBranchLength: false,
+      },
+      { fixtureExpressId: 2, kind: 'SINK', storeyId: 41, unassigned: true, fixturePosition: { x: 9000, y: 3000, z: 0 }, reason: 'no-riser-within-branch-length' },
+    ]
+    base.comparisonInput.ourBranchRoutes = [
+      {
+        storeyId: 41,
+        planUnits: 'mm',
+        segments: [
+          {
+            id: 'branch-seg|41|a-41|0',
+            start: { x: 1000, z: -500, elevation: 20 },
+            end: { x: 0, z: -500, elevation: 10 },
+            axis: 'x',
+            kind: 'fixture-branch',
+            servedFixtureExpressIds: [1],
+            diameterMm: 110,
+            riserId: 'a-41',
+          },
+        ],
+      },
+    ]
+    const input = gauntletMetricsInputFromPipeline(base)
+    expect(input.sharedFixtures.fixtures).toEqual([
+      { expressId: 1, xM: 1, yM: 0.5 },
+      { expressId: 2, xM: 9, yM: 0 },
+    ])
+    expect(input.sharedFixtures.ourSegments).toEqual([{ planLengthM: 1, servedFixtureExpressIds: [1] }])
   })
 
   it('turns empty engineer sets into null totals and an empty engineer stack list without a band', () => {
