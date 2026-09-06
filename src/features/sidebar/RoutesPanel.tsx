@@ -98,26 +98,29 @@ export function RoutesPanel({
 
       {groups.length > 0 && (
         <ul className="routes-panel__list" data-testid="branch-run-groups">
-          {groups.map((group) => (
-            <li key={group.stackId} className="routes-panel__group" data-testid="branch-run-group">
-              <span className="routes-panel__item-riser">{group.stackLabel}</span>
-              <span className="routes-panel__group-detail">
-                {group.fixtureExpressIds.length} fixture{group.fixtureExpressIds.length === 1 ? '' : 's'} ·{' '}
-                {group.segmentCount} run{group.segmentCount === 1 ? '' : 's'}
-                {group.fixturesAtStackExpressIds.length > 0 &&
-                  ` · ${group.fixturesAtStackExpressIds.length} at the stack (no horizontal run)`}
-                {(collectorRowsByStackId.get(group.stackId)?.size ?? 0) > 0 && (
-                  <span data-testid="branch-run-collectors">
-                    {` · ${collectorRowsByStackId.get(group.stackId)!.size} row collector${collectorRowsByStackId.get(group.stackId)!.size === 1 ? '' : 's'}`}
-                  </span>
-                )}
-              </span>
-              <span className="routes-panel__group-spec">
-                {formatMetres(group.totalLengthM)} · Ø{group.diametersMm.length > 0 ? group.diametersMm.join('/') : '—'} ·{' '}
-                {group.slopePercent.toFixed(1)} %
-              </span>
-            </li>
-          ))}
+          {groups.map((group) => {
+            const collectorRowCount = collectorRowsByStackId.get(group.stackId)?.size ?? 0
+            return (
+              <li key={group.stackId} className="routes-panel__group" data-testid="branch-run-group">
+                <span className="routes-panel__item-riser">{group.stackLabel}</span>
+                <span className="routes-panel__group-detail">
+                  {group.fixtureExpressIds.length} fixture{group.fixtureExpressIds.length === 1 ? '' : 's'} ·{' '}
+                  {group.segmentCount} run{group.segmentCount === 1 ? '' : 's'}
+                  {group.fixturesAtStackExpressIds.length > 0 &&
+                    ` · ${group.fixturesAtStackExpressIds.length} at the stack (no horizontal run)`}
+                  {collectorRowCount > 0 && (
+                    <span data-testid="branch-run-collectors">
+                      {` · ${collectorRowCount} row collector${collectorRowCount === 1 ? '' : 's'}`}
+                    </span>
+                  )}
+                </span>
+                <span className="routes-panel__group-spec">
+                  {formatMetres(group.totalLengthM)} · Ø{group.diametersMm.length > 0 ? group.diametersMm.join('/') : '—'} ·{' '}
+                  {group.slopePercent.toFixed(1)} %
+                </span>
+              </li>
+            )
+          })}
         </ul>
       )}
 

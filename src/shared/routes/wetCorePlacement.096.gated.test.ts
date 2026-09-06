@@ -342,7 +342,7 @@ gated('096-P + 096-A wet-core placement on storey 01 (gated: requires local clie
           `[096 office report] cores=${office.cores.length} stacks=${officeStacks.length} (${JSON.stringify(officeRules)}, flagged ${officeFlagged}); ` +
             `core shafts ${officeSelection?.selected.length ?? 0}/${officeSelection?.candidates.length ?? 0} (${officeSelection?.denseClusters.length ?? 0} dense clusters, ${officeSelection?.largeVoids.length ?? 0} void anchors); ` +
             `fixture rows ${office.fixtureRows.length}; nearest-stack assignment under the 12 m placeholder: ${officeAssignments.filter((a) => !a.unassigned).length}/${officeAssignments.length} routed, ` +
-            `${officeAssignments.filter((a) => a.exceedsMaxBranchLength).length} over-length; residential run: ${coreStacks.length} stacks (${JSON.stringify(rules)})`,
+            `${officeAssignments.filter((a) => !a.unassigned && a.exceedsMaxBranchLength).length} over-length; residential run: ${coreStacks.length} stacks (${JSON.stringify(rules)})`,
         )
         expect(office.typology).toBe('office')
         expect(office.cores).toHaveLength(result.cores.length)

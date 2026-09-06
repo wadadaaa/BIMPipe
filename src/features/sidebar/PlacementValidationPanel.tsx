@@ -617,16 +617,29 @@ function TypologySection({
       )}
       {suggestion !== null && suggestion.typology === 'office' && (
         <ul className="risers-panel__legend-list" data-testid="office-core-shafts">
-          {suggestion.officeCoreShafts.map((selection) => (
-            <li key={selection.storeyId}>
-              <strong>Core shafts:</strong> {selection.selected.length} of {selection.candidates.length} shaft candidate(s) selected (
-              {selection.denseClusters.length} dense-structure cluster(s), {selection.largeVoids.length} stair/lift void anchor(s)).
-              {selection.candidates
-                .filter((candidate) => candidate.selected)
-                .map((candidate) => ` ${candidate.areaM2.toFixed(2)} m² ${candidate.reason}`)
-                .join(';')}
-            </li>
-          ))}
+          {suggestion.officeCoreShafts.map((selection) => {
+            const rejected: Record<string, number> = {}
+            for (const candidate of selection.candidates) {
+              if (candidate.rejection !== null) rejected[candidate.rejection] = (rejected[candidate.rejection] ?? 0) + 1
+            }
+            const usedShaftIds = new Set(
+              suggestion.stacks.flatMap((stack) =>
+                stack.anchor === 'wet-core' && stack.placement.rule === 'shaft' ? [stack.placement.shaftId] : [],
+              ),
+            )
+            const used = selection.candidates.filter((candidate) => usedShaftIds.has(candidate.candidate.id))
+            return (
+              <li key={selection.storeyId}>
+                <strong>Core shafts:</strong> {selection.selected.length} of {selection.candidates.length} shaft candidate(s) selected (
+                {selection.denseClusters.length} dense-structure cluster(s), {selection.largeVoids.length} stair/lift void anchor(s))
+                {Object.keys(rejected).length > 0 &&
+                  `; rejected: ${Object.entries(rejected)
+                    .map(([reason, count]) => `${count} ${reason.replace(/-/g, ' ')}`)
+                    .join(', ')}`}
+                .{used.length > 0 && ` Stacks sit on ${used.length}: ${used.map((candidate) => candidate.reason.replace(/^core shaft: /, '')).join('; ')}.`}
+              </li>
+            )
+          })}
           <li>
             <strong>Fixture rows:</strong>{' '}
             {suggestion.fixtureRows.length === 0
