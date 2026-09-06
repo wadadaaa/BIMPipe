@@ -21,8 +21,14 @@ import { closeSpecModels, GAUNTLET_BUILTIN_FLOOR_SPECS, openSpecModels, specFile
 const SPEC = GAUNTLET_BUILTIN_FLOOR_SPECS['096-01']
 const TEST_TIMEOUT_MS = 600_000
 
-// Engineer risers: V1's honest storey-01 count (15 sanitary + 1 vent intersecting).
-const PIN_ENGINEER_SANITARY_STACKS = 15
+// Engineer risers: V1's honest storey-01 count is 15 sanitary + 1 vent
+// intersecting; R1's served-stack rule keeps the 12 joined by a storey-01
+// horizontal within 0.5 m (audit 2026-09-06: risers 12, 14 and 18 have no run
+// of this storey within 0.5 m — the Ø160/Ø200 pair on the south edge passes
+// through to upper storeys, riser 18 sits 0.54 m from a WC with no drawn run).
+const PIN_ENGINEER_SANITARY_STACKS_INTERSECTING = 15
+const PIN_ENGINEER_SANITARY_STACKS = 12
+const PIN_ENGINEER_PASS_THROUGH = 3
 const PIN_ENGINEER_VENT_STACKS = 1
 // Horizontal SW-GRV runs by storey rule: 12 in the literal band, 122 in the
 // 1.2 m hang band under the slab, 9 crossing the slab level (counted in both).
@@ -38,8 +44,11 @@ const PIN_SLOPE_COVERAGE = 0.896
 // Collector role at the strict 50 mm endpoint-coincidence rule (Revit joins
 // pipes through fittings, so most junctions are not endpoint-coincident).
 const PIN_COLLECTORS_STRICT = 2
-// Our side: 10 wet cores → 10 stacks on the storey (V3 pin).
-const PIN_OUR_STACKS = 10
+// Our side: 10 wet cores → 8 stacks on the storey (R1: the two cores whose
+// snap window is fully obstructed are gathered into a neighbour's stack through
+// a core collector instead of a flagged stack on a blocked cell; V3 pinned 10).
+const PIN_OUR_STACKS = 8
+const PIN_OUR_CORE_COLLECTORS = 2
 
 const gated = describe.skipIf(!specFilesExist(SPEC))
 
@@ -67,6 +76,9 @@ gated('engineer + our floor drawings on 096 storey 01 (gated: requires local cli
         // --- engineer sheet ---
         expect(engineer.model.title).toBe('Storey 01 — sanitary plan')
         expect(engineer.diagnostics.risers.sanitary).toBe(PIN_ENGINEER_SANITARY_STACKS)
+        expect(engineer.diagnostics.risers.sanitaryPassThrough).toBe(PIN_ENGINEER_PASS_THROUGH)
+        expect(metricsInput.engineerStacks.intersecting).toBe(PIN_ENGINEER_SANITARY_STACKS_INTERSECTING)
+        expect(metricsInput.engineerStacks.served).toBe(PIN_ENGINEER_SANITARY_STACKS)
         expect(engineer.diagnostics.risers.vent).toBe(PIN_ENGINEER_VENT_STACKS)
         expect(engineer.model.risers.filter((riser) => riser.system === 'sanitary')).toHaveLength(PIN_ENGINEER_SANITARY_STACKS)
         expect(engineer.model.risers.filter((riser) => riser.system === 'vent')).toHaveLength(PIN_ENGINEER_VENT_STACKS)
@@ -86,6 +98,8 @@ gated('engineer + our floor drawings on 096 storey 01 (gated: requires local cli
         expect(sanitaryPipes.total).toBe(sanitaryPipes.inBand + sanitaryPipes.inHang - sanitaryPipes.both)
         expect(engineer.model.pipes.filter((pipe) => pipe.system === 'sanitary')).toHaveLength(PIN_SANITARY_TOTAL)
         expect(metricsInput.engineerStoreyHorizontals.literalBandSelection.segments).toBe(PIN_SANITARY_IN_BAND)
+        // Every SW-GRV segment of this file has a centreline: the containment rule never engages here.
+        expect(metricsInput.engineerStoreyHorizontals.literalBandSelection.byContainmentRejected).toBe(0)
 
         expect(engineer.diagnostics.slope.extrusionCoverage).not.toBeNull()
         expect(engineer.diagnostics.slope.extrusionCoverage!).toBeGreaterThanOrEqual(MIN_SLOPE_COVERAGE)
@@ -123,9 +137,17 @@ gated('engineer + our floor drawings on 096 storey 01 (gated: requires local cli
         expect(ours.model.fixtures).toEqual(engineer.model.fixtures)
         expect(ours.model.structure).toEqual(engineer.model.structure)
 
-        // Metrics input is JSON-ready and the report agrees with the V3/V5 pins.
+        // Metrics input is JSON-ready and the report agrees with the V3/V5/R1 pins.
         expect(JSON.parse(JSON.stringify(metricsInput)).report.riserCounts.engineerStacksIntersectingStorey).toBe(PIN_ENGINEER_SANITARY_STACKS)
         expect(metricsInput.report.riserCounts.oursStacksOnStorey).toBe(PIN_OUR_STACKS)
+        // R1 core collectors: the gathered cores appear as collector runs, not stacks.
+        expect(metricsInput.coreCollectors).toHaveLength(PIN_OUR_CORE_COLLECTORS)
+        expect(metricsInput.continuityProbes.every((probe) => probe.probe.status !== 'blocked')).toBe(true)
+        expect(metricsInput.continuityProbes.every((probe) => !probe.flagged)).toBe(true)
+        const collectorRuns = metricsInput.comparisonInput.ourBranchRoutes.flatMap((floor) =>
+          floor.segments.filter((segment) => segment.coreCollectorId !== undefined),
+        )
+        expect(new Set(collectorRuns.map((segment) => segment.coreCollectorId)).size).toBe(PIN_OUR_CORE_COLLECTORS)
       } finally {
         closeSpecModels(api, models)
       }

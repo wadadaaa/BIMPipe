@@ -10,6 +10,7 @@ import {
   type ContinuityMap,
   type ContinuityStoreyInput,
 } from '@/domain/continuityMap'
+import { buildFixtureCoreIds, type CoreCollector } from '@/domain/coreCollectors'
 import type { FloorDrawingModel } from '@/domain/drawing/floorDrawingModel'
 import {
   computeEngineerComparison,
@@ -19,7 +20,9 @@ import {
 import {
   classifyEngineerRiserStacks,
   selectEngineerBranchSegments,
+  selectEngineerServedStacks,
   selectEngineerStoreyHorizontals,
+  stacksIntersectingBand,
   storeySlabBandM,
   type EngineerRiserClassification,
   type EngineerStoreyHorizontalRule,
@@ -167,7 +170,24 @@ export interface GauntletMetricsInput {
     inHang: number
     both: number
     total: number
-    literalBandSelection: { segments: number; byGeometry: number; byContainment: number }
+    literalBandSelection: {
+      segments: number
+      byGeometry: number
+      byContainment: number
+      /** Geometry-less pieces contained in the storey whose invert contradicts it (excluded), with their Pset length. */
+      byContainmentRejected: number
+      byContainmentRejectedLengthM: number
+    }
+  }
+  /**
+   * Engineer sanitary stacks intersecting the storey band split by the
+   * served-stack rule (R1): only `served` stacks are compared / drawn.
+   */
+  engineerStacks: {
+    intersecting: number
+    served: number
+    passThrough: Array<{ id: string; xM: number; yM: number; diameterMm: number }>
+    joinToleranceM: number
   }
   /**
    * The engineer's horizontal sanitary runs of the storey under both storey
@@ -178,6 +198,8 @@ export interface GauntletMetricsInput {
   /** Whole-building fixture positions the hang-band evidence was measured against; null without `wholeBuildingExtent`. */
   storeyBelow: { id: StoreyId; name: string; fixtures: number } | null
   cores: Array<Pick<WetCore, 'id' | 'memberExpressIds' | 'kindsFingerprint' | 'kindCounts' | 'bbox' | 'centroid'>>
+  /** Obstructed cores gathered into a neighbour's stack (R1); no stack of their own. */
+  coreCollectors: CoreCollector[]
   continuityProbes: GauntletContinuityProbe[]
   fixtures: { merged: number; byKind: Record<string, number>; duplicates: number }
   timingsMs: Record<string, number>
@@ -463,8 +485,8 @@ export async function runGauntletFloorPipeline(
   diagnostics.push(...suggestion.diagnostics)
 
   // --- assignment by wet core + branch routing --------------------------------
-  const fixtureCoreIds = new Map<number, string>()
-  for (const core of suggestion.cores) for (const expressId of core.memberExpressIds) fixtureCoreIds.set(expressId, core.id)
+  // Gathered cores (R1 core collectors) belong to the receiving core's stack.
+  const fixtureCoreIds = buildFixtureCoreIds(suggestion.cores, suggestion.coreCollectors)
   const stackCoreIds = new Map<string, string>()
   for (const stack of suggestion.stacks) if (stack.anchor === 'wet-core') stackCoreIds.set(stack.stackId, stack.core.id)
   const storeyRisers = suggestion.risers.filter((riser) => riser.storeyId === hostStorey.id)
@@ -473,20 +495,42 @@ export async function runGauntletFloorPipeline(
     storeyRisers.map((riser) => ({ id: riser.id, stackId: riser.stackId, storeyId: riser.storeyId, position: riser.position })),
     { units: 'm', coreMembership: { fixtureCoreIds, stackCoreIds }, typology: suggestion.typology },
   )
-  const routes = buildBranchRoutesFromAssignments(assignments, { rowCollectors: suggestion.fixtureRows })
+  const routes = buildBranchRoutesFromAssignments(assignments, {
+    rowCollectors: suggestion.fixtureRows,
+    coreCollectors: suggestion.coreCollectors,
+  })
   diagnostics.push(
-    `typology "${suggestion.typology}" applied (placement, branch limit, ${suggestion.fixtureRows.length} row collector(s)).`,
+    `typology "${suggestion.typology}" applied (placement, branch limit, ${suggestion.fixtureRows.length} row collector(s), ` +
+      `${suggestion.coreCollectors.length} core collector(s)).`,
   )
 
   // --- comparison metrics (as the page computes them) -------------------------
   const literalBand = selectEngineerBranchSegments(network, band)
+  const hangSelection = selectEngineerStoreyHorizontals(network, band)
+  // Served-stack rule (R1): the compared engineer stacks are those a horizontal
+  // of the storey joins; pass-through stacks are recorded, not compared.
+  const servedStacks = selectEngineerServedStacks(
+    stacksIntersectingBand(classification.sanitaryStacks, band),
+    hangSelection.horizontals,
+    network.metersPerSourceUnit,
+  )
+  diagnostics.push(
+    `engineer sanitary stacks on the storey: ${servedStacks.served.length} served (a horizontal joins within ${servedStacks.joinToleranceM} m), ` +
+      `${servedStacks.passThrough.length} pass-through excluded: ${servedStacks.passThrough.map((stack) => stack.id).join(', ') || 'none'}.`,
+  )
+  if (literalBand.byContainmentRejectedCount > 0) {
+    diagnostics.push(
+      `literal band: ${literalBand.byContainmentRejectedCount} geometry-less segment(s) contained in the storey rejected — their invert lies outside ` +
+        `[bottom − ${hangSelection.hangDepthM} m, top) (${literalBand.byContainmentRejectedLengthM.toFixed(2)} m of Pset length, stacks filed on this storey).`,
+    )
+  }
   const comparisonInput: EngineerComparisonInput = {
     ourRisers: suggestion.risers,
     ourRiserUnits: 'm',
     ourBranchRoutes: routes,
     ourAssignments: assignments,
     engineerRisers: {
-      sanitaryStacks: alignEngineerStacksToViewerPlan(classification.sanitaryStacks),
+      sanitaryStacks: alignEngineerStacksToViewerPlan(servedStacks.served),
       ventStacks: alignEngineerStacksToViewerPlan(classification.ventStacks),
       stubs: alignEngineerStacksToViewerPlan(classification.stubs),
       minStackExtentM: classification.minStackExtentM,
@@ -496,7 +540,6 @@ export async function runGauntletFloorPipeline(
     engineerSegments: literalBand.segments,
   }
   const report = computeEngineerComparison(comparisonInput)
-  const hangSelection = selectEngineerStoreyHorizontals(network, band)
   const engineerBranchRuns = buildEngineerBranchRuns(
     literalBand,
     hangSelection,
@@ -573,7 +616,15 @@ export async function runGauntletFloorPipeline(
         segments: literalBand.segments.length,
         byGeometry: literalBand.byGeometryCount,
         byContainment: literalBand.byContainmentCount,
+        byContainmentRejected: literalBand.byContainmentRejectedCount,
+        byContainmentRejectedLengthM: literalBand.byContainmentRejectedLengthM,
       },
+    },
+    engineerStacks: {
+      intersecting: servedStacks.served.length + servedStacks.passThrough.length,
+      served: servedStacks.served.length,
+      passThrough: servedStacks.passThrough.map((stack) => ({ id: stack.id, xM: stack.xM, yM: stack.yM, diameterMm: stack.diameterMm })),
+      joinToleranceM: servedStacks.joinToleranceM,
     },
     engineerBranchRuns,
     storeyBelow:
@@ -588,6 +639,7 @@ export async function runGauntletFloorPipeline(
       bbox: core.bbox,
       centroid: core.centroid,
     })),
+    coreCollectors: suggestion.coreCollectors,
     continuityProbes,
     fixtures: { merged: merged.fixtures.length, byKind, duplicates: merged.duplicates.length },
     timingsMs,

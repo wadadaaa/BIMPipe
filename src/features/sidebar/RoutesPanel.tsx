@@ -5,7 +5,7 @@ import {
   type UnassignedFixtureRiser,
   type UnassignedReason,
 } from '@/domain/assignFixturesToRisers'
-import type { FloorRoutes } from '@/domain/branchRouting'
+import type { FloorRoutes, RouteSegment } from '@/domain/branchRouting'
 import { formatBranchSlopePercent } from '@/domain/branchDefaults'
 import { groupBranchRunsByStack } from '@/shared/routes/branchRouteSummary'
 import './RoutesPanel.css'
@@ -34,6 +34,22 @@ function unassignedReasonCopy(reason: UnassignedReason, branchLimitLabel: string
   }
 }
 
+/** Distinct ids (row / core collector) picked off the segments, per receiving stack. */
+function collectIdsByStack(
+  floor: FloorRoutes | null,
+  pick: (segment: RouteSegment) => string | undefined,
+): Map<string, Set<string>> {
+  const idsByStackId = new Map<string, Set<string>>()
+  for (const segment of floor?.segments ?? []) {
+    const id = pick(segment)
+    if (id === undefined || segment.riserStackId === undefined) continue
+    const ids = idsByStackId.get(segment.riserStackId) ?? new Set<string>()
+    ids.add(id)
+    idsByStackId.set(segment.riserStackId, ids)
+  }
+  return idsByStackId
+}
+
 /**
  * Branch runs of the open floor grouped by the stack they drain to (V5). This
  * is the only routes list in plain mode — riser-to-riser chains are never shown
@@ -56,14 +72,12 @@ export function RoutesPanel({
   )
   const totalLengthM = groups.reduce((sum, group) => sum + group.totalLengthM, 0)
   const fixtureCount = new Set(groups.flatMap((group) => group.fixtureExpressIds)).size
-  // Office row collectors (G3): rows per stack, from the segment roles.
-  const collectorRowsByStackId = new Map<string, Set<string>>()
-  for (const segment of floor?.segments ?? []) {
-    if (segment.role !== 'row-collector' || segment.rowId === undefined || segment.riserStackId === undefined) continue
-    const rows = collectorRowsByStackId.get(segment.riserStackId) ?? new Set<string>()
-    rows.add(segment.rowId)
-    collectorRowsByStackId.set(segment.riserStackId, rows)
-  }
+  // Office row collectors (G3): rows per stack, from the segment roles. Core
+  // collectors (R1): gathered cores per stack, from `coreCollectorId`.
+  const collectorRowsByStackId = collectIdsByStack(floor, (segment) => (segment.role === 'row-collector' ? segment.rowId : undefined))
+  const coreCollectorsByStackId = collectIdsByStack(floor, (segment) =>
+    segment.role === 'collector-run' ? segment.coreCollectorId : undefined,
+  )
 
   if (groups.length === 0 && unrouted.length === 0) {
     return (
@@ -100,6 +114,7 @@ export function RoutesPanel({
         <ul className="routes-panel__list" data-testid="branch-run-groups">
           {groups.map((group) => {
             const collectorRowCount = collectorRowsByStackId.get(group.stackId)?.size ?? 0
+            const coreCollectorCount = coreCollectorsByStackId.get(group.stackId)?.size ?? 0
             return (
               <li key={group.stackId} className="routes-panel__group" data-testid="branch-run-group">
                 <span className="routes-panel__item-riser">{group.stackLabel}</span>
@@ -111,6 +126,11 @@ export function RoutesPanel({
                   {collectorRowCount > 0 && (
                     <span data-testid="branch-run-collectors">
                       {` · ${collectorRowCount} row collector${collectorRowCount === 1 ? '' : 's'}`}
+                    </span>
+                  )}
+                  {coreCollectorCount > 0 && (
+                    <span data-testid="branch-run-core-collectors">
+                      {` · gathers ${coreCollectorCount} obstructed core${coreCollectorCount === 1 ? '' : 's'} through a collector run`}
                     </span>
                   )}
                 </span>

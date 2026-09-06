@@ -7,6 +7,7 @@ import type { StoreyAlignment } from '@/domain/alignStoreys'
 import type { MergedStoreyDetection } from '@/domain/mergeFixturesAcrossFiles'
 import type { EngineerPipeNetwork, EngineerRiserClassification } from '@/domain/engineerPipes'
 import type { ContinuityMap, OfficeCoreShaftSelection } from '@/domain/continuityMap'
+import type { CoreCollector } from '@/domain/coreCollectors'
 import { DEFAULT_BUILDING_TYPOLOGY, type BuildingTypology } from '@/domain/typology'
 import type { FixtureRow, WetCore } from '@/domain/wetCores'
 import type {
@@ -89,6 +90,8 @@ export interface WetCoreSuggestionState {
   fixtureRows: FixtureRow[]
   /** Office only: the core-shaft selection per storey the placement used. Empty for residential. */
   officeCoreShafts: OfficeCoreShaftSelection[]
+  /** Obstructed cores gathered into a neighbour's stack through a collector (R1); they have no stack. */
+  coreCollectors: CoreCollector[]
   diagnostics: string[]
 }
 
@@ -413,6 +416,7 @@ export type WorkspacePageAction =
         typology?: BuildingTypology
         fixtureRows?: FixtureRow[]
         officeCoreShafts?: OfficeCoreShaftSelection[]
+        coreCollectors?: CoreCollector[]
         diagnostics: string[]
       } | null
     }
@@ -713,6 +717,7 @@ function reduce(state: WorkspacePageState, action: WorkspacePageAction): Workspa
                 typology: wetCore.typology ?? DEFAULT_BUILDING_TYPOLOGY,
                 fixtureRows: wetCore.fixtureRows ?? [],
                 officeCoreShafts: wetCore.officeCoreShafts ?? [],
+                coreCollectors: wetCore.coreCollectors ?? [],
                 diagnostics: wetCore.diagnostics,
               },
         isSuggestingRisers: false,

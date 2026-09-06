@@ -1,6 +1,7 @@
 import type { Fixture, KitchenArea, Riser, Storey, StoreyId } from '@/domain/types'
 import type { ContinuityMap, OfficeCoreShaftSelection } from '@/domain/continuityMap'
 import type { BuildingTypology } from '@/domain/typology'
+import type { CoreCollector } from '@/domain/coreCollectors'
 import {
   computeRiserStackExtent,
   type RiserStackExtent,
@@ -225,6 +226,12 @@ export interface WetCoreSuggestedRisers {
   fixtureRows: FixtureRow[]
   /** Office only: the core-shaft selection per storey that placement used. Empty for residential. */
   officeCoreShafts: OfficeCoreShaftSelection[]
+  /**
+   * Obstructed cores gathered into a neighbour's stack (R1). They have no
+   * stack here; hand them to `buildFixtureCoreIds` and
+   * `buildBranchRoutesFromAssignments(assignments, { coreCollectors })`.
+   */
+  coreCollectors: CoreCollector[]
   /** Explicit notes about inputs that could not be used. */
   diagnostics: string[]
 }
@@ -322,6 +329,7 @@ export function buildWetCoreSuggestedRisers(options: BuildWetCoreSuggestedRisers
     typology: suggestion.typology,
     fixtureRows: suggestion.fixtureRows,
     officeCoreShafts: suggestion.officeCoreShafts,
+    coreCollectors: suggestion.coreCollectors,
     diagnostics,
   }
 }

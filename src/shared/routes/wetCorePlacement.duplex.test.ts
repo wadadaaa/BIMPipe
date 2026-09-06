@@ -99,6 +99,10 @@ describe('wet-core placement on the bundled Duplex sample', () => {
           expect(stack.placement.rule).toBe('wall-side-edge')
           expect(stack.placement.flagged).toBe(false)
         }
+        // R1: no obstruction grid on the storey → the core-collector rule never
+        // engages; the suggestion is the pre-R1 one (byte-identity proven by the
+        // R1 commit's before/after dump, see its message).
+        expect(after.coreCollectors).toEqual([])
         // The extent is wired: one entry per stack.
         expect(after.stackExtents).toHaveLength(after.stacks.length)
 

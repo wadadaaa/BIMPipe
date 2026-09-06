@@ -20,8 +20,22 @@ import { closeSpecModels, GAUNTLET_BUILTIN_FLOOR_SPECS, openSpecModels, specFile
 const SPEC = GAUNTLET_BUILTIN_FLOOR_SPECS['shbj-L04']
 const TEST_TIMEOUT_MS = 600_000
 
-const PIN_ENGINEER_SANITARY_STACKS = 9
+// R1 served-stack rule: 9 sanitary stacks intersect the L04 band, but only 5
+// are joined by an L04 horizontal within 0.5 m (audit 2026-09-06: risers 2, 6,
+// 7, 8 have no run of this storey within 0.5 m — nearest fixture 1.5 / 18.9 /
+// 10.5 / 17.6 m — they pass through to other storeys' fixtures / roof).
+const PIN_ENGINEER_SANITARY_STACKS_INTERSECTING = 9
+const PIN_ENGINEER_SANITARY_STACKS = 5
+const PIN_ENGINEER_PASS_THROUGH = 4
 const PIN_ENGINEER_VENT_STACKS = 2
+// Literal band: 14 resolved runs by Z + 6 geometry-less pieces contained in
+// L04 carrying 124.35 m of Pset length. Their inverts: 5 sit 12–19 m BELOW
+// the storey (full-height stacks filed on L04 → rejected, 121.65 m), 1 sits
+// 0.42 m under the slab (kept, 2.70 m). Literal band total 132.06 → 10.41 m.
+const PIN_LITERAL_BAND_SEGMENTS = 15
+const PIN_LITERAL_BAND_REJECTED = 5
+const PIN_LITERAL_BAND_REJECTED_M = 121.65
+const PIN_LITERAL_BAND_TOTAL_M = 10.41
 // Horizontal SW-GRV runs by storey rule: 14 in the literal 4 m band, 35 in the
 // 1.2 m hang band under the slab, 0 crossing the slab level → 49 drawn.
 const PIN_SANITARY_IN_BAND = 14
@@ -68,6 +82,10 @@ gated('engineer + our floor drawings on the second project MEP storey (gated: re
         // --- engineer sheet ---
         expect(engineer.model.title).toBe('Storey 04 — sanitary plan')
         expect(engineer.diagnostics.risers.sanitary).toBe(PIN_ENGINEER_SANITARY_STACKS)
+        expect(engineer.diagnostics.risers.sanitaryPassThrough).toBe(PIN_ENGINEER_PASS_THROUGH)
+        expect(metricsInput.engineerStacks.intersecting).toBe(PIN_ENGINEER_SANITARY_STACKS_INTERSECTING)
+        expect(metricsInput.engineerStacks.served).toBe(PIN_ENGINEER_SANITARY_STACKS)
+        expect(metricsInput.engineerStacks.passThrough).toHaveLength(PIN_ENGINEER_PASS_THROUGH)
         expect(engineer.diagnostics.risers.vent).toBe(PIN_ENGINEER_VENT_STACKS)
         expect(engineer.model.risers.filter((riser) => riser.system === 'sanitary')).toHaveLength(PIN_ENGINEER_SANITARY_STACKS)
         expect(engineer.model.risers.filter((riser) => riser.system === 'vent')).toHaveLength(PIN_ENGINEER_VENT_STACKS)
@@ -80,8 +98,16 @@ gated('engineer + our floor drawings on the second project MEP storey (gated: re
         expect(sanitaryPipes.both).toBe(PIN_SANITARY_BOTH)
         expect(sanitaryPipes.total).toBe(PIN_SANITARY_TOTAL)
         expect(engineer.model.pipes.filter((pipe) => pipe.system === 'sanitary')).toHaveLength(PIN_SANITARY_TOTAL)
-        // The 6 unresolved cut-face pipes (V1b) are vertical stacks, never horizontals: nothing is lost here.
-        expect(metricsInput.engineerStoreyHorizontals.literalBandSelection.segments).toBeGreaterThanOrEqual(PIN_SANITARY_IN_BAND)
+        // The 6 unresolved cut-face pipes (V1b) are vertical stacks, never
+        // horizontals; R1 rejects the 5 whose invert contradicts the containment
+        // and keeps the 1 that hangs 0.42 m under the slab.
+        const literal = metricsInput.engineerStoreyHorizontals.literalBandSelection
+        expect(literal.segments).toBe(PIN_LITERAL_BAND_SEGMENTS)
+        expect(literal.byGeometry).toBe(PIN_SANITARY_IN_BAND)
+        expect(literal.byContainment).toBe(1)
+        expect(literal.byContainmentRejected).toBe(PIN_LITERAL_BAND_REJECTED)
+        expect(literal.byContainmentRejectedLengthM).toBeCloseTo(PIN_LITERAL_BAND_REJECTED_M, 1)
+        expect(metricsInput.engineerBranchRuns.literalBand.totalM).toBeCloseTo(PIN_LITERAL_BAND_TOTAL_M, 1)
 
         expect(engineer.diagnostics.slope.extrusionCoverage).not.toBeNull()
         expect(engineer.diagnostics.slope.extrusionCoverage!).toBeCloseTo(PIN_SLOPE_COVERAGE, 3)

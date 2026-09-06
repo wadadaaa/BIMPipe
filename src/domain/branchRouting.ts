@@ -83,6 +83,12 @@ export interface RouteSegment {
   role?: RouteSegmentRole
   /** Id of the fixture row this segment belongs to (`role` 'row-stub' / 'row-collector' only). */
   rowId?: string
+  /**
+   * Id of the core collector (R1, `src/domain/coreCollectors.ts`) whose run
+   * this segment carries — set on the `'collector-run'` legs from a gathered
+   * core's junction to the receiving stack.
+   */
+  coreCollectorId?: string
 }
 
 /**
@@ -135,6 +141,20 @@ export interface RowCollectorInput {
   memberExpressIds: number[]
 }
 
+/**
+ * A wet core gathered into a neighbouring core's stack (R1 core collector).
+ * Structural subset of `CoreCollector` from `./coreCollectors`. Coordinates in
+ * the plan units of the assignments.
+ */
+export interface CoreCollectorInput {
+  id: string
+  storeyId: StoreyId
+  /** Where the gathered core's fixtures meet before the single run to the stack. */
+  junction: PlanPoint
+  /** Fixtures of the gathered core. */
+  memberExpressIds: number[]
+}
+
 export interface ComputeBranchRoutesOptions {
   /**
    * Units of the incoming plan coordinates. When omitted, units are detected
@@ -150,6 +170,13 @@ export interface ComputeBranchRoutesOptions {
    * Omitted/empty → every fixture routes individually (residential behaviour).
    */
   rowCollectors?: readonly RowCollectorInput[]
+  /**
+   * Core collectors (R1). Members of a gathered core that are assigned to the
+   * same riser route as: plain L-run to the core's junction → ONE L-run from
+   * the junction to the riser (`role: 'collector-run'`). Omitted/empty → no
+   * gathering (byte-identical to the pre-R1 routing).
+   */
+  coreCollectors?: readonly CoreCollectorInput[]
 }
 
 /**
@@ -205,6 +232,15 @@ export interface ComputeBranchRoutesOptions {
  * - Approximation: a stub can in theory overlap a plain leg on the same line
  *   (only when a member's along-coordinate equals the riser coordinate).
  *
+ * Core collectors (R1, `options.coreCollectors`):
+ * - Every member of a gathered core runs to the core's junction with the plain
+ *   corner rule (the junction takes the riser's place; the slope datum still
+ *   accounts for the remaining run to the riser), then ONE L-run from the
+ *   junction to the riser carries every member (`role: 'collector-run'`,
+ *   `coreCollectorId` set). A member exactly at the junction adds no leg.
+ * - Approximation: the collector is a Manhattan L-run under the slab; it is
+ *   not routed around walls or columns (no obstacle avoidance in V0).
+ *
  * @throws when the same riser id is given conflicting plan positions on one storey.
  */
 export function computeBranchRoutes(
@@ -213,6 +249,7 @@ export function computeBranchRoutes(
 ): FloorRoutes[] {
   const planUnits = options.planUnits ?? detectAssignedPlanUnits(assignments)
   const rowCollectors = options.rowCollectors ?? []
+  const coreCollectors = options.coreCollectors ?? []
   const sortedAssignments = [...assignments].sort((a, b) => a.fixtureExpressId - b.fixtureExpressId)
 
   const byStorey = new Map<StoreyId, AssignedFixture[]>()
@@ -233,9 +270,12 @@ export function computeBranchRoutes(
     }
 
     const storeyRows = rowCollectors.filter((row) => row.storeyId === storeyId)
+    const storeyCoreCollectors = coreCollectors.filter((collector) => collector.storeyId === storeyId)
     const segments: RouteSegment[] = []
     for (const riserId of [...byRiser.keys()].sort((a, b) => a.localeCompare(b))) {
-      segments.push(...routeRiserGroup(storeyId, riserId, byRiser.get(riserId) ?? [], planUnits, storeyRows))
+      segments.push(
+        ...routeRiserGroup(storeyId, riserId, byRiser.get(riserId) ?? [], planUnits, storeyRows, storeyCoreCollectors),
+      )
     }
 
     floors.push({ storeyId, planUnits, segments })
@@ -266,6 +306,8 @@ interface LegEntry {
   fixtureExpressIds: number[]
   /** Row-collector role carried by this entry, if any. */
   role?: RouteSegmentRole
+  /** Core collector whose run this entry is (collector-run legs of a gathered core). */
+  coreCollectorId?: string
 }
 
 interface LegBucket {
@@ -289,6 +331,7 @@ function routeRiserGroup(
   assignments: AssignedFixture[],
   planUnits: PlanUnits,
   rows: readonly RowCollectorInput[],
+  coreCollectors: readonly CoreCollectorInput[] = [],
 ): RouteSegment[] {
   const resolution = PLAN_SNAP_RESOLUTION[planUnits]
   const riserPlan = snapPlanPoint(assignments[0].riserPlan, resolution)
@@ -309,10 +352,20 @@ function routeRiserGroup(
     for (const member of members) rowMembers.add(member.fixtureExpressId)
     addRowLegs(buckets, row, members, riserPlan, resolution)
   }
+  const gatheredMembers = new Set<number>()
+  for (const collector of coreCollectors) {
+    const members = assignments.filter(
+      (assignment) =>
+        collector.memberExpressIds.includes(assignment.fixtureExpressId) && !rowMembers.has(assignment.fixtureExpressId),
+    )
+    if (members.length === 0) continue
+    for (const member of members) gatheredMembers.add(member.fixtureExpressId)
+    addCoreCollectorLegs(buckets, collector, members, riserPlan, resolution)
+  }
 
   for (const assignment of assignments) {
     const { fixtureExpressId } = assignment
-    if (rowMembers.has(fixtureExpressId)) continue
+    if (rowMembers.has(fixtureExpressId) || gatheredMembers.has(fixtureExpressId)) continue
     const fixturePlan = snapPlanPoint(assignment.fixturePlan, resolution)
     addLRunLegs(buckets, fixturePlan, riserPlan, { fixtureExpressIds: [fixtureExpressId] })
   }
@@ -355,6 +408,8 @@ function addLRunLegs(
   riserPlan: PlanPoint,
   entry: Omit<LegEntry, 'coord'>,
   firstAxis: 'x' | 'z' = 'x',
+  /** L1 run remaining beyond `riserPlan` when it is an intermediate junction, not the riser. */
+  tailBeyond = 0,
 ): void {
   const dx = from.x - riserPlan.x
   const dz = from.z - riserPlan.z
@@ -365,7 +420,7 @@ function addLRunLegs(
       side: dx > 0 ? 1 : -1,
       junctionCoord: riserPlan.x,
       tailDistance,
-    }, { fixtureExpressIds: entry.fixtureExpressIds, role: entry.role, coord: from.x })
+    }, { fixtureExpressIds: entry.fixtureExpressIds, role: entry.role, coreCollectorId: entry.coreCollectorId, coord: from.x })
   const zLeg = (tailDistance: number) =>
     addLeg(buckets, {
       axis: 'z',
@@ -373,14 +428,35 @@ function addLRunLegs(
       side: dz > 0 ? 1 : -1,
       junctionCoord: riserPlan.z,
       tailDistance,
-    }, { fixtureExpressIds: entry.fixtureExpressIds, role: entry.role, coord: from.z })
+    }, { fixtureExpressIds: entry.fixtureExpressIds, role: entry.role, coreCollectorId: entry.coreCollectorId, coord: from.z })
   if (firstAxis === 'x') {
-    if (dx !== 0) xLeg(Math.abs(dz))
-    if (dz !== 0) zLeg(0)
+    if (dx !== 0) xLeg(Math.abs(dz) + tailBeyond)
+    if (dz !== 0) zLeg(tailBeyond)
   } else {
-    if (dz !== 0) zLeg(Math.abs(dx))
-    if (dx !== 0) xLeg(0)
+    if (dz !== 0) zLeg(Math.abs(dx) + tailBeyond)
+    if (dx !== 0) xLeg(tailBeyond)
   }
+}
+
+/**
+ * Core-collector legs (R1): each gathered member L-runs to the core's junction,
+ * then one L-run from the junction to the riser carries them all.
+ */
+function addCoreCollectorLegs(
+  buckets: Map<string, LegBucket>,
+  collector: CoreCollectorInput,
+  members: AssignedFixture[],
+  riserPlan: PlanPoint,
+  resolution: number,
+): void {
+  const junction = snapPlanPoint(collector.junction, resolution)
+  const runLength = Math.abs(junction.x - riserPlan.x) + Math.abs(junction.z - riserPlan.z)
+  const allMembers = members.map((member) => member.fixtureExpressId).sort((a, b) => a - b)
+  for (const member of members) {
+    const memberPlan = snapPlanPoint(member.fixturePlan, resolution)
+    addLRunLegs(buckets, memberPlan, junction, { fixtureExpressIds: [member.fixtureExpressId] }, 'x', runLength)
+  }
+  addLRunLegs(buckets, junction, riserPlan, { fixtureExpressIds: allMembers, role: 'collector-run', coreCollectorId: collector.id })
 }
 
 /** Stub → collector → single run legs for the members of one row in one riser group. */
@@ -475,6 +551,7 @@ function emitBucketSegments(bucket: LegBucket): UnkeyedSegment[] {
     .sort(farthestFirst)
   const boundaries = [...entryCoords, bucket.junctionCoord]
   const role = resolveBucketRole(bucket)
+  const coreCollectorId = bucket.entries.find((entry) => entry.coreCollectorId !== undefined)?.coreCollectorId
 
   const served = new Set<number>()
   const segments: UnkeyedSegment[] = []
@@ -493,6 +570,7 @@ function emitBucketSegments(bucket: LegBucket): UnkeyedSegment[] {
       servedFixtureExpressIds,
       ...(role === undefined ? {} : { role }),
       ...(bucket.rowId === undefined ? {} : { rowId: bucket.rowId }),
+      ...(coreCollectorId === undefined ? {} : { coreCollectorId }),
     })
   }
   return segments

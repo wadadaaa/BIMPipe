@@ -10,6 +10,7 @@ import {
   clusterWetCores,
   detectFixtureRows,
   placeWetCoreStack,
+  snapWindowIntersectsGrid,
   type WetCore,
 } from './wetCores'
 
@@ -229,6 +230,46 @@ describe('placeWetCoreStack', () => {
     expect(placement.flagged).toBe(true)
     expect(placement.reason).toMatch(/obstructed/)
     expect(placement.position).toEqual({ x: 3, z: 3 })
+  })
+
+  it('(d→c, R1) a core whose snap window misses the grid entirely is NOT obstructed: wall-side-edge, unflagged', () => {
+    // The test grid covers roughly [0, 6] × [0, 6] (plus padding). A core at
+    // x = 20 with a 1.5 m window never touches it — the grid says nothing about
+    // that part of the plan, so it must not be reported as "everything blocked".
+    const map = buildTestMap({ opening: false, slab: true })
+    const grid = map.grids[0]
+    const farCore = coreOf([fixture(1, 'TOILETPAN', 20.0, 3.0)])
+    expect(snapWindowIntersectsGrid(grid, farCore.bbox, 1.5)).toBe(false)
+    const placement = placeWetCoreStack(farCore, {
+      units: 'm',
+      continuityMap: map,
+      maxSnap: 1.5,
+      floorPlanBounds: { minX: 0, maxX: 24, minZ: 0, maxZ: 6 },
+    })
+    expect(placement.rule).toBe('wall-side-edge')
+    expect(placement.flagged).toBe(false)
+    expect(placement.reason).toContain('obstruction grid does not cover the core or anything within 1.50 m of it')
+
+    // A core 1 m past the grid edge still has its window ON the grid, so the
+    // grid is consulted (here it finds a free padding cell); and the core in
+    // the middle of the solid slab keeps the genuine obstructed flag (test d).
+    const gridMaxX = grid.origin.x + grid.columns * grid.cellSize
+    const nearCore = coreOf([fixture(2, 'TOILETPAN', gridMaxX + 1.0, 3.0)])
+    expect(snapWindowIntersectsGrid(grid, nearCore.bbox, 1.5)).toBe(true)
+    const nearPlacement = placeWetCoreStack(nearCore, {
+      units: 'm',
+      continuityMap: map,
+      maxSnap: 1.5,
+      floorPlanBounds: { minX: 0, maxX: 24, minZ: 0, maxZ: 6 },
+    })
+    expect(nearPlacement.rule).toBe('free-cell')
+    const middleCore = coreOf([fixture(3, 'TOILETPAN', 3.0, 3.0)])
+    expect(snapWindowIntersectsGrid(grid, middleCore.bbox, 1.5)).toBe(true)
+    expect(placeWetCoreStack(middleCore, { units: 'm', continuityMap: map, maxSnap: 1.5 })).toMatchObject({ rule: 'centroid', flagged: true })
+
+    // Without plan bounds the far core keeps an unflagged centroid with the same explanation.
+    const noBounds = placeWetCoreStack(farCore, { units: 'm', continuityMap: map, maxSnap: 1.5 })
+    expect(noBounds).toMatchObject({ rule: 'centroid', flagged: false, position: { x: 20, z: 3 } })
   })
 
   it('(c) without a map uses the bbox edge farthest from the plan centre, offset by the clearance', () => {

@@ -12,6 +12,7 @@ import type {
 } from '@/shared/routes/buildSuggestedRisers'
 import type { FixtureRow, WetCore } from '@/domain/wetCores'
 import type { OfficeCoreShaftSelection } from '@/domain/continuityMap'
+import type { CoreCollector } from '@/domain/coreCollectors'
 import {
   BRANCH_LENGTH_LIMIT_M,
   DEFAULT_BUILDING_TYPOLOGY,
@@ -64,6 +65,8 @@ export interface WetCoreSuggestionSummary {
   fixtureRows: FixtureRow[]
   /** Office only: core-shaft selection per storey. */
   officeCoreShafts: OfficeCoreShaftSelection[]
+  /** Obstructed cores gathered into a neighbour's stack (R1); no stack of their own. */
+  coreCollectors: CoreCollector[]
   diagnostics: string[]
 }
 
@@ -505,6 +508,23 @@ function WetCoreSection({
           )
         })}
       </ul>
+      {suggestion.coreCollectors.length > 0 && (
+        <ul className="risers-panel__legend-list" data-testid="wet-core-collectors">
+          {suggestion.coreCollectors.map((collector) => {
+            const core = suggestion.cores.find((candidate) => candidate.id === collector.coreId)
+            const target = suggestion.stacks.find(
+              (stack) => stack.anchor === 'wet-core' && stack.core.id === collector.targetCoreId,
+            )
+            return (
+              <li key={collector.id}>
+                <strong>Gathered core{target === undefined ? '' : ` → ${target.stackLabel}`}:</strong>{' '}
+                {core === undefined ? collector.memberExpressIds.length + ' fixtures' : describeWetCoreMembers(core)} — no stack of its own;{' '}
+                {collector.reason}.
+              </li>
+            )
+          })}
+        </ul>
+      )}
       {suggestion.diagnostics.map((line) => (
         <p key={line} className="sidebar__panel-copy" dir="auto">
           {line}
@@ -541,6 +561,13 @@ function RoutingModelSection({
     0,
   )
   const collectorLengthM = floor?.planUnits === 'mm' ? collectorLength / 1000 : collectorLength
+  const coreCollectorSegments = floor === null ? [] : floor.segments.filter((segment) => segment.coreCollectorId !== undefined)
+  const coreCollectorIds = new Set(coreCollectorSegments.map((segment) => segment.coreCollectorId))
+  const coreCollectorLength = coreCollectorSegments.reduce(
+    (sum, segment) => sum + Math.abs(segment.start.x - segment.end.x) + Math.abs(segment.start.z - segment.end.z),
+    0,
+  )
+  const coreCollectorLengthM = floor?.planUnits === 'mm' ? coreCollectorLength / 1000 : coreCollectorLength
   return (
     <section className="sidebar__panel" data-testid="routing-model-section">
       <p className="sidebar__panel-title">Horizontal routing</p>
@@ -570,6 +597,12 @@ function RoutingModelSection({
             <li data-testid="row-collectors">
               <strong>Row collectors:</strong> {collectorRowIds.size} fixture row(s) drain through a collector along the row — {collectorSegments.length}{' '}
               collector segment(s), {collectorLengthM.toFixed(2)} m, then one run per row to the stack.
+            </li>
+          )}
+          {coreCollectorIds.size > 0 && (
+            <li data-testid="core-collectors">
+              <strong>Core collectors:</strong> {coreCollectorIds.size} obstructed wet core(s) have no stack of their own and drain through
+              a collector run to a neighbouring core&apos;s stack — {coreCollectorSegments.length} run segment(s), {coreCollectorLengthM.toFixed(2)} m.
             </li>
           )}
           {summary.overlength.length > 0 && (

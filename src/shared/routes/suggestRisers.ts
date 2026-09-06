@@ -1,6 +1,7 @@
 import type { Fixture, KitchenArea, PlanBounds, StoreyId } from '@/domain/types'
 import { selectOfficeCoreShafts, snapPointToContinuity, type ContinuityMap, type OfficeCoreShaftSelection } from '@/domain/continuityMap'
 import { DEFAULT_BUILDING_TYPOLOGY, TYPOLOGY_PLACEMENT_RULES, type BuildingTypology } from '@/domain/typology'
+import { gatherObstructedCores, type CoreCollector } from '@/domain/coreCollectors'
 import {
   clusterWetCores,
   detectFixtureRows,
@@ -233,6 +234,14 @@ export interface WetCoreSuggestion {
   fixtureRows: FixtureRow[]
   /** Office only: the core-shaft selection per storey that placement used. Empty for residential. */
   officeCoreShafts: OfficeCoreShaftSelection[]
+  /**
+   * Obstructed cores gathered into a neighbouring core's stack (R1,
+   * `gatherObstructedCores`); these cores have NO position in `positions`.
+   * Hand to `computeBranchRoutes({ coreCollectors })` and
+   * `buildFixtureCoreIds`. Empty when no core was obstructed or the typology
+   * disables gathering.
+   */
+  coreCollectors: CoreCollector[]
   /** Explicit notes about inputs that could not be used (fixtures without positions …). */
   diagnostics: string[]
 }
@@ -241,8 +250,12 @@ export interface WetCoreSuggestion {
  * Wet-core riser suggestion (V3): clusters every positioned fixture into wet
  * cores (`clusterWetCores`) and places exactly ONE stack per core through the
  * placement chain shaft → free cell → wall-side edge → flagged centroid
- * (`placeWetCoreStack`). Kitchen areas keep the dedicated outer-corner stack of
- * the toilet-anchored path (kitchen waste is its own stack); the corner is
+ * (`placeWetCoreStack`). Cores flagged obstructed are then gathered into the
+ * nearest neighbouring core's valid stack within the typology's collector
+ * limit (R1, `gatherObstructedCores`) — they get a collector run instead of a
+ * stack on a blocked cell; the flagged stack stays only when no valid stack
+ * is reachable. Kitchen areas keep the dedicated outer-corner stack of the
+ * toilet-anchored path (kitchen waste is its own stack); the corner is
  * snapped to the continuity map when one covers the storey, a miss keeps the
  * corner with the reason attached.
  */
@@ -284,8 +297,9 @@ export function suggestWetCoreRiserPositions(
     diagnostics.push('office typology: no usable continuity map, so no core shafts could be selected; every stack is flagged at its core centroid')
   }
 
-  const positions: WetCoreSuggestedPosition[] = clustered.cores.map((core) => {
-    const placement = placeWetCoreStack(core, {
+  const placements = clustered.cores.map((core) => ({
+    core,
+    placement: placeWetCoreStack(core, {
       units: planUnits,
       continuityMap: map,
       maxSnap,
@@ -293,9 +307,30 @@ export function suggestWetCoreRiserPositions(
       ...(typology === DEFAULT_BUILDING_TYPOLOGY
         ? {}
         : { typology, officeCoreShafts: officeCoreShafts.find((selection) => selection.storeyId === core.storeyId) }),
-    })
-    return { x: placement.position.x, y: core.centroidY, z: placement.position.z, anchor: 'wet-core', core, placement }
+    }),
+  }))
+
+  // R1: obstructed cores drain through a collector to a neighbour's valid stack
+  // when one is within the typology's collector limit; they get no stack.
+  const gathered = gatherObstructedCores(placements, {
+    units: planUnits,
+    maxCollectorLength:
+      rules.coreCollectorMaxM === null ? null : planUnits === 'mm' ? rules.coreCollectorMaxM * 1000 : rules.coreCollectorMaxM,
   })
+  const gatheredCoreIds = new Set(gathered.collectors.map((collector) => collector.coreId))
+  for (const collector of gathered.collectors) diagnostics.push(`core ${collector.coreId}: ${collector.reason}`)
+  for (const entry of gathered.unreachable) diagnostics.push(`core ${entry.coreId}: ${entry.reason}`)
+
+  const positions: WetCoreSuggestedPosition[] = placements
+    .filter(({ core }) => !gatheredCoreIds.has(core.id))
+    .map(({ core, placement }) => ({
+      x: placement.position.x,
+      y: core.centroidY,
+      z: placement.position.z,
+      anchor: 'wet-core',
+      core,
+      placement,
+    }))
 
   const fixtureRows: FixtureRow[] =
     rules.rowCollectors === null
@@ -342,7 +377,7 @@ export function suggestWetCoreRiserPositions(
     })
   })
 
-  return { positions, cores: clustered.cores, typology, fixtureRows, officeCoreShafts, diagnostics }
+  return { positions, cores: clustered.cores, typology, fixtureRows, officeCoreShafts, coreCollectors: gathered.collectors, diagnostics }
 }
 
 function resolveMaxSnap(planUnits: WetCorePlanUnits, maxSnapMm: number | undefined, typology: BuildingTypology): number {

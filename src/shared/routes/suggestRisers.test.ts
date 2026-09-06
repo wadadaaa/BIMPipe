@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { Fixture, FixtureKind, KitchenArea, PlanBounds } from '@/domain/types'
 import { buildContinuityMap, type ContinuityMapInput } from '@/domain/continuityMap'
-import { suggestRiserPositions } from './suggestRisers'
+import { RESIDENTIAL_COLLECTOR_MAX_M } from '@/domain/typology'
+import { suggestRiserPositions, suggestWetCoreRiserPositions } from './suggestRisers'
 
 function fixture(
   expressId: number,
@@ -416,5 +417,81 @@ describe('suggestRiserPositions with continuitySnap', () => {
       defaults.map(({ x, y, z }) => ({ x, y, z })),
     )
     expect(snapped.every((entry) => entry.snap?.status === 'snapMiss')).toBe(true)
+  })
+})
+
+describe('suggestWetCoreRiserPositions with core collectors (R1)', () => {
+  // One storey (id 10) on a solid slab 0..16 × 0..6 m with a single 0.5 m slab
+  // opening at (1..1.5, 1..1.5). Core A next to the opening snaps to it (shaft);
+  // core B in the middle of the slab has every cell within 1.5 m blocked and
+  // core C sits 11.5 m (Manhattan) from A's stack — beyond the 8 m residential
+  // collector limit.
+  const map = buildContinuityMap({
+    units: 'm',
+    storeys: [
+      {
+        storeyId: 10,
+        storeyName: 'L1',
+        elevation: 3,
+        obstructions: [{ id: 'slab:1', kind: 'slab', footprint: { shape: 'bbox', bounds: { minX: 0, maxX: 16, minZ: 0, maxZ: 6 } } }],
+        voids: [{ id: 'opening:1', kind: 'slab-opening', footprint: { shape: 'bbox', bounds: { minX: 1.0, maxX: 1.5, minZ: 1.0, maxZ: 1.5 } } }],
+        spaces: [],
+      },
+    ],
+  })
+  const coreA = [fixture(1, 1.2, 3, 2.2), fixture(2, 1.8, 3, 2.2, 'WASHHANDBASIN')]
+  const coreB = [fixture(5, 6.0, 3, 3.0), fixture(6, 6.6, 3, 3.0, 'WASHHANDBASIN')]
+  const coreC = [fixture(9, 11.0, 3, 3.0)]
+  const bounds: PlanBounds = { minX: 0, maxX: 16, minZ: 0, maxZ: 6 }
+
+  it('gathers the obstructed core into the neighbour with a valid stack and keeps the unreachable one flagged', () => {
+    const result = suggestWetCoreRiserPositions([...coreA, ...coreB, ...coreC], [], bounds, null, {
+      planUnits: 'm',
+      continuityMap: map,
+    })
+    expect(result.typology).toBe('residential')
+    expect(result.cores.map((core) => core.memberExpressIds)).toEqual([[1, 2], [5, 6], [9]])
+
+    // A: shaft. B: no stack (gathered). C: flagged centroid, still visible.
+    const stacks = result.positions.filter((position) => position.anchor === 'wet-core')
+    expect(stacks.map((stack) => [stack.core.memberExpressIds.join('+'), stack.placement.rule, stack.placement.flagged])).toEqual([
+      ['1+2', 'shaft', false],
+      ['9', 'centroid', true],
+    ])
+
+    const [collector] = result.coreCollectors
+    expect(result.coreCollectors).toHaveLength(1)
+    expect(collector).toMatchObject({
+      storeyId: 10,
+      memberExpressIds: [5, 6],
+      targetCoreId: result.cores[0].id,
+      junction: { x: 6.3, z: 3 },
+      targetStackPosition: { x: 1.25, z: 1.25 },
+      units: 'm',
+    })
+    expect(collector.lengthManhattan).toBeCloseTo(6.8, 9)
+    expect(collector.lengthManhattan).toBeLessThanOrEqual(RESIDENTIAL_COLLECTOR_MAX_M)
+
+    // Both decisions are explained in the diagnostics.
+    expect(result.diagnostics.some((line) => line.includes(`core ${result.cores[1].id}: every cell within snap range`))).toBe(true)
+    expect(result.diagnostics.some((line) => line.includes(`core ${result.cores[2].id}: nearest core with a valid stack`) && line.includes('beyond the 8.00 m collector limit'))).toBe(true)
+  })
+
+  it('does not engage without an obstruction grid (the wall-side-edge rule keeps one stack per core, no collectors)', () => {
+    const result = suggestWetCoreRiserPositions([...coreA, ...coreB, ...coreC], [], bounds, null, { planUnits: 'm', continuityMap: null })
+    expect(result.coreCollectors).toEqual([])
+    const stacks = result.positions.filter((position) => position.anchor === 'wet-core')
+    expect(stacks).toHaveLength(3)
+    expect(stacks.every((stack) => stack.placement.rule === 'wall-side-edge')).toBe(true)
+  })
+
+  it('is deterministic regardless of fixture input order', () => {
+    const forward = suggestWetCoreRiserPositions([...coreA, ...coreB, ...coreC], [], bounds, null, { planUnits: 'm', continuityMap: map })
+    const shuffled = suggestWetCoreRiserPositions([coreC[0], coreB[1], coreA[0], coreB[0], coreA[1]], [], bounds, null, {
+      planUnits: 'm',
+      continuityMap: map,
+    })
+    expect(shuffled.coreCollectors).toEqual(forward.coreCollectors)
+    expect(shuffled.positions.map(({ x, y, z }) => ({ x, y, z }))).toEqual(forward.positions.map(({ x, y, z }) => ({ x, y, z })))
   })
 })

@@ -136,6 +136,28 @@ export const ROW_COLLECTOR_OFFSET_M = 0.3
 export const ROW_WALL_SEARCH_M = 1.5
 
 // ---------------------------------------------------------------------------
+// Core collectors (R1): gather an obstructed core into a neighbour's stack
+// ---------------------------------------------------------------------------
+
+/**
+ * Longest Manhattan run (metres, in plan) from an obstructed core's centroid to
+ * a neighbouring core's stack that may gather it instead of leaving a flagged
+ * stack at the centroid (`src/domain/coreCollectors.ts`).
+ *
+ *  - residential 8.0 m: **PLACEHOLDER** — twice the residential branch limit,
+ *    i.e. a collector spanning two adjacent wet rooms under the slab. The
+ *    הל"ת figure for an under-slab collector between two apartments' wet
+ *    rooms has not been verified.
+ *  - office 12.0 m: the office collector limit (`BRANCH_LENGTH_LIMIT_M.office`),
+ *    already a placeholder there.
+ *
+ * The rule engages only where a continuity map with an obstruction grid says
+ * the core is obstructed; storeys without a grid never reach it.
+ */
+export const RESIDENTIAL_COLLECTOR_MAX_M = 8.0
+export const OFFICE_COLLECTOR_MAX_M = BRANCH_LENGTH_LIMIT_M.office
+
+// ---------------------------------------------------------------------------
 // Rules table
 // ---------------------------------------------------------------------------
 
@@ -173,6 +195,12 @@ export interface TypologyPlacementRules {
   rowCollectors: RowCollectorRules | null
   /** Core-shaft selection rules (office only). */
   coreShafts: OfficeCoreShaftRules | null
+  /**
+   * Longest collector (Manhattan, metres) that may gather an OBSTRUCTED core
+   * into a neighbouring core's valid stack instead of a flagged centroid stack.
+   * null = never gather (keep the flagged fallback).
+   */
+  coreCollectorMaxM: number | null
 }
 
 export const OFFICE_CORE_SHAFT_RULES: OfficeCoreShaftRules = {
@@ -202,6 +230,7 @@ export const TYPOLOGY_PLACEMENT_RULES: Readonly<Record<BuildingTypology, Typolog
     branchLengthLimitM: BRANCH_LENGTH_LIMIT_M.residential,
     rowCollectors: null,
     coreShafts: null,
+    coreCollectorMaxM: RESIDENTIAL_COLLECTOR_MAX_M,
   },
   office: {
     typology: 'office',
@@ -210,6 +239,7 @@ export const TYPOLOGY_PLACEMENT_RULES: Readonly<Record<BuildingTypology, Typolog
     branchLengthLimitM: BRANCH_LENGTH_LIMIT_M.office,
     rowCollectors: OFFICE_ROW_COLLECTOR_RULES,
     coreShafts: OFFICE_CORE_SHAFT_RULES,
+    coreCollectorMaxM: OFFICE_COLLECTOR_MAX_M,
   },
 }
 

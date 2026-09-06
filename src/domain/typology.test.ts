@@ -5,6 +5,8 @@ import {
   BUILDING_TYPOLOGIES,
   DEFAULT_BUILDING_TYPOLOGY,
   MAX_SNAP_OFFICE_M,
+  OFFICE_COLLECTOR_MAX_M,
+  RESIDENTIAL_COLLECTOR_MAX_M,
   TYPOLOGY_PLACEMENT_RULES,
   buildingTypologySchema,
   describeBuildingTypology,
@@ -46,6 +48,14 @@ describe('building typology', () => {
     expect(rules.rowCollectors?.minFixtures).toBe(3)
     expect(rules.coreShafts?.shaftMinAreaM2).toBeLessThan(rules.coreShafts!.shaftMaxAreaM2)
     expect(rules.coreShafts?.largeVoidMinAreaM2).toBeLessThanOrEqual(rules.coreShafts!.shaftMaxAreaM2)
+  })
+
+  it('core-collector limits (R1): residential 8 m placeholder, office = its branch limit, both in the rules table', () => {
+    expect(RESIDENTIAL_COLLECTOR_MAX_M).toBe(8)
+    expect(RESIDENTIAL_COLLECTOR_MAX_M).toBe(2 * MAX_BRANCH_LENGTH_M)
+    expect(OFFICE_COLLECTOR_MAX_M).toBe(BRANCH_LENGTH_LIMIT_M.office)
+    expect(TYPOLOGY_PLACEMENT_RULES.residential.coreCollectorMaxM).toBe(RESIDENTIAL_COLLECTOR_MAX_M)
+    expect(TYPOLOGY_PLACEMENT_RULES.office.coreCollectorMaxM).toBe(OFFICE_COLLECTOR_MAX_M)
   })
 
   it('mm and m limits agree for both typologies', () => {

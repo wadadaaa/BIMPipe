@@ -337,8 +337,13 @@ export function placeWetCoreStack(core: WetCore, options: PlaceWetCoreStackOptio
     // (a) shaft candidates work with or without an obstruction grid for the storey.
     const shaft = snapCoreToShaft(core, map!, structure.grid, options.maxSnap)
     if (shaft !== null) return shaft
-    if (structure.grid !== null) {
-      // (b) free grid cell; (d) everything in range is obstructed → flagged centroid.
+    // (b) free grid cell; (d) everything in range is obstructed → flagged centroid.
+    // A snap window that does not touch the grid at all is NOT an obstruction:
+    // the grid says nothing about that part of the plan (the storey's
+    // structure was modelled in another file or the core sits past the grid
+    // extent), so the core falls through to the wall-side-edge rule exactly
+    // as a storey without a grid does.
+    if (structure.grid !== null && snapWindowIntersectsGrid(structure.grid, core.bbox, options.maxSnap)) {
       const free = nearestFreeCell(structure.grid, core, options.maxSnap)
       if (free !== null) {
         return {
@@ -365,7 +370,9 @@ export function placeWetCoreStack(core: WetCore, options: PlaceWetCoreStackOptio
     structure === null
       ? 'no continuity map loaded'
       : structure.usable
-        ? `continuity map has shaft candidates but no obstruction grid for storey ${core.storeyId} and no candidate within ${formatLength(options.maxSnap, options.units)}`
+        ? structure.grid === null
+          ? `continuity map has shaft candidates but no obstruction grid for storey ${core.storeyId} and no candidate within ${formatLength(options.maxSnap, options.units)}`
+          : `the storey's obstruction grid does not cover the core or anything within ${formatLength(options.maxSnap, options.units)} of it (structure not modelled there) and no shaft candidate is within range`
         : structure.reason
   const bounds = options.floorPlanBounds ?? null
   if (bounds !== null && isFiniteBounds(bounds)) {
@@ -808,6 +815,22 @@ function nearestFreeCell(
     }
   }
   return best === null ? null : { cell: best.cell, position: best.position, distance: best.distance }
+}
+
+/**
+ * Whether the snap window (core bbox grown by `maxSnap`) overlaps the grid
+ * extent at all. False means the grid has no information about this core —
+ * not that the core is obstructed.
+ */
+export function snapWindowIntersectsGrid(grid: StoreyObstructionGrid, bbox: PlanBounds, maxSnap: number): boolean {
+  const gridMaxX = grid.origin.x + grid.columns * grid.cellSize
+  const gridMaxZ = grid.origin.z + grid.rows * grid.cellSize
+  return (
+    bbox.maxX + maxSnap >= grid.origin.x &&
+    bbox.minX - maxSnap <= gridMaxX &&
+    bbox.maxZ + maxSnap >= grid.origin.z &&
+    bbox.minZ - maxSnap <= gridMaxZ
+  )
 }
 
 /** Plan distance from a point to the nearest point of `bounds`; 0 when inside. */

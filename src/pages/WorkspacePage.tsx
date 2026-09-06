@@ -59,6 +59,7 @@ import { buildSanitaryRoutingDemoPlan, type SanitaryRoutingPlan } from '@/shared
 import { buildBranchRoutesFromAssignments } from '@/shared/routes/buildBranchRoutes'
 import { summarizeBranchRunsForDebug } from '@/shared/routes/branchRouteSummary'
 import { assignFixturesToRisers } from '@/domain/assignFixturesToRisers'
+import { buildFixtureCoreIds } from '@/domain/coreCollectors'
 import type { BuildingTypology } from '@/domain/typology'
 
 let floorViewerModulePromise: Promise<typeof import('@/viewer/FloorViewer')> | null = null
@@ -917,6 +918,7 @@ export function WorkspacePage({
             typology: result.typology,
             fixtureRows: result.fixtureRows,
             officeCoreShafts: result.officeCoreShafts,
+            coreCollectors: result.coreCollectors,
             diagnostics: result.diagnostics,
           },
         })
@@ -1090,13 +1092,14 @@ export function WorkspacePage({
   // from the last suggest run, stack → core from the reducer (auto stacks and
   // the moved stacks that superseded them). Null in demo mode, where the
   // toilet-anchored risers have no cores and nearest assignment is the rule.
+  // Fixtures of a gathered core (R1 core collector) belong to the receiving
+  // core's stack.
   const fixtureCoreMembership = useMemo(() => {
     if (routingModel !== 'branch-runs' || wetCoreSuggestion === null) return undefined
-    const fixtureCoreIds = new Map<number, string>()
-    for (const core of wetCoreSuggestion.cores) {
-      for (const expressId of core.memberExpressIds) fixtureCoreIds.set(expressId, core.id)
+    return {
+      fixtureCoreIds: buildFixtureCoreIds(wetCoreSuggestion.cores, wetCoreSuggestion.coreCollectors),
+      stackCoreIds: autoStackCoreIds,
     }
-    return { fixtureCoreIds, stackCoreIds: autoStackCoreIds }
   }, [routingModel, wetCoreSuggestion, autoStackCoreIds])
 
   // Fixture-to-stack assignment for the active floor: a fixture routes to its
@@ -1126,11 +1129,17 @@ export function WorkspacePage({
   // Branch runs: pure derivation from the assignments above. The adapter drops
   // unassigned entries — those stay visible in the fixtures panel with an
   // explicit reason and have no riser to route toward. Office fixture rows of
-  // the last suggest run drain through collectors (G3).
+  // the last suggest run drain through collectors (G3); gathered cores drain
+  // through a core collector to a neighbour's stack (R1).
   const suggestedFixtureRows = routingModel === 'branch-runs' ? wetCoreSuggestion?.fixtureRows : undefined
+  const suggestedCoreCollectors = routingModel === 'branch-runs' ? wetCoreSuggestion?.coreCollectors : undefined
   const branchRouteFloors = useMemo(
-    () => buildBranchRoutesFromAssignments(fixtureAssignments, { rowCollectors: suggestedFixtureRows }),
-    [fixtureAssignments, suggestedFixtureRows],
+    () =>
+      buildBranchRoutesFromAssignments(fixtureAssignments, {
+        rowCollectors: suggestedFixtureRows,
+        coreCollectors: suggestedCoreCollectors,
+      }),
+    [fixtureAssignments, suggestedFixtureRows, suggestedCoreCollectors],
   )
 
   // Riser-to-riser "main sanitary route" chains exist ONLY under the

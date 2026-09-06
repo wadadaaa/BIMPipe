@@ -452,3 +452,72 @@ describe('computeBranchRoutes with row collectors (office, G3)', () => {
     expect(mmFloor.segments.filter((segment) => segment.role === 'row-stub').every((segment) => planLength(segment) === 300)).toBe(true)
   })
 })
+
+describe('computeBranchRoutes with core collectors (R1)', () => {
+  // Receiving stack at the origin; the gathered core (fixtures 5 and 6) meets
+  // at its junction (6, 2) and drains through one collector run to the stack.
+  const riserPlan = { x: 0, z: 0 }
+  const collector = { id: 'core-collector|wet-core:101:5+6', storeyId: 101, junction: { x: 6, z: 2 }, memberExpressIds: [5, 6] }
+  const input: AssignedFixture[] = [
+    assigned(1, { x: 1, z: 0 }, riserPlan), // the receiving core's own fixture
+    assigned(5, { x: 7, z: 3 }, riserPlan),
+    assigned(6, { x: 6, z: 2 }, riserPlan), // exactly at the junction: no leg of its own
+  ]
+
+  it('is byte-identical to the plain routing when no collectors are passed', () => {
+    expect(computeBranchRoutes(input, { coreCollectors: [] })).toEqual(computeBranchRoutes(input))
+  })
+
+  it('runs every member to the junction, then ONE collector-run to the stack carrying them all, tagged with the collector id', () => {
+    const [floor] = computeBranchRoutes(input, { coreCollectors: [collector] })
+    const run = floor.segments.filter((segment) => segment.role === 'collector-run')
+    const legs = floor.segments.filter((segment) => segment.role === undefined)
+
+    // Junction (6, 2) → stack (0, 0): X-leg along z = 2 then Z-leg along x = 0.
+    expect(run.map((segment) => [segment.axis, segment.start.x, segment.start.z, segment.end.x, segment.end.z])).toEqual([
+      ['x', 6, 2, 0, 2],
+      ['z', 0, 2, 0, 0],
+    ])
+    expect(run.every((segment) => segment.coreCollectorId === collector.id)).toBe(true)
+    expect(run.every((segment) => segment.servedFixtureExpressIds.join() === '5,6')).toBe(true)
+    expect(run.reduce((sum, segment) => sum + planLength(segment), 0)).toBe(8) // Manhattan junction → stack
+
+    // Fixture 5 (7, 3) → junction (6, 2) with the plain corner rule (junction.x, fixture.z);
+    // fixture 6 sits at the junction and adds nothing; fixture 1 routes directly.
+    expect(legs.map((segment) => [segment.servedFixtureExpressIds.join(), segment.axis, segment.start.x, segment.start.z, segment.end.x, segment.end.z])).toEqual([
+      ['1', 'x', 1, 0, 0, 0],
+      ['5', 'x', 7, 3, 6, 3],
+      ['5', 'z', 6, 3, 6, 2],
+    ])
+    expect(legs.every((segment) => segment.coreCollectorId === undefined)).toBe(true)
+
+    // The slope datum is the stack: fixture 5's first leg starts 1 + 1 + 8 = 10 m of run above it.
+    const fixture5Start = legs.find((segment) => segment.servedFixtureExpressIds.join() === '5')!
+    expect(fixture5Start.start.elevation).toBeCloseTo(SLOPE * 10, 10)
+    const runEnd = run.find((segment) => segment.axis === 'z')!
+    expect(runEnd.end.elevation).toBe(0)
+    // Ø110 as soon as a WC is served.
+    expect(run.every((segment) => segment.diameterMm === 110)).toBe(true)
+  })
+
+  it('ignores collectors of other storeys and members outside the riser group, and is order-independent', () => {
+    const otherStorey = { ...collector, id: 'core-collector|other', storeyId: 202 }
+    expect(computeBranchRoutes(input, { coreCollectors: [otherStorey] })).toEqual(computeBranchRoutes(input))
+
+    const strangers = { ...collector, memberExpressIds: [77, 78] }
+    expect(computeBranchRoutes(input, { coreCollectors: [strangers] })).toEqual(computeBranchRoutes(input))
+
+    const forward = computeBranchRoutes(input, { coreCollectors: [collector] })
+    const shuffled = computeBranchRoutes([input[2], input[0], input[1]], { coreCollectors: [collector] })
+    expect(shuffled).toEqual(forward)
+  })
+
+  it('a collector never leaves a stack on a blocked cell: no segment starts or ends off the fixtures / junction / stack', () => {
+    const [floor] = computeBranchRoutes(input, { coreCollectors: [collector] })
+    const known = new Set(['7,3', '6,3', '6,2', '0,2', '0,0', '1,0'])
+    for (const segment of floor.segments) {
+      expect(known.has(`${segment.start.x},${segment.start.z}`)).toBe(true)
+      expect(known.has(`${segment.end.x},${segment.end.z}`)).toBe(true)
+    }
+  })
+})

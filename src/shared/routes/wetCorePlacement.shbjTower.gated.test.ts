@@ -6,6 +6,8 @@ import { BRANCH_DIAMETER_MM_BY_FIXTURE_KIND } from '@/domain/branchDefaults'
 import { probeContinuityCell } from '@/domain/continuityMap'
 import { buildCoreFingerprint, SAME_CORE_RADIUS_M, toStackExtentFixtures } from '@/domain/riserStackExtent'
 import type { Fixture, KitchenArea, Storey } from '@/domain/types'
+import { buildFixtureCoreIds } from '@/domain/coreCollectors'
+import { RESIDENTIAL_COLLECTOR_MAX_M } from '@/domain/typology'
 import { buildContinuityMapForModels, type ContinuityMapSource } from '@/shared/ifc/buildContinuityMapForModel'
 import { aggregateStoreyDetections } from '@/shared/ifc/aggregateStoreyDetections'
 import { extractFloorMeshes } from '@/shared/ifc/extractFloorMeshes'
@@ -204,7 +206,6 @@ gated('tower band (single AR file, L10–L12) wet-core placement + routing (gate
         // block, the single accessible WC and the two multi-bowl sink units (each
         // sink unit sits > 2.6 m from its WC block, so it is its own core). No
         // core is wider than one wet room (largest diagonal 4.5 m).
-        expect(coreStacks).toHaveLength(result.cores.length)
         expect(result.cores).toHaveLength(5)
         expect(result.cores.reduce((sum, core) => sum + core.members.length, 0)).toBe(sourceFixtures.length)
         expect(result.stackExtents).toHaveLength(result.stacks.length)
@@ -213,25 +214,30 @@ gated('tower band (single AR file, L10–L12) wet-core placement + routing (gate
         // The architect's slab models six real openings per storey (four 8.7 × 2.8 m
         // and two stair voids with landing slabs) and NO shaft opening near the
         // two WC rows: every cell within 1.5 m of those cores is solid slab or
-        // wall, so their stacks stay at the core centroid FLAGGED with the
-        // obstruction reason (never silently placed in the slab). The three
+        // wall. V7 left their stacks at the core centroid FLAGGED; R1 gathers
+        // each row into the nearest neighbouring core's valid stack through a
+        // core collector (6-WC row → sink-unit stack, 4.41 m; WC+urinal block →
+        // accessible-WC stack, 5.16 m; both within the 8 m residential limit),
+        // so no stack sits on a blocked cell and nothing is flagged. The three
         // other cores snap to free cells inside the nearest real opening
-        // (0.76–0.85 m from the core footprint). obstructed ⇔ flagged, as on the
-        // 096 podium.
+        // (0.76–0.85 m from the core footprint).
         for (const stack of coreStacks) {
           if ('distance' in stack.placement) expect(stack.placement.distance).toBeLessThanOrEqual(MAX_SNAP_M + 1e-9)
           const probe = probeContinuityCell(continuity.map, source.id, stack.position)
-          if (stack.placement.flagged) {
-            expect(stack.placement.rule).toBe('centroid')
-            expect(stack.placement.reason).toMatch(/obstructed/)
-            expect(stack.core.kindCounts.TOILETPAN, `${stack.stackLabel} flagged core must be a WC row`).toBeGreaterThanOrEqual(4)
-          } else {
-            expect(probe.status, `${stack.stackLabel} ${JSON.stringify(probe)}`).not.toBe('blocked')
-          }
+          expect(stack.placement.flagged, `${stack.stackLabel} ${stack.placement.reason}`).toBe(false)
+          expect(probe.status, `${stack.stackLabel} ${JSON.stringify(probe)}`).not.toBe('blocked')
         }
-        expect(flagged).toHaveLength(2)
-        expect(rules).toEqual({ centroid: 2, 'free-cell': 3 })
+        expect(flagged).toHaveLength(0)
+        expect(rules).toEqual({ 'free-cell': 3 })
         expect(onSlabOpening).toBe(3)
+        expect(result.coreCollectors).toHaveLength(2)
+        expect(coreStacks).toHaveLength(result.cores.length - result.coreCollectors.length)
+        for (const collector of result.coreCollectors) {
+          const core = result.cores.find((candidate) => candidate.id === collector.coreId)!
+          expect(core.kindCounts.TOILETPAN, `gathered core ${collector.coreId} must be a WC row`).toBeGreaterThanOrEqual(4)
+          expect(collector.lengthManhattan).toBeLessThanOrEqual(RESIDENTIAL_COLLECTOR_MAX_M)
+          expect(coreStacks.some((stack) => stack.core.id === collector.targetCoreId)).toBe(true)
+        }
         // The 29.3 × 18.6 m cut-out of the outer plate is filled by the tower
         // plate and must not surface as a shaft candidate (it did before V7:
         // every stack then landed on "free" cells that were solid slab).
@@ -261,20 +267,19 @@ gated('tower band (single AR file, L10–L12) wet-core placement + routing (gate
             `fingerprint match at the stack XY (${SAME_CORE_RADIUS_M} m radius): ${below.name} ${matchesBelow}/${total}, ${above.name} ${matchesAbove}/${total}`,
         )
         // Typical-storey signal: the same core fingerprint exists at every stack
-        // XY on both neighbours (5/5 and 5/5). The three placed stacks run
-        // L10 → L12; the two flagged stacks stop at L11 because V4's obstruction
-        // bound sees solid slab at their XY on both neighbours (correct: no
-        // shaft exists there in the architect's model). Floors, not tuned.
+        // XY on both neighbours (3/3 and 3/3). All three placed stacks run
+        // L10 → L12 (the two gathered WC rows have no stack of their own; V7's
+        // flagged stacks stopped at L11 because V4's obstruction bound saw solid
+        // slab at their XY — correct: no shaft exists there). Floors, not tuned.
         expect(matchesBelow).toBe(total)
         expect(matchesAbove).toBe(total)
-        expect(both).toBeGreaterThanOrEqual(3)
+        expect(both).toBe(3)
         expect(both + none).toBe(total)
         expect(none).toBe(flagged.length)
 
         // --- 5. branch runs: every fixture routes to its core's stack ---
         const sourceRisers = result.risers.filter((riser) => riser.storeyId === source.id)
-        const fixtureCoreIds = new Map<number, string>()
-        for (const core of result.cores) for (const expressId of core.memberExpressIds) fixtureCoreIds.set(expressId, core.id)
+        const fixtureCoreIds = buildFixtureCoreIds(result.cores, result.coreCollectors)
         const stackCoreIds = new Map(coreStacks.map((stack) => [stack.stackId, stack.core.id]))
         const routing = await timed('assign + branch routes', () => {
           const assignments = assignFixturesToRisers(
@@ -282,7 +287,7 @@ gated('tower band (single AR file, L10–L12) wet-core placement + routing (gate
             sourceRisers.map((riser) => ({ id: riser.id, stackId: riser.stackId, storeyId: riser.storeyId, position: riser.position })),
             { units: 'm', coreMembership: { fixtureCoreIds, stackCoreIds } },
           )
-          return { assignments, floors: buildBranchRoutesFromAssignments(assignments) }
+          return { assignments, floors: buildBranchRoutesFromAssignments(assignments, { coreCollectors: result.coreCollectors }) }
         })
         const stackLabelByRiserId = new Map(sourceRisers.map((riser) => [riser.id, riser.stackLabel]))
         const summary = summarizeBranchRunsForDebug(routing.floors, routing.assignments, stackLabelByRiserId)
@@ -301,24 +306,32 @@ gated('tower band (single AR file, L10–L12) wet-core placement + routing (gate
               (group.fixturesAtStackExpressIds.length > 0 ? ` (${group.fixturesAtStackExpressIds.length} at the stack)` : ''),
           )
         }
-        // Measured: 15/15 fixtures routed to their core's stack, 21 segments /
-        // 13.5 m in total, longest fixture→stack 2.35 m (no run over the 4 m
-        // limit); the two WC rows produce Ø110 runs, the sink units Ø50, and
-        // the shared collectors under the WC row / urinal pair are Ø63.
+        // Measured (R1): 15/15 fixtures routed to their core's stack — the 12
+        // WCs / urinals of the two gathered rows through their core collector —
+        // 25 segments / 21.45 m in total, longest fixture→stack 4.83 m. (V7,
+        // one flagged stack per row: 21 segments / 13.5 m, longest 2.35 m.) The
+        // 12 gathered fixtures sit beyond the 4 m branch limit and are kept
+        // with the over-length WARNING (within the 8 m collector limit); the
+        // WC rows produce Ø110 runs, the sink units Ø50, and the shared
+        // collectors under the urinal pair / sink legs are Ø63.
         // (Before the 1 mm plan snap in `computeBranchRoutes` the same storey
         // gave 30 segments / 19.3 m: the six WCs of a row differ by ~4e-14 m
         // in Z, so each got its own parallel X leg and the Z approach split
         // into five zero-length segments that aborted the IFC export.)
+        const gatheredExpressIds = new Set(result.coreCollectors.flatMap((collector) => collector.memberExpressIds))
         expect(summary.unrouted).toEqual([])
-        expect(summary.overlength).toEqual([])
+        expect(summary.overlength.map((entry) => entry.fixtureExpressId).sort((a, b) => a - b)).toEqual([...gatheredExpressIds].sort((a, b) => a - b))
         expect(summary.assignedBy.wetCore).toBe(sourceFixtures.length)
         expect(summary.assignedBy.nearest).toBe(0)
         expect(routing.floors).toHaveLength(1)
         expect(floor!.groups).toHaveLength(coreStacks.length)
-        expect(floor!.segmentCount).toBe(21)
-        expect(floor!.totalLengthM).toBeCloseTo(13.49, 1)
-        expect(diameters).toEqual({ 'Ø110': 14, 'Ø50': 5, 'Ø63': 2 })
-        expect(longest).toBeLessThanOrEqual(MAX_BRANCH_LENGTH_M)
+        expect(floor!.segmentCount).toBe(25)
+        expect(floor!.totalLengthM).toBeCloseTo(21.45, 1)
+        expect(diameters).toEqual({ 'Ø110': 20, 'Ø50': 3, 'Ø63': 2 })
+        expect(longest).toBeGreaterThan(MAX_BRANCH_LENGTH_M)
+        expect(longest).toBeLessThanOrEqual(RESIDENTIAL_COLLECTOR_MAX_M)
+        const collectorRuns = routing.floors.flatMap((entry) => entry.segments.filter((segment) => segment.role === 'collector-run'))
+        expect(new Set(collectorRuns.map((segment) => segment.coreCollectorId)).size).toBe(result.coreCollectors.length)
         // No degenerate segment: every run is at least 1 mm long in plan, so
         // the export's zero-length guard cannot trip on this storey.
         const shortestSegmentM = Math.min(
@@ -376,7 +389,10 @@ gated('tower band (single AR file, L10–L12) wet-core placement + routing (gate
               })),
           }))
         expect(
-          normaliseRuns(buildBranchRoutesFromAssignments(secondAssignments), new Map(secondRisers.map((riser) => [riser.id, riser.stackLabel]))),
+          normaliseRuns(
+            buildBranchRoutesFromAssignments(secondAssignments, { coreCollectors: second.coreCollectors }),
+            new Map(secondRisers.map((riser) => [riser.id, riser.stackLabel])),
+          ),
         ).toEqual(normaliseRuns(routing.floors, stackLabelByRiserId))
 
         // --- 7. performance ---

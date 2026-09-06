@@ -106,8 +106,9 @@ function pipelineInput(): GauntletMetricsInput {
       inHang: 4,
       both: 1,
       total: 5,
-      literalBandSelection: { segments: 2, byGeometry: 2, byContainment: 0 },
+      literalBandSelection: { segments: 2, byGeometry: 2, byContainment: 0, byContainmentRejected: 0, byContainmentRejectedLengthM: 0 },
     },
+    engineerStacks: { intersecting: 2, served: 2, passThrough: [], joinToleranceM: 0.5 },
     engineerBranchRuns: {
       literalBand: { segments: 2, byContainment: 0, totalM: 6 },
       union: { segments: 5, inBandOnly: 1, inHangOnly: 3, both: 1, totalM: 30 },
@@ -115,6 +116,7 @@ function pipelineInput(): GauntletMetricsInput {
     },
     storeyBelow: { id: 37, name: 'GF', fixtures: 0 },
     cores: [],
+    coreCollectors: [],
     continuityProbes: [
       { stackId: 'stack-a', stackLabel: 'R1', anchor: 'wet-core', position: { x: 0, y: 3, z: 0 }, placementRule: 'shaft', flagged: false, probe: { status: 'free', cell: { col: 1, row: 1 } } },
       { stackId: 'stack-b', stackLabel: 'R2', anchor: 'wet-core', position: { x: 10, y: 3, z: -5 }, placementRule: 'centroid', flagged: true, probe: { status: 'blocked', cell: { col: 4, row: 2 } } },

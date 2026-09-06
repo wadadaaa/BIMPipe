@@ -1,4 +1,10 @@
-import { computeBranchRoutes, type AssignedFixture, type FloorRoutes, type RowCollectorInput } from '@/domain/branchRouting'
+import {
+  computeBranchRoutes,
+  type AssignedFixture,
+  type CoreCollectorInput,
+  type FloorRoutes,
+  type RowCollectorInput,
+} from '@/domain/branchRouting'
 import type { AssignedFixtureRiser, FixtureRiserAssignment } from '@/domain/assignFixturesToRisers'
 
 export interface BuildBranchRoutesOptions {
@@ -7,6 +13,11 @@ export interface BuildBranchRoutesOptions {
    * `fixtureRows` of the wet-core suggestion. Omitted/empty → plain routing.
    */
   rowCollectors?: readonly RowCollectorInput[]
+  /**
+   * Obstructed cores gathered into a neighbour's stack (R1); pass the
+   * `coreCollectors` of the wet-core suggestion. Omitted/empty → no gathering.
+   */
+  coreCollectors?: readonly CoreCollectorInput[]
 }
 
 /**
@@ -39,5 +50,6 @@ export function buildBranchRoutesFromAssignments(
   return computeBranchRoutes(assignedFixtures, {
     planUnits: assigned[0].units,
     ...(options.rowCollectors !== undefined && options.rowCollectors.length > 0 ? { rowCollectors: options.rowCollectors } : {}),
+    ...(options.coreCollectors !== undefined && options.coreCollectors.length > 0 ? { coreCollectors: options.coreCollectors } : {}),
   })
 }
