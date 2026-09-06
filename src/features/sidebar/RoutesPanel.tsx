@@ -1,8 +1,9 @@
-import type {
-  AssignedFixtureRiser,
-  FixtureRiserAssignment,
-  UnassignedFixtureRiser,
-  UnassignedReason,
+import {
+  MAX_BRANCH_LENGTH_M,
+  type AssignedFixtureRiser,
+  type FixtureRiserAssignment,
+  type UnassignedFixtureRiser,
+  type UnassignedReason,
 } from '@/domain/assignFixturesToRisers'
 import type { FloorRoutes } from '@/domain/branchRouting'
 import { formatBranchSlopePercent } from '@/domain/branchDefaults'
@@ -18,12 +19,19 @@ interface RoutesPanelProps {
   stackLabelByRiserId: ReadonlyMap<string, string>
   /** Fixture express id → display name for the warning rows. */
   fixtureNameByExpressId: ReadonlyMap<number, string>
+  /** Branch length limit (m) the assignments were checked against; default residential 4 m. */
+  branchLengthLimitM?: number
 }
 
-const UNASSIGNED_REASON_COPY: Record<UnassignedReason, string> = {
-  'no-plan-position': 'no plan position in the IFC',
-  'no-riser-on-storey': 'no stack on this floor',
-  'no-riser-within-branch-length': 'no stack within the 4 m branch limit',
+function unassignedReasonCopy(reason: UnassignedReason, branchLimitLabel: string): string {
+  switch (reason) {
+    case 'no-plan-position':
+      return 'no plan position in the IFC'
+    case 'no-riser-on-storey':
+      return 'no stack on this floor'
+    case 'no-riser-within-branch-length':
+      return `no stack within the ${branchLimitLabel} branch limit`
+  }
 }
 
 /**
@@ -31,7 +39,14 @@ const UNASSIGNED_REASON_COPY: Record<UnassignedReason, string> = {
  * is the only routes list in plain mode — riser-to-riser chains are never shown
  * here. Every fixture that could not be routed is a visible warning row.
  */
-export function RoutesPanel({ floor, assignments, stackLabelByRiserId, fixtureNameByExpressId }: RoutesPanelProps) {
+export function RoutesPanel({
+  floor,
+  assignments,
+  stackLabelByRiserId,
+  fixtureNameByExpressId,
+  branchLengthLimitM = MAX_BRANCH_LENGTH_M,
+}: RoutesPanelProps) {
+  const branchLimitLabel = `${Number.isInteger(branchLengthLimitM) ? branchLengthLimitM.toFixed(0) : branchLengthLimitM.toFixed(1)} m`
   const groups = floor === null ? [] : groupBranchRunsByStack(floor, stackLabelByRiserId, assignments)
   const unrouted = assignments.filter(
     (assignment): assignment is UnassignedFixtureRiser => assignment.unassigned,
@@ -41,6 +56,14 @@ export function RoutesPanel({ floor, assignments, stackLabelByRiserId, fixtureNa
   )
   const totalLengthM = groups.reduce((sum, group) => sum + group.totalLengthM, 0)
   const fixtureCount = new Set(groups.flatMap((group) => group.fixtureExpressIds)).size
+  // Office row collectors (G3): rows per stack, from the segment roles.
+  const collectorRowsByStackId = new Map<string, Set<string>>()
+  for (const segment of floor?.segments ?? []) {
+    if (segment.role !== 'row-collector' || segment.rowId === undefined || segment.riserStackId === undefined) continue
+    const rows = collectorRowsByStackId.get(segment.riserStackId) ?? new Set<string>()
+    rows.add(segment.rowId)
+    collectorRowsByStackId.set(segment.riserStackId, rows)
+  }
 
   if (groups.length === 0 && unrouted.length === 0) {
     return (
@@ -83,6 +106,11 @@ export function RoutesPanel({ floor, assignments, stackLabelByRiserId, fixtureNa
                 {group.segmentCount} run{group.segmentCount === 1 ? '' : 's'}
                 {group.fixturesAtStackExpressIds.length > 0 &&
                   ` · ${group.fixturesAtStackExpressIds.length} at the stack (no horizontal run)`}
+                {(collectorRowsByStackId.get(group.stackId)?.size ?? 0) > 0 && (
+                  <span data-testid="branch-run-collectors">
+                    {` · ${collectorRowsByStackId.get(group.stackId)!.size} row collector${collectorRowsByStackId.get(group.stackId)!.size === 1 ? '' : 's'}`}
+                  </span>
+                )}
               </span>
               <span className="routes-panel__group-spec">
                 {formatMetres(group.totalLengthM)} · Ø{group.diametersMm.length > 0 ? group.diametersMm.join('/') : '—'} ·{' '}
@@ -98,14 +126,14 @@ export function RoutesPanel({ floor, assignments, stackLabelByRiserId, fixtureNa
           {unrouted.map((assignment) => (
             <li key={`unrouted-${assignment.fixtureExpressId}`} className="routes-panel__warning">
               <span dir="auto">{fixtureNameByExpressId.get(assignment.fixtureExpressId) ?? `#${assignment.fixtureExpressId}`}</span>{' '}
-              not routed: {UNASSIGNED_REASON_COPY[assignment.reason]}.
+              not routed: {unassignedReasonCopy(assignment.reason, branchLimitLabel)}.
             </li>
           ))}
           {overlength.map((assignment) => (
             <li key={`overlength-${assignment.fixtureExpressId}`} className="routes-panel__warning">
               <span dir="auto">{fixtureNameByExpressId.get(assignment.fixtureExpressId) ?? `#${assignment.fixtureExpressId}`}</span>{' '}
               routes to its core stack {stackLabelByRiserId.get(assignment.riserId) ?? assignment.riserId} at{' '}
-              {formatMetres(assignment.units === 'mm' ? assignment.planDistance / 1000 : assignment.planDistance)}, beyond the 4 m
+              {formatMetres(assignment.units === 'mm' ? assignment.planDistance / 1000 : assignment.planDistance)}, beyond the {branchLimitLabel}{' '}
               branch limit (kept: the fixture belongs to that stack&apos;s wet core, and a moved stack always wins).
             </li>
           ))}

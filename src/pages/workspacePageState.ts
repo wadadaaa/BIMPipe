@@ -6,8 +6,9 @@ import type { LengthUnit } from '@/shared/lengthUnits'
 import type { StoreyAlignment } from '@/domain/alignStoreys'
 import type { MergedStoreyDetection } from '@/domain/mergeFixturesAcrossFiles'
 import type { EngineerPipeNetwork, EngineerRiserClassification } from '@/domain/engineerPipes'
-import type { ContinuityMap } from '@/domain/continuityMap'
-import type { WetCore } from '@/domain/wetCores'
+import type { ContinuityMap, OfficeCoreShaftSelection } from '@/domain/continuityMap'
+import { DEFAULT_BUILDING_TYPOLOGY, type BuildingTypology } from '@/domain/typology'
+import type { FixtureRow, WetCore } from '@/domain/wetCores'
 import type {
   SuggestedRiserSnapOutcome,
   SuggestedRiserStackExtent,
@@ -82,6 +83,12 @@ export interface WetCoreSuggestionState {
   supersededCoreIds: string[]
   /** Stack ids kept from the previous state (manual / moved) during the merge. */
   preservedStackIds: string[]
+  /** Typology the suggest run used (G3); residential when the run predates the switch. */
+  typology: BuildingTypology
+  /** Office only: fixture rows that drain through a collector (routing input). Empty for residential. */
+  fixtureRows: FixtureRow[]
+  /** Office only: the core-shaft selection per storey the placement used. Empty for residential. */
+  officeCoreShafts: OfficeCoreShaftSelection[]
   diagnostics: string[]
 }
 
@@ -117,6 +124,12 @@ export interface WorkspacePageState {
   // The single horizontal-routing switch (V5), derived from demoRuntime once at
   // mount: 'branch-runs' in plain mode, 'demo-chains' for the demo runtime.
   routingModel: RoutingModel
+  // Building typology (G3), chosen on the upload screen ("manual for now").
+  // Read by the plain-mode suggest + assignment path only; demo mode ignores it
+  // (same gate as routingModel). Changing it never re-runs a suggestion by
+  // itself — the user presses Suggest. Survives upload-reset so the choice made
+  // on the upload screen before picking a file is what the model gets.
+  buildingTypology: BuildingTypology
 
   // --- linked models (multi-IFC ingest) ---
   // Non-host files of a multi-file upload, in upload order. Empty for a
@@ -242,6 +255,7 @@ export const initialWorkspacePageState: WorkspacePageState = {
   demoRuntime: { enabled: false },
   demoRuntimeConfigError: null,
   routingModel: 'branch-runs',
+  buildingTypology: DEFAULT_BUILDING_TYPOLOGY,
   linkedModels: [],
   storeyAlignments: [],
   selectedStoreyId: null,
@@ -395,9 +409,15 @@ export type WorkspacePageAction =
         sourceStoreyId: StoreyId
         stacks: WetCoreSuggestedStack[]
         cores: WetCore[]
+        /** Omitted → residential with no rows / core-shaft selection (pre-G3 callers). */
+        typology?: BuildingTypology
+        fixtureRows?: FixtureRow[]
+        officeCoreShafts?: OfficeCoreShaftSelection[]
         diagnostics: string[]
       } | null
     }
+  // Building typology switch (G3) from the upload screen; no suggestion re-run.
+  | { type: 'building-typology-set'; typology: BuildingTypology }
   // Async suggest lifecycle (V3): the whole-building scan before the stacks are
   // built. `suggest-cancelled` / `suggest-failed` are explicit, never silent.
   | { type: 'suggest-started' }
@@ -690,6 +710,9 @@ function reduce(state: WorkspacePageState, action: WorkspacePageAction): Workspa
                 cores: wetCore.cores,
                 supersededCoreIds: merge.supersededCoreIds,
                 preservedStackIds: merge.preservedStackIds,
+                typology: wetCore.typology ?? DEFAULT_BUILDING_TYPOLOGY,
+                fixtureRows: wetCore.fixtureRows ?? [],
+                officeCoreShafts: wetCore.officeCoreShafts ?? [],
                 diagnostics: wetCore.diagnostics,
               },
         isSuggestingRisers: false,
@@ -697,6 +720,9 @@ function reduce(state: WorkspacePageState, action: WorkspacePageAction): Workspa
         suggestError: null,
       }
     }
+
+    case 'building-typology-set':
+      return { ...state, buildingTypology: action.typology }
 
     case 'suggest-started':
       return { ...state, isSuggestingRisers: true, suggestProgress: null, suggestError: null }

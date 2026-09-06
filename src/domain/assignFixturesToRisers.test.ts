@@ -7,6 +7,7 @@ import {
   type AssignableFixture,
   type AssignableRiser,
 } from './assignFixturesToRisers'
+import { BRANCH_LENGTH_LIMIT_M, BRANCH_LENGTH_LIMIT_MM } from './typology'
 
 function fixture(
   expressId: number,
@@ -246,5 +247,58 @@ describe('assignFixturesToRisers with wet-core membership (V5)', () => {
     )
 
     expect(result[0]).toMatchObject({ unassigned: true, reason: 'no-riser-within-branch-length' })
+  })
+})
+
+describe('assignFixturesToRisers typology (G3)', () => {
+  it('keeps the residential constants equal to the pre-typology 4 m limit', () => {
+    expect(MAX_BRANCH_LENGTH_M).toBe(BRANCH_LENGTH_LIMIT_M.residential)
+    expect(MAX_BRANCH_LENGTH_MM).toBe(BRANCH_LENGTH_LIMIT_MM.residential)
+    expect(MAX_BRANCH_LENGTH_M).toBe(4)
+  })
+
+  it('explicit residential typology is byte-identical to omitting it', () => {
+    const fixtures = [fixture(1, 5000, 5000), fixture(2, 5000, 5000 + MAX_BRANCH_LENGTH_MM + 1)]
+    const risers = [riser('r1', 5000, 5000)]
+    expect(assignFixturesToRisers(fixtures, risers, { typology: 'residential' })).toEqual(
+      assignFixturesToRisers(fixtures, risers),
+    )
+  })
+
+  it('office typology raises the nearest-riser limit to the office placeholder (12 m)', () => {
+    const fixtures = [fixture(1, 10, 10)]
+    const risers = [riser('r1', 10 + 9, 10)]
+    expect(assignFixturesToRisers(fixtures, risers)[0]).toMatchObject({ unassigned: true, reason: 'no-riser-within-branch-length' })
+    expect(assignFixturesToRisers(fixtures, risers, { typology: 'office' })[0]).toMatchObject({
+      unassigned: false,
+      riserId: 'r1',
+      planDistance: 9,
+      units: 'm',
+    })
+    const beyond = assignFixturesToRisers(fixtures, [riser('r1', 10 + BRANCH_LENGTH_LIMIT_M.office + 0.5, 10)], { typology: 'office' })
+    expect(beyond[0]).toMatchObject({ unassigned: true, reason: 'no-riser-within-branch-length' })
+  })
+
+  it('office typology flags wet-core assignments against the office limit (mm scale), never blocks', () => {
+    const coreMembership = {
+      fixtureCoreIds: new Map<number, string>([[1, 'core-A']]),
+      stackCoreIds: new Map<string, string>([['stack-core-a', 'core-A']]),
+    }
+    const fixtures = [fixture(1, 5000, 5000)]
+    const nearRisers = [riser('core-a', 5000, 5000 + 9000)]
+    expect(assignFixturesToRisers(fixtures, nearRisers, { coreMembership })[0]).toMatchObject({
+      assignedBy: 'wet-core',
+      exceedsMaxBranchLength: true,
+    })
+    expect(assignFixturesToRisers(fixtures, nearRisers, { coreMembership, typology: 'office' })[0]).toMatchObject({
+      assignedBy: 'wet-core',
+      exceedsMaxBranchLength: false,
+    })
+    const farRisers = [riser('core-a', 5000, 5000 + BRANCH_LENGTH_LIMIT_MM.office + 1)]
+    expect(assignFixturesToRisers(fixtures, farRisers, { coreMembership, typology: 'office' })[0]).toMatchObject({
+      unassigned: false,
+      assignedBy: 'wet-core',
+      exceedsMaxBranchLength: true,
+    })
   })
 })

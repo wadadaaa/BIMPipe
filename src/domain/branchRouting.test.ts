@@ -285,3 +285,170 @@ describe('computeBranchRoutes', () => {
     ])).toThrow('Conflicting plan positions for riser riser-1 on storey 101')
   })
 })
+
+describe('computeBranchRoutes with row collectors (office, G3)', () => {
+  // Riser at the origin; a WC row of four along x at z = 5 (x 2, 3, 4, 5),
+  // collector 0.3 m behind the row (z 5.3, the +z "wall" side).
+  const riserPlan = { x: 0, z: 0 }
+  const rowInput = [
+    assigned(11, { x: 2, z: 5 }, riserPlan),
+    assigned(12, { x: 3, z: 5 }, riserPlan),
+    assigned(13, { x: 4, z: 5 }, riserPlan),
+    assigned(14, { x: 5, z: 5 }, riserPlan),
+  ]
+  const row = { id: 'row:core:TOILETPAN:x:0', storeyId: 101, axis: 'x' as const, collectorLineCoord: 5.3, memberExpressIds: [11, 12, 13, 14] }
+
+  it('is byte-identical to the plain routing when no rows are passed', () => {
+    expect(computeBranchRoutes(rowInput, { rowCollectors: [] })).toEqual(computeBranchRoutes(rowInput))
+    const plain = computeBranchRoutes(rowInput)[0].segments
+    expect(plain.every((segment) => !('role' in segment) && !('rowId' in segment))).toBe(true)
+  })
+
+  it('routes stubs → collector → one run to the riser, with roles, diameters and served sets', () => {
+    const [floor] = computeBranchRoutes(rowInput, { rowCollectors: [row] })
+    const segments = floor.segments
+
+    const stubs = segments.filter((segment) => segment.role === 'row-stub')
+    const collectors = segments.filter((segment) => segment.role === 'row-collector')
+    const runs = segments.filter((segment) => segment.role === 'collector-run')
+    expect(stubs).toHaveLength(4)
+    expect(collectors).toHaveLength(3)
+    expect(runs).toHaveLength(2)
+    expect(segments).toHaveLength(9)
+
+    for (const stub of stubs) {
+      expect(stub.axis).toBe('z')
+      expect(stub.kind).toBe('fixture-branch')
+      expect(stub.rowId).toBe(row.id)
+      expect(stub.start.z).toBe(5)
+      expect(stub.end.z).toBeCloseTo(5.3, 9)
+      expect(planLength(stub)).toBeCloseTo(0.3, 9)
+      expect(stub.diameterMm).toBe(110)
+    }
+
+    // Collector end = row extreme nearest the riser along x → x = 2. Flow 5 → 2.
+    expect(collectors.map((segment) => [segment.start.x, segment.end.x, segment.servedFixtureExpressIds])).toEqual([
+      [5, 4, [14]],
+      [4, 3, [13, 14]],
+      [3, 2, [12, 13, 14]],
+    ])
+    for (const collector of collectors) {
+      expect(collector.axis).toBe('x')
+      expect(collector.start.z).toBeCloseTo(5.3, 9)
+      expect(collector.rowId).toBe(row.id)
+      expect(collector.diameterMm).toBe(110)
+    }
+    expect(collectors.reduce((sum, segment) => sum + planLength(segment), 0)).toBeCloseTo(3, 9)
+
+    // ONE L-run from (2, 5.3): X leg to x = 0 at z = 5.3, then Z leg down to the riser.
+    const [xRun, zRun] = runs
+    expect(xRun.axis).toBe('x')
+    expect([xRun.start.x, xRun.start.z, xRun.end.x, xRun.end.z].map((v) => Number(v.toFixed(9)))).toEqual([2, 5.3, 0, 5.3])
+    expect(zRun.axis).toBe('z')
+    expect([zRun.start.x, zRun.start.z, zRun.end.x, zRun.end.z].map((v) => Number(v.toFixed(9)))).toEqual([0, 5.3, 0, 0])
+    for (const run of runs) {
+      expect(run.kind).toBe('trunk')
+      expect(run.servedFixtureExpressIds).toEqual([11, 12, 13, 14])
+      expect(run.diameterMm).toBe(110)
+      expect(run.rowId).toBeUndefined()
+    }
+
+    // Every member still walks to the riser along served segments; the end member skips the collector.
+    for (const member of rowInput) {
+      const path = walkPathToRiser(segments, member.fixtureExpressId, member.fixturePlan, riserPlan)
+      expect(path[0].role).toBe('row-stub')
+      expect(path[path.length - 1].role).toBe('collector-run')
+    }
+    expect(walkPathToRiser(segments, 11, { x: 2, z: 5 }, riserPlan)).toHaveLength(3)
+    expect(walkPathToRiser(segments, 14, { x: 5, z: 5 }, riserPlan)).toHaveLength(6)
+
+    // Slope datum: the riser end is 0; the far WC's stub start is the highest point.
+    expect(zRun.end.elevation).toBe(0)
+    const farStub = stubs.find((segment) => segment.start.x === 5)!
+    expect(farStub.start.elevation).toBeCloseTo(SLOPE * (0.3 + 3 + 2 + 5.3), 9)
+    // Elevations are continuous through junctions.
+    expect(collectors[0].start.elevation).toBeCloseTo(farStub.end.elevation, 9)
+    expect(xRun.start.elevation).toBeCloseTo(collectors[2].end.elevation, 9)
+
+    // Ids are dense and deterministic.
+    expect(segments.map((segment) => segment.id)).toEqual(segments.map((_, i) => `branch-seg|101|riser-1|${i}`))
+  })
+
+  it('shares the collector run corridor with non-row fixtures and marks it collector-run', () => {
+    const basin = assigned(21, { x: 0, z: 7 }, riserPlan, { fixtureKind: 'WASHHANDBASIN' })
+    const [floor] = computeBranchRoutes([...rowInput, basin], { rowCollectors: [row] })
+    const zLegs = floor.segments.filter((segment) => segment.axis === 'z' && segment.start.x === 0)
+    // Basin enters at z 7, the row run at z 5.3: split into two segments on the same corridor.
+    expect(zLegs.map((segment) => [segment.start.z, Number(segment.end.z.toFixed(9)), segment.servedFixtureExpressIds, segment.role])).toEqual([
+      [7, 5.3, [21], 'collector-run'],
+      [5.3, 0, [11, 12, 13, 14, 21], 'collector-run'],
+    ])
+    expect(zLegs[0].diameterMm).toBe(50)
+    expect(zLegs[1].diameterMm).toBe(110)
+  })
+
+  it('picks the collector end nearest the riser and handles z-rows and a member at the end', () => {
+    // z-row at x = 10 (z 1..3), riser at (10, 6): the end is alongMax (z 3), flow +z.
+    const riser = { x: 10, z: 6 }
+    const input = [assigned(1, { x: 10, z: 1 }, riser), assigned(2, { x: 10, z: 2 }, riser), assigned(3, { x: 10, z: 3 }, riser)]
+    const zRow = { id: 'row:z', storeyId: 101, axis: 'z' as const, collectorLineCoord: 9.7, memberExpressIds: [1, 2, 3] }
+    const [floor] = computeBranchRoutes(input, { rowCollectors: [zRow] })
+    const collectors = floor.segments.filter((segment) => segment.role === 'row-collector')
+    expect(collectors.map((segment) => [segment.start.z, segment.end.z, segment.servedFixtureExpressIds])).toEqual([
+      [1, 2, [1]],
+      [2, 3, [1, 2]],
+    ])
+    expect(collectors.every((segment) => Math.abs(segment.start.x - 9.7) < 1e-9)).toBe(true)
+    const runs = floor.segments.filter((segment) => segment.role === 'collector-run')
+    // From (9.7, 3) to (10, 6): the riser lies beyond the row along z, so the run
+    // continues along z on the collector line first, then turns to x at z = 6.
+    expect(runs.map((segment) => [segment.axis, Number(segment.start.x.toFixed(3)), segment.start.z, Number(segment.end.x.toFixed(3)), segment.end.z])).toEqual([
+      ['x', 9.7, 6, 10, 6],
+      ['z', 9.7, 3, 9.7, 6],
+    ])
+    expect(runs.every((segment) => segment.servedFixtureExpressIds.join() === '1,2,3')).toBe(true)
+    for (const member of input) walkPathToRiser(floor.segments, member.fixtureExpressId, member.fixturePlan, riser)
+  })
+
+  it('turns perpendicular first when the riser sits within the row extent', () => {
+    // x-row x 2..5 at z 5, collector at z 5.3, riser at (3.5, 8) beyond the collector: end = x 2 (tie → min).
+    const riser = { x: 3.5, z: 8 }
+    const input = rowInput.map((entry) => ({ ...entry, riserPlan: riser }))
+    const [floor] = computeBranchRoutes(input, { rowCollectors: [row] })
+    const runs = floor.segments.filter((segment) => segment.role === 'collector-run')
+    expect(runs.map((segment) => [segment.axis, Number(segment.start.x.toFixed(3)), Number(segment.start.z.toFixed(3)), Number(segment.end.x.toFixed(3)), Number(segment.end.z.toFixed(3))])).toEqual([
+      ['x', 2, 8, 3.5, 8],
+      ['z', 2, 5.3, 2, 8],
+    ])
+    for (const member of input) walkPathToRiser(floor.segments, member.fixtureExpressId, member.fixturePlan, riser)
+  })
+
+  it('routes row members individually when fewer than two of them are in the riser group, and ignores other storeys', () => {
+    const otherRiser = assigned(14, { x: 5, z: 5 }, { x: 9, z: 9 }, { riserId: 'riser-2', riserStackId: 'stack-2' })
+    const input = [rowInput[0], rowInput[1], rowInput[2], otherRiser]
+    const [floor] = computeBranchRoutes(input, { rowCollectors: [row] })
+    const riser2 = floor.segments.filter((segment) => segment.riserId === 'riser-2')
+    expect(riser2.every((segment) => segment.role === undefined)).toBe(true)
+    expect(riser2.every((segment) => segment.servedFixtureExpressIds.join() === '14')).toBe(true)
+    const riser1 = floor.segments.filter((segment) => segment.riserId === 'riser-1')
+    expect(riser1.filter((segment) => segment.role === 'row-stub')).toHaveLength(3)
+
+    const otherStoreyRow = { ...row, storeyId: 999 }
+    expect(computeBranchRoutes(rowInput, { rowCollectors: [otherStoreyRow] })).toEqual(computeBranchRoutes(rowInput))
+  })
+
+  it('is deterministic regardless of input order and works in mm', () => {
+    const forward = computeBranchRoutes(rowInput, { rowCollectors: [row] })
+    const shuffled = computeBranchRoutes([rowInput[2], rowInput[0], rowInput[3], rowInput[1]], { rowCollectors: [row] })
+    expect(shuffled).toEqual(forward)
+
+    const mmInput = rowInput.map((entry) => ({
+      ...entry,
+      fixturePlan: { x: entry.fixturePlan.x * 1000, z: entry.fixturePlan.z * 1000 },
+      riserPlan: { x: 0, z: 0 },
+    }))
+    const [mmFloor] = computeBranchRoutes(mmInput, { rowCollectors: [{ ...row, collectorLineCoord: 5300 }] })
+    expect(mmFloor.planUnits).toBe('mm')
+    expect(mmFloor.segments.filter((segment) => segment.role === 'row-stub').every((segment) => planLength(segment) === 300)).toBe(true)
+  })
+})

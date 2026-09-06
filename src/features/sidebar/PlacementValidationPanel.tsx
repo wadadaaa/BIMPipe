@@ -10,7 +10,14 @@ import type {
   SuggestedRiserStackExtent,
   WetCoreSuggestedStack,
 } from '@/shared/routes/buildSuggestedRisers'
-import type { WetCore } from '@/domain/wetCores'
+import type { FixtureRow, WetCore } from '@/domain/wetCores'
+import type { OfficeCoreShaftSelection } from '@/domain/continuityMap'
+import {
+  BRANCH_LENGTH_LIMIT_M,
+  DEFAULT_BUILDING_TYPOLOGY,
+  describeBuildingTypology,
+  type BuildingTypology,
+} from '@/domain/typology'
 import type { FixtureRiserAssignment } from '@/domain/assignFixturesToRisers'
 import type { FloorRoutes } from '@/domain/branchRouting'
 import { formatBranchSlopePercent } from '@/domain/branchDefaults'
@@ -51,6 +58,12 @@ export interface WetCoreSuggestionSummary {
   cores: WetCore[]
   supersededCoreIds: string[]
   preservedStackIds: string[]
+  /** Typology the run used (G3). */
+  typology: BuildingTypology
+  /** Office only: fixture rows routed through a collector. */
+  fixtureRows: FixtureRow[]
+  /** Office only: core-shaft selection per storey. */
+  officeCoreShafts: OfficeCoreShaftSelection[]
   diagnostics: string[]
 }
 
@@ -66,6 +79,8 @@ interface PlacementValidationPanelProps {
   demoFlowEnabled?: boolean
   /** V5 routing switch; the routing-model section renders in plain mode only (demo parity). */
   routingModel?: RoutingModel
+  /** Building typology (G3) as set on the upload screen; null hides the line (demo mode). */
+  buildingTypology?: BuildingTypology | null
   /** Branch runs of the open floor (branch-runs model); null before stacks exist. */
   branchRouteFloor?: FloorRoutes | null
   /** Fixture assignments of the open floor, summarised in the routing-model section. */
@@ -508,14 +523,24 @@ function RoutingModelSection({
   routingModel,
   floor,
   assignments,
+  branchLengthLimitM,
 }: {
   routingModel: RoutingModel
   floor: FloorRoutes | null
   assignments: FixtureRiserAssignment[]
+  /** Branch limit the assignments were flagged against (typology of the last run). */
+  branchLengthLimitM: number
 }) {
   const summary = summarizeBranchRunsForDebug(floor === null ? [] : [floor], assignments)
   const floorSummary = summary.floors[0] ?? null
   const routedCount = summary.assignedBy.wetCore + summary.assignedBy.nearest
+  const collectorSegments = floor === null ? [] : floor.segments.filter((segment) => segment.role === 'row-collector')
+  const collectorRowIds = new Set(collectorSegments.map((segment) => segment.rowId))
+  const collectorLength = collectorSegments.reduce(
+    (sum, segment) => sum + Math.abs(segment.start.x - segment.end.x) + Math.abs(segment.start.z - segment.end.z),
+    0,
+  )
+  const collectorLengthM = floor?.planUnits === 'mm' ? collectorLength / 1000 : collectorLength
   return (
     <section className="sidebar__panel" data-testid="routing-model-section">
       <p className="sidebar__panel-title">Horizontal routing</p>
@@ -541,11 +566,75 @@ function RoutingModelSection({
               <strong>Not routed:</strong> {summary.unrouted.length} fixture(s) without a reachable stack — see the Risers tab.
             </li>
           )}
-          {summary.overlength.length > 0 && (
-            <li>
-              <strong>Beyond branch limit:</strong> {summary.overlength.length} fixture(s) kept on their wet core&apos;s stack farther than 4 m (wide core or moved stack).
+          {collectorRowIds.size > 0 && (
+            <li data-testid="row-collectors">
+              <strong>Row collectors:</strong> {collectorRowIds.size} fixture row(s) drain through a collector along the row — {collectorSegments.length}{' '}
+              collector segment(s), {collectorLengthM.toFixed(2)} m, then one run per row to the stack.
             </li>
           )}
+          {summary.overlength.length > 0 && (
+            <li>
+              <strong>Beyond branch limit:</strong> {summary.overlength.length} fixture(s) kept on their wet core&apos;s stack farther than{' '}
+              {formatBranchLimit(branchLengthLimitM)} (wide core or moved stack).
+            </li>
+          )}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+function formatBranchLimit(limitM: number): string {
+  return `${Number.isInteger(limitM) ? limitM.toFixed(0) : limitM.toFixed(1)} m`
+}
+
+/**
+ * Building typology (G3): what is currently selected on the upload screen,
+ * what the last suggest run used, and — for office runs — the core-shaft
+ * selection and fixture rows that fell out. Plain mode only.
+ */
+function TypologySection({
+  typology,
+  suggestion,
+}: {
+  typology: BuildingTypology
+  suggestion: WetCoreSuggestionSummary | null
+}) {
+  const stale = suggestion !== null && suggestion.typology !== typology
+  return (
+    <section className="sidebar__panel" data-testid="typology-section">
+      <p className="sidebar__panel-title">Building typology</p>
+      <p className="sidebar__panel-copy">
+        <strong>{describeBuildingTypology(typology)}</strong>. Branch limit {formatBranchLimit(BRANCH_LENGTH_LIMIT_M[typology])}
+        {typology === 'office'
+          ? '; stacks on core shafts only, toilet rows drain through a collector along the row.'
+          : '; stacks per wet core through shaft → free cell → wall-side edge.'}
+      </p>
+      {stale && (
+        <p className="sidebar__panel-copy" role="status">
+          The current stacks were suggested as <strong>{suggestion.typology}</strong> — press Suggest to apply the {typology} rules.
+        </p>
+      )}
+      {suggestion !== null && suggestion.typology === 'office' && (
+        <ul className="risers-panel__legend-list" data-testid="office-core-shafts">
+          {suggestion.officeCoreShafts.map((selection) => (
+            <li key={selection.storeyId}>
+              <strong>Core shafts:</strong> {selection.selected.length} of {selection.candidates.length} shaft candidate(s) selected (
+              {selection.denseClusters.length} dense-structure cluster(s), {selection.largeVoids.length} stair/lift void anchor(s)).
+              {selection.candidates
+                .filter((candidate) => candidate.selected)
+                .map((candidate) => ` ${candidate.areaM2.toFixed(2)} m² ${candidate.reason}`)
+                .join(';')}
+            </li>
+          ))}
+          <li>
+            <strong>Fixture rows:</strong>{' '}
+            {suggestion.fixtureRows.length === 0
+              ? 'none (no ≥ 3 same-kind fixtures in a row)'
+              : suggestion.fixtureRows
+                  .map((row) => `${row.memberExpressIds.length}× ${row.kind} along ${row.axis} (${row.sideReason} side)`)
+                  .join(', ')}
+          </li>
         </ul>
       )}
     </section>
@@ -560,6 +649,7 @@ export function PlacementValidationPanel({
   riserStackExtents = null,
   demoFlowEnabled = false,
   routingModel = 'branch-runs',
+  buildingTypology = null,
   branchRouteFloor = null,
   fixtureAssignments = [],
   initialStoreyDecision = null,
@@ -631,8 +721,17 @@ export function PlacementValidationPanel({
     <WetCoreSection suggestion={wetCoreSuggestion} extents={riserStackExtents} storeys={storeys} />
   )
 
+  const typologySection = !demoFlowEnabled && buildingTypology !== null && (
+    <TypologySection typology={buildingTypology} suggestion={wetCoreSuggestion} />
+  )
+
   const routingModelSection = !demoFlowEnabled && (
-    <RoutingModelSection routingModel={routingModel} floor={branchRouteFloor} assignments={fixtureAssignments} />
+    <RoutingModelSection
+      routingModel={routingModel}
+      floor={branchRouteFloor}
+      assignments={fixtureAssignments}
+      branchLengthLimitM={BRANCH_LENGTH_LIMIT_M[wetCoreSuggestion?.typology ?? DEFAULT_BUILDING_TYPOLOGY]}
+    />
   )
 
   if (!report) {
@@ -642,6 +741,7 @@ export function PlacementValidationPanel({
         {multiModelSections}
         {engineerSection}
         {continuitySection}
+        {typologySection}
         {wetCoreSection}
         {routingModelSection}
         <p className="sidebar__panel-copy">Suggest risers to populate export validation details.</p>
@@ -663,6 +763,7 @@ export function PlacementValidationPanel({
       {multiModelSections}
       {engineerSection}
       {continuitySection}
+      {typologySection}
       {wetCoreSection}
       {routingModelSection}
       <p className="sidebar__panel-title">Placement and export readiness</p>

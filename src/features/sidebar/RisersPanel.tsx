@@ -42,6 +42,8 @@ interface RisersPanelProps {
   modelLengthUnit?: LengthUnit | null
   /** Wet-core stacks of the last suggest run (V3); null in demo mode / before suggesting. */
   wetCoreStacks?: WetCoreSuggestedStack[] | null
+  /** Branch length limit (m) of the last suggest run's typology (G3); default residential 4 m. */
+  branchLengthLimitM?: number
   /** Async suggest lifecycle (V3). */
   isSuggestingRisers?: boolean
   suggestProgress?: { processed: number; total: number; storeyName: string | null } | null
@@ -69,6 +71,7 @@ export function RisersPanel({
   fixtureAssignments = EMPTY_FIXTURE_ASSIGNMENTS,
   modelLengthUnit = null,
   wetCoreStacks = null,
+  branchLengthLimitM,
   isSuggestingRisers = false,
   suggestProgress = null,
   suggestError = null,
@@ -227,6 +230,7 @@ export function RisersPanel({
           assignments={fixtureAssignments}
           stackLabelByRiserId={stackLabelByRiserId}
           fixtureNameByExpressId={fixtureNameByExpressId}
+          branchLengthLimitM={branchLengthLimitM}
         />
       )}
 

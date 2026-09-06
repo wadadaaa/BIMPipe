@@ -1,8 +1,11 @@
 import type { Fixture, KitchenArea, PlanBounds, StoreyId } from '@/domain/types'
-import { snapPointToContinuity, type ContinuityMap } from '@/domain/continuityMap'
+import { selectOfficeCoreShafts, snapPointToContinuity, type ContinuityMap, type OfficeCoreShaftSelection } from '@/domain/continuityMap'
+import { DEFAULT_BUILDING_TYPOLOGY, TYPOLOGY_PLACEMENT_RULES, type BuildingTypology } from '@/domain/typology'
 import {
   clusterWetCores,
+  detectFixtureRows,
   placeWetCoreStack,
+  type FixtureRow,
   type WetCore,
   type WetCorePlanUnits,
   type WetCoreStackPlacement,
@@ -191,8 +194,19 @@ export interface WetCoreSuggestOptions {
    * Null/undefined = no structure loaded → wall-side-edge rule.
    */
   continuityMap?: ContinuityMap | null
-  /** Snap search radius in millimetres. Defaults to {@link MAX_SNAP_MM}. */
+  /**
+   * Snap search radius in millimetres. Defaults to the typology's snap radius:
+   * {@link MAX_SNAP_MM} (1.5 m) for residential, `MAX_SNAP_OFFICE_MM` (6 m) for office.
+   */
   maxSnapMm?: number
+  /**
+   * Building typology (G3). Omitted → `'residential'`, byte-identical to the
+   * pre-typology behaviour. `'office'`: stacks snap to core shafts only
+   * (`selectOfficeCoreShafts`), flagged when none is within the office snap
+   * radius, and same-kind fixture rows are detected for collector routing
+   * (`fixtureRows`).
+   */
+  typology?: BuildingTypology
 }
 
 /** One suggested stack of the wet-core path with its provenance. */
@@ -210,6 +224,15 @@ export interface WetCoreSuggestion {
   /** Cores first (storey, then dominant plan axis), then kitchens in the default kitchen order. */
   positions: WetCoreSuggestedPosition[]
   cores: WetCore[]
+  /** Typology the rules were taken from. */
+  typology: BuildingTypology
+  /**
+   * Office only: same-kind fixture rows inside the cores (`detectFixtureRows`),
+   * to be handed to `computeBranchRoutes({ rowCollectors })`. Empty for residential.
+   */
+  fixtureRows: FixtureRow[]
+  /** Office only: the core-shaft selection per storey that placement used. Empty for residential. */
+  officeCoreShafts: OfficeCoreShaftSelection[]
   /** Explicit notes about inputs that could not be used (fixtures without positions …). */
   diagnostics: string[]
 }
@@ -231,8 +254,10 @@ export function suggestWetCoreRiserPositions(
   options: WetCoreSuggestOptions,
 ): WetCoreSuggestion {
   const { planUnits } = options
+  const typology = options.typology ?? DEFAULT_BUILDING_TYPOLOGY
+  const rules = TYPOLOGY_PLACEMENT_RULES[typology]
   const map = options.continuityMap ?? null
-  const maxSnap = resolveMaxSnap(planUnits, options.maxSnapMm)
+  const maxSnap = resolveMaxSnap(planUnits, options.maxSnapMm, typology)
   const diagnostics: string[] = []
 
   const clustered = clusterWetCores(fixtures, { units: planUnits })
@@ -243,15 +268,49 @@ export function suggestWetCoreRiserPositions(
     )
   }
 
+  // Office: core-shaft selection once per storey (pure; shared by every core on it).
+  const officeCoreShafts: OfficeCoreShaftSelection[] = []
+  if (rules.stackCandidates === 'core-shafts-only' && rules.coreShafts !== null && map !== null && map.units === planUnits) {
+    const storeyIds = [...new Set(clustered.cores.map((core) => core.storeyId))].sort((a, b) => a - b)
+    for (const storeyId of storeyIds) {
+      const selection = selectOfficeCoreShafts(map, storeyId, rules.coreShafts)
+      officeCoreShafts.push(selection)
+      diagnostics.push(
+        `office core shafts on storey ${storeyId}: ${selection.selected.length}/${selection.candidates.length} shaft candidate(s) selected ` +
+          `(${selection.denseClusters.length} dense-structure cluster(s), ${selection.largeVoids.length} stair/lift void anchor(s))`,
+      )
+    }
+  } else if (rules.stackCandidates === 'core-shafts-only') {
+    diagnostics.push('office typology: no usable continuity map, so no core shafts could be selected; every stack is flagged at its core centroid')
+  }
+
   const positions: WetCoreSuggestedPosition[] = clustered.cores.map((core) => {
     const placement = placeWetCoreStack(core, {
       units: planUnits,
       continuityMap: map,
       maxSnap,
       floorPlanBounds,
+      ...(typology === DEFAULT_BUILDING_TYPOLOGY
+        ? {}
+        : { typology, officeCoreShafts: officeCoreShafts.find((selection) => selection.storeyId === core.storeyId) }),
     })
     return { x: placement.position.x, y: core.centroidY, z: placement.position.z, anchor: 'wet-core', core, placement }
   })
+
+  const fixtureRows: FixtureRow[] =
+    rules.rowCollectors === null
+      ? []
+      : clustered.cores.flatMap((core) =>
+          detectFixtureRows(core, { units: planUnits, rules: rules.rowCollectors ?? undefined, continuityMap: map, floorPlanBounds }),
+        )
+  if (rules.rowCollectors !== null) {
+    diagnostics.push(
+      fixtureRows.length === 0
+        ? `office typology: no fixture row of ≥ ${rules.rowCollectors.minFixtures} same-kind fixtures found; fixtures route individually`
+        : `office typology: ${fixtureRows.length} fixture row(s) drain through a collector: ` +
+            fixtureRows.map((row) => `${row.memberExpressIds.length}× ${row.kind} along ${row.axis} in ${row.coreId}`).join('; '),
+    )
+  }
 
   const fixtureOffsetToleranceMm = ruleProfile?.fixtureOffsetToleranceMm ?? 450
   const positionedKitchens = kitchens.filter(
@@ -283,12 +342,14 @@ export function suggestWetCoreRiserPositions(
     })
   })
 
-  return { positions, cores: clustered.cores, diagnostics }
+  return { positions, cores: clustered.cores, typology, fixtureRows, officeCoreShafts, diagnostics }
 }
 
-function resolveMaxSnap(planUnits: WetCorePlanUnits, maxSnapMm: number | undefined): number {
+function resolveMaxSnap(planUnits: WetCorePlanUnits, maxSnapMm: number | undefined, typology: BuildingTypology): number {
   if (maxSnapMm !== undefined) return planUnits === 'mm' ? maxSnapMm : maxSnapMm / 1000
-  return planUnits === 'mm' ? MAX_SNAP_MM : MAX_SNAP_M
+  if (typology === DEFAULT_BUILDING_TYPOLOGY) return planUnits === 'mm' ? MAX_SNAP_MM : MAX_SNAP_M
+  const maxSnapM = TYPOLOGY_PLACEMENT_RULES[typology].maxSnapM
+  return planUnits === 'mm' ? maxSnapM * 1000 : maxSnapM
 }
 
 function buildKitchenRiserPositions(

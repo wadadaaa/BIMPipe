@@ -25,6 +25,16 @@ export type RouteSegmentId = string
 export type RouteSegmentKind = 'fixture-branch' | 'trunk'
 
 /**
+ * Office row-collector role of a segment (G3). Absent on every segment of the
+ * residential/plain routing so that output stays byte-identical:
+ * - 'row-stub': short perpendicular run from one row fixture to the collector line.
+ * - 'row-collector': run along the collector line, parallel to the fixture row.
+ * - 'collector-run': the single L-run from the collector end to the riser
+ *   (may also carry non-row fixtures that share the corridor).
+ */
+export type RouteSegmentRole = 'row-stub' | 'row-collector' | 'collector-run'
+
+/**
  * One end of an axis-aligned horizontal route segment.
  * All values are in the plan units recorded on the owning FloorRoutes.
  */
@@ -69,6 +79,10 @@ export interface RouteSegment {
   riserId: RiserId
   /** Vertical stack of the target riser, when known. */
   riserStackId?: string
+  /** Set only for office row-collector routing; see {@link RouteSegmentRole}. */
+  role?: RouteSegmentRole
+  /** Id of the fixture row this segment belongs to (`role` 'row-stub' / 'row-collector' only). */
+  rowId?: string
 }
 
 /**
@@ -105,6 +119,22 @@ export interface AssignedFixture {
   storeyId: StoreyId
 }
 
+/**
+ * A fixture row that drains through a collector (office typology). Structural
+ * subset of `FixtureRow` from `./wetCores` so rows can be passed straight
+ * through. Coordinates must be in the same plan units as the assignments.
+ */
+export interface RowCollectorInput {
+  id: string
+  storeyId: StoreyId
+  /** Axis the row (and its collector) runs along. */
+  axis: 'x' | 'z'
+  /** Perpendicular coordinate of the collector line (z for x-rows, x for z-rows). */
+  collectorLineCoord: number
+  /** Fixtures in the row. */
+  memberExpressIds: number[]
+}
+
 export interface ComputeBranchRoutesOptions {
   /**
    * Units of the incoming plan coordinates. When omitted, units are detected
@@ -113,6 +143,13 @@ export interface ComputeBranchRoutesOptions {
    * mm, otherwise metres. Pass explicitly when the model units are known.
    */
   planUnits?: PlanUnits
+  /**
+   * Office row collectors (G3). Members of a row that are assigned to the same
+   * riser (≥ 2 of them) route as: perpendicular stub → collector line along
+   * the row → ONE L-run from the collector end nearest the riser to the riser.
+   * Omitted/empty → every fixture routes individually (residential behaviour).
+   */
+  rowCollectors?: readonly RowCollectorInput[]
 }
 
 /**
@@ -151,6 +188,23 @@ export interface ComputeBranchRoutesOptions {
  * - Junction invert refinement is not modelled: elevations are the ideal
  *   2%-of-remaining-run levels, not min-invert-at-junction hydraulics.
  *
+ * Row collectors (office, `options.rowCollectors`):
+ * - Each row member gets a perpendicular stub from its centre to the collector
+ *   line (`role: 'row-stub'`); the collector runs along the row on that line
+ *   from the far member to the collector END — the row extreme nearest the
+ *   riser along the row axis (tie → lower coordinate) — split at every member
+ *   entry (`role: 'row-collector'`); then ONE L-run from the collector end to
+ *   the riser carries every member (`role: 'collector-run'`) and merges with
+ *   any other leg on the same corridor. The run's first leg continues along
+ *   the row axis when the riser lies beyond the row extent (so it never
+ *   doubles back over the collector), else it turns perpendicular first.
+ *   Diameters follow `resolveBranchSegmentDiameterMm` on the served
+ *   kinds (Ø110 as soon as a WC is served, Ø63 for ≥ 2 shared small fixtures).
+ * - A row whose members are split across risers is applied per riser group;
+ *   a group with < 2 members of the row routes those fixtures individually.
+ * - Approximation: a stub can in theory overlap a plain leg on the same line
+ *   (only when a member's along-coordinate equals the riser coordinate).
+ *
  * @throws when the same riser id is given conflicting plan positions on one storey.
  */
 export function computeBranchRoutes(
@@ -158,6 +212,7 @@ export function computeBranchRoutes(
   options: ComputeBranchRoutesOptions = {},
 ): FloorRoutes[] {
   const planUnits = options.planUnits ?? detectAssignedPlanUnits(assignments)
+  const rowCollectors = options.rowCollectors ?? []
   const sortedAssignments = [...assignments].sort((a, b) => a.fixtureExpressId - b.fixtureExpressId)
 
   const byStorey = new Map<StoreyId, AssignedFixture[]>()
@@ -177,9 +232,10 @@ export function computeBranchRoutes(
       byRiser.set(assignment.riserId, list)
     }
 
+    const storeyRows = rowCollectors.filter((row) => row.storeyId === storeyId)
     const segments: RouteSegment[] = []
     for (const riserId of [...byRiser.keys()].sort((a, b) => a.localeCompare(b))) {
-      segments.push(...routeRiserGroup(storeyId, riserId, byRiser.get(riserId) ?? [], planUnits))
+      segments.push(...routeRiserGroup(storeyId, riserId, byRiser.get(riserId) ?? [], planUnits, storeyRows))
     }
 
     floors.push({ storeyId, planUnits, segments })
@@ -206,7 +262,10 @@ function snapCoordinate(value: number, resolution: number): number {
 interface LegEntry {
   /** Upstream entry coordinate along the run axis (exact input coordinate). */
   coord: number
-  fixtureExpressId: number
+  /** Fixtures entering the run at `coord` (one for a plain leg, the whole row for a collector run). */
+  fixtureExpressIds: number[]
+  /** Row-collector role carried by this entry, if any. */
+  role?: RouteSegmentRole
 }
 
 interface LegBucket {
@@ -219,6 +278,8 @@ interface LegBucket {
   junctionCoord: number
   /** Remaining L1 run from the junction to the riser (|fixture.z - riser.z| for X-legs, 0 for Z-legs). */
   tailDistance: number
+  /** Row this bucket belongs to (stubs and collectors only). */
+  rowId?: string
   entries: LegEntry[]
 }
 
@@ -227,6 +288,7 @@ function routeRiserGroup(
   riserId: RiserId,
   assignments: AssignedFixture[],
   planUnits: PlanUnits,
+  rows: readonly RowCollectorInput[],
 ): RouteSegment[] {
   const resolution = PLAN_SNAP_RESOLUTION[planUnits]
   const riserPlan = snapPlanPoint(assignments[0].riserPlan, resolution)
@@ -240,36 +302,26 @@ function routeRiserGroup(
   const kindByFixture = new Map(assignments.map((assignment) => [assignment.fixtureExpressId, assignment.fixtureKind]))
 
   const buckets = new Map<string, LegBucket>()
+  const rowMembers = new Set<number>()
+  for (const row of rows) {
+    const members = assignments.filter((assignment) => row.memberExpressIds.includes(assignment.fixtureExpressId))
+    if (members.length < 2) continue
+    for (const member of members) rowMembers.add(member.fixtureExpressId)
+    addRowLegs(buckets, row, members, riserPlan, resolution)
+  }
+
   for (const assignment of assignments) {
     const { fixtureExpressId } = assignment
+    if (rowMembers.has(fixtureExpressId)) continue
     const fixturePlan = snapPlanPoint(assignment.fixturePlan, resolution)
-    const dx = fixturePlan.x - riserPlan.x
-    const dz = fixturePlan.z - riserPlan.z
-
-    if (dx !== 0) {
-      addLeg(buckets, {
-        axis: 'x',
-        lineCoord: fixturePlan.z,
-        side: dx > 0 ? 1 : -1,
-        junctionCoord: riserPlan.x,
-        tailDistance: Math.abs(dz),
-      }, { coord: fixturePlan.x, fixtureExpressId })
-    }
-    if (dz !== 0) {
-      addLeg(buckets, {
-        axis: 'z',
-        lineCoord: riserPlan.x,
-        side: dz > 0 ? 1 : -1,
-        junctionCoord: riserPlan.z,
-        tailDistance: 0,
-      }, { coord: fixturePlan.z, fixtureExpressId })
-    }
+    addLRunLegs(buckets, fixturePlan, riserPlan, { fixtureExpressIds: [fixtureExpressId] })
   }
 
   const sortedBuckets = [...buckets.values()].sort((a, b) => {
     if (a.axis !== b.axis) return a.axis === 'x' ? -1 : 1
     if (a.lineCoord !== b.lineCoord) return a.lineCoord - b.lineCoord
-    return a.side - b.side
+    if (a.side !== b.side) return a.side - b.side
+    return a.junctionCoord - b.junctionCoord
   })
 
   const segments: RouteSegment[] = []
@@ -292,12 +344,111 @@ function routeRiserGroup(
   return segments
 }
 
+/**
+ * Corner rule: an axis-aligned L-run from `from` to the riser, `firstAxis`
+ * leg first (X for the plain rule). `entry.fixtureExpressIds` and
+ * `entry.role` are carried onto both legs.
+ */
+function addLRunLegs(
+  buckets: Map<string, LegBucket>,
+  from: PlanPoint,
+  riserPlan: PlanPoint,
+  entry: Omit<LegEntry, 'coord'>,
+  firstAxis: 'x' | 'z' = 'x',
+): void {
+  const dx = from.x - riserPlan.x
+  const dz = from.z - riserPlan.z
+  const xLeg = (tailDistance: number) =>
+    addLeg(buckets, {
+      axis: 'x',
+      lineCoord: firstAxis === 'x' ? from.z : riserPlan.z,
+      side: dx > 0 ? 1 : -1,
+      junctionCoord: riserPlan.x,
+      tailDistance,
+    }, { fixtureExpressIds: entry.fixtureExpressIds, role: entry.role, coord: from.x })
+  const zLeg = (tailDistance: number) =>
+    addLeg(buckets, {
+      axis: 'z',
+      lineCoord: firstAxis === 'x' ? riserPlan.x : from.x,
+      side: dz > 0 ? 1 : -1,
+      junctionCoord: riserPlan.z,
+      tailDistance,
+    }, { fixtureExpressIds: entry.fixtureExpressIds, role: entry.role, coord: from.z })
+  if (firstAxis === 'x') {
+    if (dx !== 0) xLeg(Math.abs(dz))
+    if (dz !== 0) zLeg(0)
+  } else {
+    if (dz !== 0) zLeg(Math.abs(dx))
+    if (dx !== 0) xLeg(0)
+  }
+}
+
+/** Stub → collector → single run legs for the members of one row in one riser group. */
+function addRowLegs(
+  buckets: Map<string, LegBucket>,
+  row: RowCollectorInput,
+  members: AssignedFixture[],
+  riserPlan: PlanPoint,
+  resolution: number,
+): void {
+  const along = (point: PlanPoint) => (row.axis === 'x' ? point.x : point.z)
+  const perp = (point: PlanPoint) => (row.axis === 'x' ? point.z : point.x)
+  const perpAxis: 'x' | 'z' = row.axis === 'x' ? 'z' : 'x'
+  const collectorCoord = snapCoordinate(row.collectorLineCoord, resolution)
+  const memberPlans = members.map((member) => ({
+    fixtureExpressId: member.fixtureExpressId,
+    plan: snapPlanPoint(member.fixturePlan, resolution),
+  }))
+  const alongCoords = memberPlans.map((member) => along(member.plan))
+  const alongMin = Math.min(...alongCoords)
+  const alongMax = Math.max(...alongCoords)
+  const riserAlong = along(riserPlan)
+  // Collector end: the row extreme nearest the riser along the row axis; tie → min.
+  const endAlong = Math.abs(riserAlong - alongMax) < Math.abs(riserAlong - alongMin) ? alongMax : alongMin
+  const endPoint: PlanPoint = row.axis === 'x' ? { x: endAlong, z: collectorCoord } : { x: collectorCoord, z: endAlong }
+  const runLength = Math.abs(endPoint.x - riserPlan.x) + Math.abs(endPoint.z - riserPlan.z)
+  const allMembers = memberPlans.map((member) => member.fixtureExpressId).sort((a, b) => a - b)
+
+  for (const member of memberPlans) {
+    const memberAlong = along(member.plan)
+    const memberPerp = perp(member.plan)
+    if (memberPerp !== collectorCoord) {
+      addLeg(buckets, {
+        axis: perpAxis,
+        lineCoord: memberAlong,
+        side: memberPerp > collectorCoord ? 1 : -1,
+        junctionCoord: collectorCoord,
+        tailDistance: Math.abs(memberAlong - endAlong) + runLength,
+        rowId: row.id,
+      }, { coord: memberPerp, fixtureExpressIds: [member.fixtureExpressId], role: 'row-stub' })
+    }
+    if (memberAlong !== endAlong) {
+      addLeg(buckets, {
+        axis: row.axis,
+        lineCoord: collectorCoord,
+        side: endAlong === alongMin ? 1 : -1,
+        junctionCoord: endAlong,
+        tailDistance: runLength,
+        rowId: row.id,
+      }, { coord: memberAlong, fixtureExpressIds: [member.fixtureExpressId], role: 'row-collector' })
+    }
+  }
+  // The run leaves the collector end along the row axis when the riser lies
+  // beyond the row extent (it continues the collector's direction, never
+  // doubling back over it); otherwise it turns perpendicular first.
+  const riserBeyondRow = riserAlong < alongMin || riserAlong > alongMax
+  addLRunLegs(buckets, endPoint, riserPlan, { fixtureExpressIds: allMembers, role: 'collector-run' }, riserBeyondRow ? row.axis : perpAxis)
+}
+
 function addLeg(
   buckets: Map<string, LegBucket>,
   bucket: Omit<LegBucket, 'entries'>,
   entry: LegEntry,
 ): void {
-  const key = `${bucket.axis}|${bucket.lineCoord}|${bucket.side}`
+  // Junction coordinate is part of the key so a row stub never merges with a
+  // plain leg on the same line that drains to a different junction. For plain
+  // legs the junction is fixed per axis, so their grouping is unchanged.
+  const key = `${bucket.axis}|${bucket.lineCoord}|${bucket.side}|${bucket.junctionCoord}`
   const existing = buckets.get(key)
   if (existing) {
     existing.entries.push(entry)
@@ -311,14 +462,19 @@ type UnkeyedSegment = Omit<RouteSegment, 'id' | 'diameterMm' | 'riserId' | 'rise
 /**
  * Merges a bucket of collinear same-direction legs and splits the merged run
  * at every distinct upstream entry coordinate, so each emitted segment serves
- * a constant fixture set. Segments are emitted upstream to downstream.
+ * a constant fixture set. Segments are emitted upstream to downstream. Entries
+ * sitting exactly at the junction (a row member at the collector end) add no
+ * length and are served downstream instead.
  */
 function emitBucketSegments(bucket: LegBucket): UnkeyedSegment[] {
   const farthestFirst = bucket.side === 1
     ? (a: number, b: number) => b - a
     : (a: number, b: number) => a - b
-  const entryCoords = [...new Set(bucket.entries.map((entry) => entry.coord))].sort(farthestFirst)
+  const entryCoords = [...new Set(bucket.entries.map((entry) => entry.coord))]
+    .filter((coord) => coord !== bucket.junctionCoord)
+    .sort(farthestFirst)
   const boundaries = [...entryCoords, bucket.junctionCoord]
+  const role = resolveBucketRole(bucket)
 
   const served = new Set<number>()
   const segments: UnkeyedSegment[] = []
@@ -326,7 +482,7 @@ function emitBucketSegments(bucket: LegBucket): UnkeyedSegment[] {
     const from = boundaries[i]
     const to = boundaries[i + 1]
     for (const entry of bucket.entries) {
-      if (entry.coord === from) served.add(entry.fixtureExpressId)
+      if (entry.coord === from) for (const expressId of entry.fixtureExpressIds) served.add(expressId)
     }
     const servedFixtureExpressIds = [...served].sort((a, b) => a - b)
     segments.push({
@@ -335,9 +491,25 @@ function emitBucketSegments(bucket: LegBucket): UnkeyedSegment[] {
       axis: bucket.axis,
       kind: servedFixtureExpressIds.length > 1 ? 'trunk' : 'fixture-branch',
       servedFixtureExpressIds,
+      ...(role === undefined ? {} : { role }),
+      ...(bucket.rowId === undefined ? {} : { rowId: bucket.rowId }),
     })
   }
   return segments
+}
+
+/**
+ * Role of a merged bucket: stubs and collectors are never merged with other
+ * legs (their key includes the row junction), so their entries agree; a plain
+ * corridor becomes a 'collector-run' as soon as a row's run enters it.
+ */
+function resolveBucketRole(bucket: LegBucket): RouteSegmentRole | undefined {
+  let role: RouteSegmentRole | undefined
+  for (const entry of bucket.entries) {
+    if (entry.role === undefined) continue
+    if (role === undefined || entry.role === 'collector-run') role = entry.role
+  }
+  return role
 }
 
 function bucketPoint(bucket: LegBucket, coord: number): RouteSegmentEndpoint {

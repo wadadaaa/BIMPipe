@@ -231,6 +231,84 @@
   border-radius: 4px;
 }
 
+/* ── Building typology switch (G3) ── */
+.ifc-upload__typology {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-soft);
+  min-width: 0;
+}
+
+.ifc-upload__typology:disabled {
+  opacity: 0.6;
+}
+
+.ifc-upload__typology legend {
+  padding: 0;
+  float: left;
+  width: 100%;
+}
+
+.ifc-upload__typology-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  clear: both;
+}
+
+.ifc-upload__typology-option {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-soft);
+  cursor: pointer;
+  transition:
+    background 150ms,
+    color 150ms;
+}
+
+.ifc-upload__typology-option:hover {
+  color: var(--text);
+}
+
+.ifc-upload__typology-option--active {
+  background: var(--accent-bg);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-border);
+}
+
+.ifc-upload__typology-option:has(.ifc-upload__typology-input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.ifc-upload__typology-input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  pointer-events: none;
+}
+
+.ifc-upload__typology-hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--text-soft);
+  line-height: 1.4;
+}
+
 /* ── Error ── */
 .ifc-upload__error {
   font-size: 12px;

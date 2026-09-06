@@ -1,6 +1,8 @@
 import { useRef, useState } from 'react'
+import type { BuildingTypology } from '@/domain/typology'
 import { validateFile } from './validateFile'
 import { DUPLEX_MEP_SAMPLE, fetchSampleModelFile } from './sampleModel'
+import { BuildingTypologySwitch } from './BuildingTypologySwitch'
 import './IfcUpload.css'
 
 interface IfcUploadProps {
@@ -19,6 +21,12 @@ interface IfcUploadProps {
   linkedFileNames?: string[]
   storeyCount?: number
   showSampleModel?: boolean
+  /**
+   * Building typology switch (G3). Rendered only when both are supplied, so
+   * callers that do not expose the switch (demo mode) keep the old layout.
+   */
+  buildingTypology?: BuildingTypology
+  onBuildingTypologyChange?: (typology: BuildingTypology) => void
 }
 
 export function IfcUpload({
@@ -30,6 +38,8 @@ export function IfcUpload({
   linkedFileNames = [],
   storeyCount = 0,
   showSampleModel = true,
+  buildingTypology,
+  onBuildingTypologyChange,
 }: IfcUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragOver, setDragOver] = useState(false)
@@ -155,6 +165,10 @@ export function IfcUpload({
               : `${DUPLEX_MEP_SAMPLE.label} (${DUPLEX_MEP_SAMPLE.sizeLabel})`}
           </button>
         </p>
+      )}
+
+      {buildingTypology !== undefined && onBuildingTypologyChange !== undefined && (
+        <BuildingTypologySwitch value={buildingTypology} onChange={onBuildingTypologyChange} disabled={isLoading} />
       )}
 
       {displayError && (

@@ -13,6 +13,7 @@ import type {
 } from '@/shared/routes/buildSuggestedRisers'
 import type { LengthUnit } from '@/shared/lengthUnits'
 import type { FloorRoutes } from '@/domain/branchRouting'
+import { BRANCH_LENGTH_LIMIT_M, DEFAULT_BUILDING_TYPOLOGY, type BuildingTypology } from '@/domain/typology'
 import type { RoutingModel } from '@/shared/routes/routingModel'
 import { ViewTransition } from '@/shared/reactViewTransition'
 import { FixturesPanel } from './FixturesPanel'
@@ -57,6 +58,8 @@ interface SidebarProps {
   sanitaryRouteCount?: number
   /** V5 routing switch (one place: the reducer); drives the routes list and the Decisions line. */
   routingModel?: RoutingModel
+  /** Building typology switch (G3) as currently set on the upload screen; null hides the Decisions line (demo mode). */
+  buildingTypology?: BuildingTypology | null
   /** Branch runs of the open floor under the branch-runs model; null before stacks exist. */
   branchRouteFloor?: FloorRoutes | null
   /** Model length unit resolved from IfcUnitAssignment; null when unknown. */
@@ -167,6 +170,7 @@ export function Sidebar({
   demoFloorOpened = false,
   sanitaryRouteCount = 0,
   routingModel = 'branch-runs',
+  buildingTypology = null,
   branchRouteFloor = null,
   modelLengthUnit = null,
   engineerBaseline = null,
@@ -314,6 +318,7 @@ export function Sidebar({
                 fixtureAssignments={fixtureAssignments}
                 modelLengthUnit={modelLengthUnit}
                 wetCoreStacks={wetCoreSuggestion?.stacks ?? null}
+                branchLengthLimitM={BRANCH_LENGTH_LIMIT_M[wetCoreSuggestion?.typology ?? DEFAULT_BUILDING_TYPOLOGY]}
                 isSuggestingRisers={isSuggestingRisers}
                 suggestProgress={suggestProgress}
                 suggestError={suggestError}
@@ -328,6 +333,7 @@ export function Sidebar({
                 riserStackExtents={riserStackExtents}
                 demoFlowEnabled={demoFlowEnabled}
                 routingModel={routingModel}
+                buildingTypology={buildingTypology}
                 branchRouteFloor={branchRouteFloor}
                 fixtureAssignments={fixtureAssignments}
                 initialStoreyDecision={initialStoreyDecision}

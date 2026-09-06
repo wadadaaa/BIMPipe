@@ -1,5 +1,6 @@
 import type { Fixture, KitchenArea, Riser, Storey, StoreyId } from '@/domain/types'
-import type { ContinuityMap } from '@/domain/continuityMap'
+import type { ContinuityMap, OfficeCoreShaftSelection } from '@/domain/continuityMap'
+import type { BuildingTypology } from '@/domain/typology'
 import {
   computeRiserStackExtent,
   type RiserStackExtent,
@@ -17,7 +18,7 @@ import {
   type WetCoreSuggestOptions,
   type WetCoreSuggestedPosition,
 } from './suggestRisers'
-import type { WetCore, WetCoreStackPlacement } from '@/domain/wetCores'
+import type { FixtureRow, WetCore, WetCoreStackPlacement } from '@/domain/wetCores'
 import type { Point3D } from './planGeometry'
 import { DEFAULT_RISER_PLACEMENT_RULE_PROFILE } from './riserPlacementProfile'
 import {
@@ -214,6 +215,16 @@ export interface WetCoreSuggestedRisers {
   snapOutcomes: SuggestedRiserSnapOutcome[]
   /** One entry per stack when `stackExtent` was supplied, empty otherwise. */
   stackExtents: SuggestedRiserStackExtent[]
+  /** Typology the placement rules were taken from (`wetCore.typology`, default residential). */
+  typology: BuildingTypology
+  /**
+   * Office only: same-kind fixture rows that drain through a collector — hand
+   * them to `buildBranchRoutesFromAssignments(assignments, { rowCollectors })`.
+   * Empty for residential.
+   */
+  fixtureRows: FixtureRow[]
+  /** Office only: the core-shaft selection per storey that placement used. Empty for residential. */
+  officeCoreShafts: OfficeCoreShaftSelection[]
   /** Explicit notes about inputs that could not be used. */
   diagnostics: string[]
 }
@@ -302,7 +313,17 @@ export function buildWetCoreSuggestedRisers(options: BuildWetCoreSuggestedRisers
     const snap = toSnapOutcome(position)
     if (snap !== null) snapOutcomes.push({ stackLabel: built.stackLabel, snap })
   }
-  return { risers, stacks, cores: suggestion.cores, snapOutcomes, stackExtents, diagnostics }
+  return {
+    risers,
+    stacks,
+    cores: suggestion.cores,
+    snapOutcomes,
+    stackExtents,
+    typology: suggestion.typology,
+    fixtureRows: suggestion.fixtureRows,
+    officeCoreShafts: suggestion.officeCoreShafts,
+    diagnostics,
+  }
 }
 
 function toWetCoreStack(

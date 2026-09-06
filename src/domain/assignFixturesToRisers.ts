@@ -28,16 +28,19 @@
  * the viewer uses Y as the vertical axis).
  */
 import type { FixtureKind, RiserId, StoreyId } from './types'
+import { BRANCH_LENGTH_LIMIT_M, BRANCH_LENGTH_LIMIT_MM, resolveBranchLengthLimit, type BuildingTypology } from './typology'
 
 /**
  * Maximum horizontal branch length from a fixture to its riser, as a mm/m constant
- * pair. 4 m is a plumbing-sensible default for unvented small-fixture branch drains
- * (common code limits for fixture branches before a vent/stack are in the 3–5 m
- * range); beyond that, slope and venting requirements make a direct branch
- * unrealistic and the fixture should be flagged instead.
+ * pair — the RESIDENTIAL value (the default typology). 4 m is a plumbing-sensible
+ * default for unvented small-fixture branch drains (common code limits for fixture
+ * branches before a vent/stack are in the 3–5 m range); beyond that, slope and
+ * venting requirements make a direct branch unrealistic and the fixture should be
+ * flagged instead. The per-typology table lives in `./typology`
+ * (`BRANCH_LENGTH_LIMIT_M`); pass `typology: 'office'` to use the office limit.
  */
-export const MAX_BRANCH_LENGTH_MM = 4000
-export const MAX_BRANCH_LENGTH_M = 4
+export const MAX_BRANCH_LENGTH_MM = BRANCH_LENGTH_LIMIT_MM.residential
+export const MAX_BRANCH_LENGTH_M = BRANCH_LENGTH_LIMIT_M.residential
 
 export type PlanUnits = 'mm' | 'm'
 
@@ -115,14 +118,21 @@ export interface AssignFixturesToRisersOptions {
   units?: PlanUnits
   /** When supplied, fixtures route to their wet core's stack before any nearest search. */
   coreMembership?: FixtureCoreMembership
+  /**
+   * Building typology; selects the branch length limit
+   * (`BRANCH_LENGTH_LIMIT_M[typology]`). Omitted → residential, byte-identical to
+   * the pre-typology behaviour.
+   */
+  typology?: BuildingTypology
 }
 
 /**
  * Assigns each fixture to its wet core's stack when membership is supplied,
- * otherwise to the nearest riser on the same storey within
- * `MAX_BRANCH_LENGTH_MM`/`MAX_BRANCH_LENGTH_M`. Returns one entry per input fixture,
- * in input order. Deterministic: distance ties break on riser id; when a core's
- * stack has several risers on one storey (should not happen) the smallest id wins.
+ * otherwise to the nearest riser on the same storey within the typology's branch
+ * length limit (`MAX_BRANCH_LENGTH_MM`/`MAX_BRANCH_LENGTH_M` for residential).
+ * Returns one entry per input fixture, in input order. Deterministic: distance
+ * ties break on riser id; when a core's stack has several risers on one storey
+ * (should not happen) the smallest id wins.
  */
 export function assignFixturesToRisers(
   fixtures: AssignableFixture[],
@@ -130,7 +140,7 @@ export function assignFixturesToRisers(
   options: AssignFixturesToRisersOptions = {},
 ): FixtureRiserAssignment[] {
   const units = options.units ?? detectUnits(fixtures, risers)
-  const maxBranchLength = units === 'mm' ? MAX_BRANCH_LENGTH_MM : MAX_BRANCH_LENGTH_M
+  const maxBranchLength = resolveBranchLengthLimit(units, options.typology)
   const membership = options.coreMembership
 
   return fixtures.map((fixture) => {

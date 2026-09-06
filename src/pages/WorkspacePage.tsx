@@ -57,6 +57,7 @@ import { buildSanitaryRoutingDemoPlan, type SanitaryRoutingPlan } from '@/shared
 import { buildBranchRoutesFromAssignments } from '@/shared/routes/buildBranchRoutes'
 import { summarizeBranchRunsForDebug } from '@/shared/routes/branchRouteSummary'
 import { assignFixturesToRisers } from '@/domain/assignFixturesToRisers'
+import type { BuildingTypology } from '@/domain/typology'
 
 let floorViewerModulePromise: Promise<typeof import('@/viewer/FloorViewer')> | null = null
 let model3DViewerModulePromise: Promise<typeof import('@/viewer/Model3DViewer')> | null = null
@@ -179,6 +180,7 @@ export function WorkspacePage({
     wetCoreSuggestion,
     autoStackCoreIds,
     routingModel,
+    buildingTypology,
     isSuggestingRisers,
     suggestProgress,
     suggestError,
@@ -888,7 +890,9 @@ export function WorkspacePage({
         nextLabel: () => takeNextRiserLabel(nextRiserLabelRef),
         // Fixture positions come from web-ifc geometry, which is metres
         // regardless of the declared unit (see buildContinuityMapForModel).
-        wetCore: { planUnits: 'm', continuityMap: map },
+        // Typology (G3) is read at Suggest time — changing the switch never
+        // re-runs the suggestion by itself.
+        wetCore: { planUnits: 'm', continuityMap: map, typology: buildingTypology },
         stackExtent:
           buildingFixtures === null
             ? undefined
@@ -908,6 +912,9 @@ export function WorkspacePage({
             sourceStoreyId,
             stacks: result.stacks,
             cores: result.cores,
+            typology: result.typology,
+            fixtureRows: result.fixtureRows,
+            officeCoreShafts: result.officeCoreShafts,
             diagnostics: result.diagnostics,
           },
         })
@@ -1099,21 +1106,29 @@ export function WorkspacePage({
   // (web-ifc normalizes them); only an unknown unit falls back to the
   // coordinate-magnitude heuristic. Same rule as RisersPanel's coordinateUnit —
   // without it a georeferenced model (|x| > 1000 m) is mistaken for millimetres.
+  // Typology (G3) reaches assignment and routing only under the branch-runs
+  // model and only from the last suggest run (the rules the stacks were placed
+  // with) — demo mode stays byte-identical. Flipping the switch after a suggest
+  // changes nothing until the next Suggest.
+  const suggestedTypology = routingModel === 'branch-runs' ? wetCoreSuggestion?.typology : undefined
   const fixtureAssignments = useMemo(() => {
     if (selectedStoreyId === null) return []
     if (!risers.some((riser) => riser.storeyId === selectedStoreyId)) return []
     return assignFixturesToRisers(fixtures, risers, {
       coreMembership: fixtureCoreMembership,
       units: modelLengthUnit !== null ? 'm' : undefined,
+      ...(suggestedTypology === undefined ? {} : { typology: suggestedTypology }),
     })
-  }, [fixtures, risers, selectedStoreyId, fixtureCoreMembership, modelLengthUnit])
+  }, [fixtures, risers, selectedStoreyId, fixtureCoreMembership, modelLengthUnit, suggestedTypology])
 
   // Branch runs: pure derivation from the assignments above. The adapter drops
   // unassigned entries — those stay visible in the fixtures panel with an
-  // explicit reason and have no riser to route toward.
+  // explicit reason and have no riser to route toward. Office fixture rows of
+  // the last suggest run drain through collectors (G3).
+  const suggestedFixtureRows = routingModel === 'branch-runs' ? wetCoreSuggestion?.fixtureRows : undefined
   const branchRouteFloors = useMemo(
-    () => buildBranchRoutesFromAssignments(fixtureAssignments),
-    [fixtureAssignments],
+    () => buildBranchRoutesFromAssignments(fixtureAssignments, { rowCollectors: suggestedFixtureRows }),
+    [fixtureAssignments, suggestedFixtureRows],
   )
 
   // Riser-to-riser "main sanitary route" chains exist ONLY under the
@@ -1332,6 +1347,15 @@ export function WorkspacePage({
         // Demo mode only accepts the configured demo model, so the bundled
         // sample would always be rejected — hide the affordance instead.
         showSampleModel={!demoRuntime.enabled}
+        // Typology switch (G3) is a plain-mode rule input; demo mode ignores
+        // typology (same gate as routingModel), so the switch is not shown there.
+        {...(demoRuntime.enabled
+          ? {}
+          : {
+              buildingTypology,
+              onBuildingTypologyChange: (typology: BuildingTypology) =>
+                dispatch({ type: 'building-typology-set', typology }),
+            })}
       />
       {demoAssetError ? (
         <p style={{ marginTop: 8, color: 'var(--color-warning, #f59e0b)', fontSize: 13 }} role="status">
@@ -1457,6 +1481,7 @@ export function WorkspacePage({
       demoFloorOpened={demoFloorOpened}
       sanitaryRouteCount={sanitaryRoutesForExport.length}
       routingModel={routingModel}
+      buildingTypology={demoRuntime.enabled ? null : buildingTypology}
       branchRouteFloor={selectedFloorBranchRoutes}
       modelLengthUnit={modelLengthUnit}
       engineerBaseline={

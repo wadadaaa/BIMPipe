@@ -738,6 +738,63 @@ describe('workspacePageReducer branch routes and misc', () => {
   })
 })
 
+describe('workspacePageReducer building typology (G3)', () => {
+  it('defaults to residential and is set by building-typology-set without touching risers or suggestions', () => {
+    const base = makeLoadedState()
+    expect(base.buildingTypology).toBe('residential')
+    expect(createInitialWorkspacePageState().buildingTypology).toBe('residential')
+
+    const office = workspacePageReducer(base, { type: 'building-typology-set', typology: 'office' })
+    expect(office.buildingTypology).toBe('office')
+    expect(office.risers).toBe(base.risers)
+    expect(office.wetCoreSuggestion).toBe(base.wetCoreSuggestion)
+    expect(office.isSuggestingRisers).toBe(false)
+    // Same value → bail out with the same object.
+    expect(workspacePageReducer(office, { type: 'building-typology-set', typology: 'office' })).toBe(office)
+  })
+
+  it('survives upload-reset (the upload screen choice applies to the model being uploaded)', () => {
+    const office = workspacePageReducer(makeLoadedState(), { type: 'building-typology-set', typology: 'office' })
+    const reset = workspacePageReducer(office, { type: 'upload-reset' })
+    expect(reset.buildingTypology).toBe('office')
+  })
+
+  it('risers-suggested records the typology, rows and core-shaft selection of the run, defaulting pre-G3 payloads to residential', () => {
+    const base = makeLoadedState()
+    const legacy = workspacePageReducer(base, {
+      type: 'risers-suggested',
+      risers: [],
+      wetCore: { sourceStoreyId: 2, stacks: [], cores: [], diagnostics: [] },
+    })
+    expect(legacy.wetCoreSuggestion).toMatchObject({ typology: 'residential', fixtureRows: [], officeCoreShafts: [] })
+
+    const row = {
+      id: 'row:core:TOILETPAN:x:0',
+      coreId: 'core',
+      storeyId: 2,
+      kind: 'TOILETPAN' as const,
+      axis: 'x' as const,
+      memberExpressIds: [1, 2, 3],
+      lineCoord: 5,
+      collectorLineCoord: 5.3,
+      side: 1 as const,
+      sideReason: 'plan-centre' as const,
+      alongMin: 2,
+      alongMax: 4,
+      maxSpacing: 1,
+      units: 'm' as const,
+      reason: 'test',
+    }
+    const office = workspacePageReducer(base, {
+      type: 'risers-suggested',
+      risers: [],
+      wetCore: { sourceStoreyId: 2, stacks: [], cores: [], typology: 'office', fixtureRows: [row], officeCoreShafts: [], diagnostics: [] },
+    })
+    expect(office.wetCoreSuggestion?.typology).toBe('office')
+    expect(office.wetCoreSuggestion?.fixtureRows).toEqual([row])
+  })
+})
+
 describe('workspacePageReducer adjust log (W6)', () => {
   it('starts as an empty metre-unit log', () => {
     const state = createInitialWorkspacePageState()

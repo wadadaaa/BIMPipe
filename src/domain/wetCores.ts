@@ -513,10 +513,10 @@ export interface DetectFixtureRowsOptions {
  * line parallel to a plan axis and whose neighbours along that line are ≤
  * `maxSpacing` apart. Each fixture joins at most one row (larger rows first,
  * x-rows before z-rows, then lower along-coordinate). The collector sits on
- * the wall side: the core-bbox edge (perpendicular to the row) nearest a
- * wall/column cell of the continuity grid within `wallSearch`; else the side
- * away from the storey plan centre; else away from the core centroid; else +.
- * Pure and deterministic.
+ * the wall side: the side (perpendicular to the row) with the nearest
+ * wall/column cell of the continuity grid within `wallSearch` of the row line;
+ * else the side away from the storey plan centre; else away from the core
+ * centroid; else +. Pure and deterministic.
  */
 export function detectFixtureRows(core: WetCore, options: DetectFixtureRowsOptions): FixtureRow[] {
   const rules = options.rules ?? TYPOLOGY_PLACEMENT_RULES.office.rowCollectors!
@@ -639,10 +639,10 @@ function resolveGrid(map: ContinuityMap | null, storeyId: StoreyId, units: WetCo
 }
 
 /**
- * Wall side of a row: probe outward from both core-bbox edges perpendicular
- * to the row (at every member's along-coordinate) for the nearest wall/column
- * cell; the edge with the nearer hit wins. Fallbacks in order: away from the
- * storey plan centre, away from the core centroid, +.
+ * Wall side of a row: probe outward from the row line in both perpendicular
+ * directions (at every member's along-coordinate) for the nearest wall/column
+ * cell within `wallSearch`; the side with the nearer hit wins. Fallbacks in
+ * order: away from the storey plan centre, away from the core centroid, +.
  */
 function chooseRowCollectorSide(
   core: WetCore,

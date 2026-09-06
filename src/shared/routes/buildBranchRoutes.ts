@@ -1,5 +1,13 @@
-import { computeBranchRoutes, type AssignedFixture, type FloorRoutes } from '@/domain/branchRouting'
+import { computeBranchRoutes, type AssignedFixture, type FloorRoutes, type RowCollectorInput } from '@/domain/branchRouting'
 import type { AssignedFixtureRiser, FixtureRiserAssignment } from '@/domain/assignFixturesToRisers'
+
+export interface BuildBranchRoutesOptions {
+  /**
+   * Office fixture rows (G3) whose members drain through a collector; pass the
+   * `fixtureRows` of the wet-core suggestion. Omitted/empty → plain routing.
+   */
+  rowCollectors?: readonly RowCollectorInput[]
+}
 
 /**
  * Adapts T2 fixture-to-riser assignments into branch-routing inputs and computes
@@ -9,6 +17,7 @@ import type { AssignedFixtureRiser, FixtureRiserAssignment } from '@/domain/assi
  */
 export function buildBranchRoutesFromAssignments(
   assignments: FixtureRiserAssignment[],
+  options: BuildBranchRoutesOptions = {},
 ): FloorRoutes[] {
   const assigned = assignments.filter(
     (assignment): assignment is AssignedFixtureRiser => !assignment.unassigned,
@@ -27,5 +36,8 @@ export function buildBranchRoutesFromAssignments(
 
   // Assignments already carry explicit plan units from one shared detection pass,
   // so pass them through instead of re-detecting from coordinate magnitude.
-  return computeBranchRoutes(assignedFixtures, { planUnits: assigned[0].units })
+  return computeBranchRoutes(assignedFixtures, {
+    planUnits: assigned[0].units,
+    ...(options.rowCollectors !== undefined && options.rowCollectors.length > 0 ? { rowCollectors: options.rowCollectors } : {}),
+  })
 }
