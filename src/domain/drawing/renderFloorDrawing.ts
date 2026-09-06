@@ -358,8 +358,9 @@ function renderPipeBand(pipe: DrawingPipeRun, frame: Frame): string {
  */
 function renderFittings(pipes: readonly DrawingPipeRun[], risers: readonly DrawingRiser[], frame: Frame): string {
   const tol = PIPE_STYLE.junctionToleranceM
-  const hubs = new Map<string, { point: DrawingPointM; band: number; system: DrawingPipeRun['system'] }>()
-  const parts: string[] = []
+  type Collar = { point: DrawingPointM; angleDeg: number; band: number; system: DrawingPipeRun['system'] }
+  const hubs = new Map<string, Collar>()
+  const sockets: Collar[] = []
   for (const pipe of pipes) {
     const { band } = pipeBandPx(pipe, frame)
     const dx = pipe.end.xM - pipe.start.xM
@@ -370,37 +371,34 @@ function renderFittings(pipes: readonly DrawingPipeRun[], risers: readonly Drawi
       [pipe.start, 1],
       [pipe.end, -1],
     ] as const) {
+      // Collar pointing from the run end back along the run (SVG angle, y down).
+      const angleDeg = (Math.atan2(-dy * sign, dx * sign) * 180) / Math.PI
+      const collar: Collar = { point: end, angleDeg, band, system: pipe.system }
       const touchesRun = pipes.some((other) => other.id !== pipe.id && distanceToSegmentM(end, other) <= tol)
       const touchesStack = risers.some((riser) => Math.hypot(riser.centre.xM - end.xM, riser.centre.yM - end.yM) <= tol)
       if (touchesRun || touchesStack) {
-        // One hub per junction point; the widest band there sets its size.
+        // One hub per junction point, drawn on the narrowest run entering it
+        // (the branch), the way a tee's socket sits on the branch side.
         const key = `${Math.round(end.xM / tol)}|${Math.round(end.yM / tol)}`
         const existing = hubs.get(key)
-        if (existing === undefined || existing.band < band) hubs.set(key, { point: end, band, system: pipe.system })
+        if (existing === undefined || existing.band > band) hubs.set(key, collar)
       } else {
-        const style = PIPE_SYSTEM_STYLE[pipe.system]
-        const c = frame.toSvg(end)
-        const angle = (Math.atan2(-dy * sign, dx * sign) * 180) / Math.PI
-        const w = band * PIPE_STYLE.socketWidthFactor
-        const l = band * PIPE_STYLE.socketLengthFactor
-        parts.push(
-          `<rect x="0" y="${fmt(-w / 2)}" width="${fmt(l)}" height="${fmt(w)}" transform="translate(${fmt(c.x)} ${fmt(c.y)}) rotate(${fmt(angle)})" fill="${style.fill}" stroke="${style.edge}" stroke-width="${fmt(frame.mm(PIPE_STYLE.edgeMm))}"/>`,
-        )
+        sockets.push(collar)
       }
     }
   }
   const hubKeys = [...hubs.keys()].sort()
-  for (const key of hubKeys) {
-    const hub = hubs.get(key) as { point: DrawingPointM; band: number; system: DrawingPipeRun['system'] }
-    const style = PIPE_SYSTEM_STYLE[hub.system]
-    const c = frame.toSvg(hub.point)
-    const r = (hub.band * PIPE_STYLE.hubDiameterFactor) / 2
-    parts.push(
-      `<circle cx="${fmt(c.x)}" cy="${fmt(c.y)}" r="${fmt(r)}" fill="${style.fill}" stroke="${style.edge}" stroke-width="${fmt(frame.mm(PIPE_STYLE.edgeMm))}"/>` +
-        `<circle cx="${fmt(c.x)}" cy="${fmt(c.y)}" r="${fmt(r * 0.55)}" fill="none" stroke="${PIPE_STYLE.fittingCutStroke}" stroke-width="${fmt(frame.mm(PIPE_STYLE.fittingCutMm))}"/>`,
-    )
-  }
+  const parts = hubKeys.map((key) => renderCollar(hubs.get(key) as Collar, PIPE_STYLE.hubWidthFactor, PIPE_STYLE.hubLengthFactor, frame))
+  for (const socket of sockets) parts.push(renderCollar(socket, PIPE_STYLE.socketWidthFactor, PIPE_STYLE.socketLengthFactor, frame))
   return parts.join('')
+
+  function renderCollar(collar: Collar, widthFactor: number, lengthFactor: number, frame: Frame): string {
+    const style = PIPE_SYSTEM_STYLE[collar.system]
+    const c = frame.toSvg(collar.point)
+    const w = collar.band * widthFactor
+    const l = collar.band * lengthFactor
+    return `<rect x="0" y="${fmt(-w / 2)}" width="${fmt(l)}" height="${fmt(w)}" transform="translate(${fmt(c.x)} ${fmt(c.y)}) rotate(${fmt(collar.angleDeg)})" fill="${style.fill}" stroke="${style.edge}" stroke-width="${fmt(frame.mm(PIPE_STYLE.edgeMm))}"/>`
+  }
 }
 
 /** Points where an end of either run lies on the other run (tee, elbow, wye). */
@@ -560,7 +558,13 @@ function renderPipeLabel(pipe: DrawingPipeRun, frame: Frame, placed: readonly Qu
 }
 
 function textAt(content: string, fontPx: number, y: number): string {
-  return `<text x="0" y="${fmt(y)}" font-size="${fmt(fontPx)}" text-anchor="middle">${escapeXml(content)}</text>`
+  const pad = fontPx * TEXT_STYLE.maskPaddingEm
+  const w = textWidthPx(content, fontPx) + 2 * pad
+  const h = fontPx * TEXT_STYLE.capHeightEm + 2 * pad
+  return (
+    `<rect x="${fmt(-w / 2)}" y="${fmt(y - h + pad)}" width="${fmt(w)}" height="${fmt(h)}" fill="${TEXT_STYLE.maskFill}" stroke="none"/>` +
+    `<text x="0" y="${fmt(y)}" font-size="${fmt(fontPx)}" text-anchor="middle">${escapeXml(content)}</text>`
+  )
 }
 
 interface Pt {

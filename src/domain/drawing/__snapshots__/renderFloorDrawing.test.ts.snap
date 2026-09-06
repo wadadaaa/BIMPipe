@@ -3,10 +3,10 @@
 exports[`renderFloorDrawingSvg > renders the mini model to a stable SVG document 1`] = `
 "<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="502.36" height="554.33" viewBox="0 0 502.36 554.33" font-family="Arial, Helvetica, 'Liberation Sans', sans-serif" data-scale="1:100" data-dpi="220">
-<defs><pattern id="wall-hatch" patternUnits="userSpaceOnUse" width="19.92" height="19.92"><rect width="19.92" height="19.92" fill="#e7e7e2"/><path d="M0 0L19.92 19.92M0 19.92L19.92 0" stroke="#d6d6d2" stroke-width="1.13"/></pattern></defs>
+<defs><pattern id="wall-hatch" patternUnits="userSpaceOnUse" width="12.13" height="12.13"><rect width="12.13" height="12.13" fill="#e7e7e2"/><path d="M0 0L12.13 12.13M0 12.13L12.13 0" stroke="#bdbdba" stroke-width="1.13"/></pattern></defs>
 <rect width="502.36" height="554.33" fill="#ffffff"/>
 <g id="underlay">
-<path d="M121.26 155.91L381.1 155.91L381.1 138.58L121.26 138.58Z" fill="url(#wall-hatch)" stroke="#b2b2b2" stroke-width="3.46" stroke-linejoin="miter"/>
+<path d="M121.26 155.91L381.1 155.91L381.1 138.58L121.26 138.58Z" fill="url(#wall-hatch)" stroke="#a6a6a6" stroke-width="3.46" stroke-linejoin="miter"/>
 </g>
 <g id="fixtures">
 <g transform="translate(207.87 186.22) scale(1 -1) rotate(180)" fill="#ebebeb" stroke="#a3cbc7" stroke-width="1.39" data-fixture="wc-1"><rect x="-16.46" y="-30.31" width="32.91" height="15.76"/><ellipse cx="0" cy="7.88" rx="13.82" ry="22.43"/><ellipse cx="0" cy="9.7" rx="9.87" ry="15.25"/></g>
@@ -14,14 +14,14 @@ exports[`renderFloorDrawingSvg > renders the mini model to a stable SVG document
 <g id="pipes">
 <g data-pipe="run-1" data-role="branch" stroke-linecap="butt"><line x1="207.87" y1="186.22" x2="337.8" y2="251.18" stroke="#004000" stroke-width="9.53"/><line x1="207.87" y1="186.22" x2="337.8" y2="251.18" stroke="#92d050" stroke-width="7.1"/></g>
 </g>
-<g id="fittings"><rect x="0" y="-7.62" width="10.48" height="15.24" transform="translate(207.87 186.22) rotate(26.57)" fill="#92d050" stroke="#004000" stroke-width="1.21"/><circle cx="337.8" cy="251.18" r="8.1" fill="#92d050" stroke="#004000" stroke-width="1.21"/><circle cx="337.8" cy="251.18" r="4.45" fill="none" stroke="#d9f2b8" stroke-width="1.13"/></g>
+<g id="fittings"><rect x="0" y="-6.43" width="8.57" height="12.86" transform="translate(337.8 251.18) rotate(-153.43)" fill="#92d050" stroke="#004000" stroke-width="1.21"/><rect x="0" y="-6.43" width="7.62" height="12.86" transform="translate(207.87 186.22) rotate(26.57)" fill="#92d050" stroke="#004000" stroke-width="1.21"/></g>
 <g id="sleeves">
 </g>
 <g id="stacks">
 <g data-stack="stack-1"><path d="M320.91 251.18H354.69M337.8 234.29V268.07" stroke="#000000" stroke-width="1.56"/><circle cx="337.8" cy="251.18" r="11.26" fill="#92d050" stroke="#000000" stroke-width="2.17"/></g>
 </g>
 <g id="pipe-labels" fill="#000000">
-<g transform="translate(253.35 208.96) rotate(26.57)" data-label-for="run-1"><text x="0" y="-20.18" font-size="25.98" text-anchor="middle">2.0%</text><g stroke="#000000" stroke-width="1.56" fill="#000000"><line x1="-25.98" y1="-13.43" x2="12.13" y2="-13.43"/><path d="M25.98 -13.43L12.13 -17.32L12.13 -9.53Z"/></g><text x="0" y="32.13" font-size="25.98" text-anchor="middle">ø110 mm</text><text x="0" y="49.8" font-size="17.32" text-anchor="middle">SW-GRV</text></g>
+<g transform="translate(253.35 208.96) rotate(26.57)" data-label-for="run-1"><rect x="-32.22" y="-42.01" width="64.44" height="24.94" fill="#ffffff" stroke="none"/><text x="0" y="-20.18" font-size="25.98" text-anchor="middle">2.0%</text><g stroke="#000000" stroke-width="1.56" fill="#000000"><line x1="-25.98" y1="-13.43" x2="12.13" y2="-13.43"/><path d="M25.98 -13.43L12.13 -17.32L12.13 -9.53Z"/></g><rect x="-54.05" y="10.31" width="108.09" height="24.94" fill="#ffffff" stroke="none"/><text x="0" y="32.13" font-size="25.98" text-anchor="middle">ø110 mm</text><rect x="-31.18" y="35.25" width="62.36" height="16.63" fill="#ffffff" stroke="none"/><text x="0" y="49.8" font-size="17.32" text-anchor="middle">SW-GRV</text></g>
 </g>
 <g id="stack-tags" fill="#000000">
 <g data-tag-for="stack-1"><line x1="224.21" y1="285.32" x2="315.4" y2="257.91" stroke="#000000" stroke-width="1.13"/><path d="M327.01 254.42L316.4 261.23L314.4 254.6Z" fill="#000000"/><rect x="52.66" y="285.32" width="224.5" height="35.65" rx="17.83" fill="#ffffff" stroke="#000000" stroke-width="1.56"/><text x="164.91" y="312.5" font-size="25.98" text-anchor="middle" direction="ltr" unicode-bidi="bidi-override">ø110 mm (2.1ק)</text></g>

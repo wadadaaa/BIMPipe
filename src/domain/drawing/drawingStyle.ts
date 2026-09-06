@@ -41,15 +41,16 @@ export const SHEET_STYLE = {
 
 /** Architecture underlay. */
 export const UNDERLAY_STYLE = {
-  // Sampled: outline #b2b2b2 ≈ 0.45 mm, fill #e7e7e2, hatch #d8d8d8 — a wash
-  // that recedes behind the green pipework rather than competing with it.
+  // Sampled: outline #a6a6a6 ≈ 0.4 mm, fill #e7e7e2, crisp cross-hatch
+  // #bdbdba at ~1.4 mm paper spacing — a poché that reads as "wall" yet still
+  // recedes behind the green pipework.
   wallFill: '#e7e7e2',
-  wallOutline: '#b2b2b2',
+  wallOutline: '#a6a6a6',
   wallOutlineMm: 0.4,
-  wallHatchStroke: '#d6d6d2',
+  wallHatchStroke: '#bdbdba',
   wallHatchStrokeMm: 0.13,
-  /** Spacing between hatch lines on paper. */
-  wallHatchSpacingMm: 2.3,
+  /** Spacing between hatch lines on paper (a drafting pattern, scale-independent). */
+  wallHatchSpacingMm: 1.4,
   columnFill: '#c4c4c4',
   columnOutline: '#9a9a9a',
   columnOutlineMm: 0.35,
@@ -90,14 +91,15 @@ export const PIPE_STYLE = {
   minBandMm: 0.6,
   /** Diameter assumed for a run whose ø is unknown, by role. */
   fallbackDiameterMm: { branch: 50, collector: 110 } as const,
-  /** Fitting hubs (tees, elbows, stack entries): a ring slightly wider than the band. */
-  hubDiameterFactor: 1.7,
-  /** Sockets at free run ends (fixture connections): a short wider collar. */
-  socketWidthFactor: 1.6,
-  socketLengthFactor: 1.1,
-  /** Lighter cut lines across fittings. */
-  fittingCutStroke: '#d9f2b8',
-  fittingCutMm: 0.13,
+  /**
+   * Fittings are subtle on the sheet: a short collar a little wider than the
+   * band sitting on the branch side of a tee/elbow/stack entry (hub) or at a
+   * free fixture connection (socket) — never a dot that reads as a node.
+   */
+  hubWidthFactor: 1.35,
+  hubLengthFactor: 0.9,
+  socketWidthFactor: 1.35,
+  socketLengthFactor: 0.8,
   /** Endpoints closer than this in plan are the same junction (metres). */
   junctionToleranceM: 0.002,
 } as const
@@ -146,6 +148,12 @@ export const TEXT_STYLE = {
   glyphAdvanceEm: 0.56,
   /** Cap height as a fraction of the font size. */
   capHeightEm: 0.72,
+  /**
+   * Run labels sit on an opaque white mask so they stay legible over the
+   * architectural underlay (the sheet's text has background masking on).
+   */
+  maskFill: '#ffffff',
+  maskPaddingEm: 0.12,
 } as const
 
 export const SLOPE_ARROW_STYLE = {
