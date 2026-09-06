@@ -41,24 +41,27 @@ export const SHEET_STYLE = {
 
 /** Architecture underlay. */
 export const UNDERLAY_STYLE = {
+  // Sampled: outline #b2b2b2 ≈ 0.45 mm, fill #e7e7e2, hatch #d8d8d8 — a wash
+  // that recedes behind the green pipework rather than competing with it.
   wallFill: '#e7e7e2',
-  wallOutline: '#8c8c8c',
-  wallOutlineMm: 0.35,
-  wallHatchStroke: '#c9c9c4',
+  wallOutline: '#b2b2b2',
+  wallOutlineMm: 0.4,
+  wallHatchStroke: '#d6d6d2',
   wallHatchStrokeMm: 0.13,
   /** Spacing between hatch lines on paper. */
   wallHatchSpacingMm: 2.3,
-  columnFill: '#9a9a9a',
-  columnOutline: '#5f5f5f',
+  columnFill: '#c4c4c4',
+  columnOutline: '#9a9a9a',
   columnOutlineMm: 0.35,
-  slabOpeningStroke: '#8c8c8c',
+  slabOpeningStroke: '#a6a6a6',
   slabOpeningStrokeMm: 0.25,
   slabOpeningDashMm: [1.6, 1.0] as readonly [number, number],
-  shaftCandidateStroke: '#b2b2b2',
+  shaftCandidateStroke: '#c4c4c4',
   shaftCandidateStrokeMm: 0.18,
   shaftCandidateDashMm: [0.6, 0.8] as readonly [number, number],
-  fixtureStroke: '#8fb0a4',
-  fixtureStrokeMm: 0.18,
+  // Fixtures are pale teal outlines (#b2d8d8 sampled) on a light-grey fill.
+  fixtureStroke: '#a3cbc7',
+  fixtureStrokeMm: 0.16,
   fixtureFill: '#ebebeb',
 } as const
 
@@ -76,17 +79,27 @@ export const PIPE_SYSTEM_STYLE: Readonly<Record<'sanitary' | 'vent', PipeSystemS
 }
 
 export const PIPE_STYLE = {
-  /** Edge line of a branch band (paper mm). */
-  edgeMm: 0.18,
-  /** Edge line of a collector band (paper mm) — collectors read heavier. */
-  collectorEdgeMm: 0.3,
+  /**
+   * Edge line of a band (paper mm). The sheet's pipes read as double lines:
+   * two visible dark edges around a lighter fill, not a single solid stroke.
+   */
+  edgeMm: 0.14,
+  /** Edge line of a collector band (paper mm) — a touch heavier than a branch. */
+  collectorEdgeMm: 0.16,
   /** Bands never get thinner than this on paper. */
-  minBandMm: 0.7,
+  minBandMm: 0.6,
   /** Diameter assumed for a run whose ø is unknown, by role. */
   fallbackDiameterMm: { branch: 50, collector: 110 } as const,
-  /** Fitting mark: a short lighter cut line across the band at each end. */
+  /** Fitting hubs (tees, elbows, stack entries): a ring slightly wider than the band. */
+  hubDiameterFactor: 1.7,
+  /** Sockets at free run ends (fixture connections): a short wider collar. */
+  socketWidthFactor: 1.6,
+  socketLengthFactor: 1.1,
+  /** Lighter cut lines across fittings. */
   fittingCutStroke: '#d9f2b8',
-  fittingCutMm: 0.18,
+  fittingCutMm: 0.13,
+  /** Endpoints closer than this in plan are the same junction (metres). */
+  junctionToleranceM: 0.002,
 } as const
 
 /**

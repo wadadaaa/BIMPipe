@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { FloorDrawingModel } from './floorDrawingModel'
 import { fmt, formatDiameter, formatSlopePercent, renderFloorDrawingSvg } from './renderFloorDrawing'
-import { pipeBandWidthMm } from './drawingStyle'
+import { PIPE_STYLE, pipeBandWidthMm } from './drawingStyle'
 import { buildSyntheticMiniModel, buildSyntheticToiletBlockModel } from './syntheticFloorModels'
 
 const OPTIONS = { scale: 100, dpi: 220, showUnderlay: true, anonymize: false } as const
@@ -177,7 +177,7 @@ describe('style helpers', () => {
   it('pipe bands are true scale with a legible minimum', () => {
     expect(pipeBandWidthMm(110, 50)).toBeCloseTo(2.2, 9)
     expect(pipeBandWidthMm(110, 100)).toBeCloseTo(1.1, 9)
-    expect(pipeBandWidthMm(50, 100)).toBeCloseTo(0.7, 9) // clamped
+    expect(pipeBandWidthMm(50, 100)).toBeCloseTo(PIPE_STYLE.minBandMm, 9) // clamped
     expect(pipeBandWidthMm(80, 50)).toBeCloseTo(1.6, 9) // formula fallback
   })
 

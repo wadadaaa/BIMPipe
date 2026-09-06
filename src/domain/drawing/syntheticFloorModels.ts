@@ -68,14 +68,16 @@ export function buildSyntheticToiletBlockModel(): FloorDrawingModel {
       role: 'branch',
     })
   }
-  fixtures.push({ id: 'fd-1', kind: 'floor-drain', centre: { xM: 3.6, yM: 1.2 }, rotationDeg: 0 })
+  // The floor drain joins the collector obliquely (a 45° wye), like a real
+  // sheet's angled branches; it also exercises rotated labels.
+  fixtures.push({ id: 'fd-1', kind: 'floor-drain', centre: { xM: 3.6, yM: 1.0 }, rotationDeg: 0 })
   pipes.push({
     id: 'fd-branch-1',
     system: 'sanitary',
     diameterMm: 50,
     slopePercent: 2,
-    start: { xM: 3.6, yM: 1.2 },
-    end: { xM: 3.6, yM: 1.8 },
+    start: { xM: 3.6, yM: 1.0 },
+    end: { xM: 4.4, yM: 1.8 },
     role: 'branch',
   })
   pipes.push(

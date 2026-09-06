@@ -49,7 +49,7 @@ export function renderFloorDrawingSvg(
 ): string {
   const frame = createFrame(model.boundsM, options)
   const parts: string[] = []
-  const placed: Aabb[] = []
+  const placed: Quad[] = []
 
   const walls = model.structure.filter((element) => element.kind === 'wall')
   const sleeves = model.sleeves.length > 0 ? model.sleeves : deriveSleeves(model.pipes, walls)
@@ -75,6 +75,7 @@ export function renderFloorDrawingSvg(
   parts.push(`<g id="pipes">`)
   for (const pipe of pipes) parts.push(renderPipeBand(pipe, frame))
   parts.push(`</g>`)
+  parts.push(`<g id="fittings">${renderFittings(pipes, model.risers, frame)}</g>`)
 
   parts.push(`<g id="sleeves">`)
   for (const sleeve of sortById(sleeves)) parts.push(renderSleeve(sleeve, frame))
@@ -95,14 +96,18 @@ export function renderFloorDrawingSvg(
   const bandBoxesByPipe = new Map(pipes.map((pipe) => [pipe.id, pipeBoxes(pipe, frame)]))
   parts.push(`<g id="pipe-labels" fill="${TEXT_STYLE.colour}">`)
   for (const pipe of pipes) {
-    // Bands of other runs block the label, except the chunks touching this
-    // run's ends — those are its own connections (tee, elbow, stack).
-    const ends = [frame.toSvg(pipe.start), frame.toSvg(pipe.end)]
-    const otherBands = pipes.flatMap((other) =>
-      other.id === pipe.id
-        ? []
-        : (bandBoxesByPipe.get(other.id) ?? []).filter((box) => !ends.some((end) => containsPoint(box, end))),
-    )
+    // Bands of other runs block the label, except the stretch of a connected
+    // run right at the junction (tee, elbow, collector): a short branch label
+    // may overhang its own junction the way the sheet's fixture-connection
+    // labels do, but never run across the rest of another pipe.
+    const junctionReach = frame.mm(JUNCTION_LABEL_REACH_MM)
+    const otherBands = pipes.flatMap((other) => {
+      if (other.id === pipe.id) return []
+      const boxes = bandBoxesByPipe.get(other.id) ?? []
+      const junctions = junctionPoints(pipe, other).map((point) => frame.toSvg(point))
+      if (junctions.length === 0) return boxes
+      return boxes.filter((box) => !junctions.some((j) => containsPoint(box, j) || distanceToQuadCentre(box, j) <= junctionReach))
+    })
     const label = renderPipeLabel(pipe, frame, [...placed, ...otherBands])
     if (label !== null) {
       parts.push(label.svg)
@@ -339,55 +344,106 @@ function renderPipeBand(pipe: DrawingPipeRun, frame: Frame): string {
   const line = `x1="${fmt(a.x)}" y1="${fmt(a.y)}" x2="${fmt(b.x)}" y2="${fmt(b.y)}"`
   return [
     `<g data-pipe="${escapeXml(pipe.id)}" data-role="${pipe.role}" stroke-linecap="butt">`,
-    `<line ${line} stroke="${style.edge}" stroke-width="${fmt(band + 2 * edge)}"/>`,
-    `<line ${line} stroke="${style.fill}" stroke-width="${fmt(band)}"/>`,
-    renderFittingCuts(a, b, band, frame),
+    // Edges sit inside the true-scale band so the overall width stays ø / scale.
+    `<line ${line} stroke="${style.edge}" stroke-width="${fmt(band)}"/>`,
+    `<line ${line} stroke="${style.fill}" stroke-width="${fmt(Math.max(band * 0.4, band - 2 * edge))}"/>`,
     `</g>`,
   ].join('')
 }
 
-/** Short lighter cut lines across the band near each end, as a fitting hint. */
-function renderFittingCuts(
-  a: { x: number; y: number },
-  b: { x: number; y: number },
-  band: number,
-  frame: Frame,
-): string {
-  const length = Math.hypot(b.x - a.x, b.y - a.y)
-  const inset = frame.mm(1.2)
-  if (length < inset * 3) return ''
-  const ux = (b.x - a.x) / length
-  const uy = (b.y - a.y) / length
-  const nx = -uy
-  const ny = ux
-  const half = band / 2
-  const cut = (px: number, py: number) =>
-    `<line x1="${fmt(px + nx * half)}" y1="${fmt(py + ny * half)}" x2="${fmt(px - nx * half)}" y2="${fmt(py - ny * half)}"/>`
-  return `<g stroke="${PIPE_STYLE.fittingCutStroke}" stroke-width="${fmt(frame.mm(PIPE_STYLE.fittingCutMm))}">${cut(a.x + ux * inset, a.y + uy * inset)}${cut(b.x - ux * inset, b.y - uy * inset)}</g>`
+/**
+ * Fitting symbols at run ends: a hub ring where a run meets another run or a
+ * stack (tee, elbow, stack entry) and a short collar at a free end (fixture
+ * connection). Purely derived from geometry, so adapters need not model fittings.
+ */
+function renderFittings(pipes: readonly DrawingPipeRun[], risers: readonly DrawingRiser[], frame: Frame): string {
+  const tol = PIPE_STYLE.junctionToleranceM
+  const hubs = new Map<string, { point: DrawingPointM; band: number; system: DrawingPipeRun['system'] }>()
+  const parts: string[] = []
+  for (const pipe of pipes) {
+    const { band } = pipeBandPx(pipe, frame)
+    const dx = pipe.end.xM - pipe.start.xM
+    const dy = pipe.end.yM - pipe.start.yM
+    const length = Math.hypot(dx, dy)
+    if (!(length > 0)) continue
+    for (const [end, sign] of [
+      [pipe.start, 1],
+      [pipe.end, -1],
+    ] as const) {
+      const touchesRun = pipes.some((other) => other.id !== pipe.id && distanceToSegmentM(end, other) <= tol)
+      const touchesStack = risers.some((riser) => Math.hypot(riser.centre.xM - end.xM, riser.centre.yM - end.yM) <= tol)
+      if (touchesRun || touchesStack) {
+        // One hub per junction point; the widest band there sets its size.
+        const key = `${Math.round(end.xM / tol)}|${Math.round(end.yM / tol)}`
+        const existing = hubs.get(key)
+        if (existing === undefined || existing.band < band) hubs.set(key, { point: end, band, system: pipe.system })
+      } else {
+        const style = PIPE_SYSTEM_STYLE[pipe.system]
+        const c = frame.toSvg(end)
+        const angle = (Math.atan2(-dy * sign, dx * sign) * 180) / Math.PI
+        const w = band * PIPE_STYLE.socketWidthFactor
+        const l = band * PIPE_STYLE.socketLengthFactor
+        parts.push(
+          `<rect x="0" y="${fmt(-w / 2)}" width="${fmt(l)}" height="${fmt(w)}" transform="translate(${fmt(c.x)} ${fmt(c.y)}) rotate(${fmt(angle)})" fill="${style.fill}" stroke="${style.edge}" stroke-width="${fmt(frame.mm(PIPE_STYLE.edgeMm))}"/>`,
+        )
+      }
+    }
+  }
+  const hubKeys = [...hubs.keys()].sort()
+  for (const key of hubKeys) {
+    const hub = hubs.get(key) as { point: DrawingPointM; band: number; system: DrawingPipeRun['system'] }
+    const style = PIPE_SYSTEM_STYLE[hub.system]
+    const c = frame.toSvg(hub.point)
+    const r = (hub.band * PIPE_STYLE.hubDiameterFactor) / 2
+    parts.push(
+      `<circle cx="${fmt(c.x)}" cy="${fmt(c.y)}" r="${fmt(r)}" fill="${style.fill}" stroke="${style.edge}" stroke-width="${fmt(frame.mm(PIPE_STYLE.edgeMm))}"/>` +
+        `<circle cx="${fmt(c.x)}" cy="${fmt(c.y)}" r="${fmt(r * 0.55)}" fill="none" stroke="${PIPE_STYLE.fittingCutStroke}" stroke-width="${fmt(frame.mm(PIPE_STYLE.fittingCutMm))}"/>`,
+    )
+  }
+  return parts.join('')
+}
+
+/** Points where an end of either run lies on the other run (tee, elbow, wye). */
+function junctionPoints(a: DrawingPipeRun, b: DrawingPipeRun): DrawingPointM[] {
+  const tol = PIPE_STYLE.junctionToleranceM
+  const points: DrawingPointM[] = []
+  for (const end of [a.start, a.end]) if (distanceToSegmentM(end, b) <= tol) points.push(end)
+  for (const end of [b.start, b.end]) if (distanceToSegmentM(end, a) <= tol) points.push(end)
+  return points
+}
+
+function distanceToQuadCentre(quad: Quad, point: Pt): number {
+  const cx = (quad.minX + quad.maxX) / 2
+  const cy = (quad.minY + quad.maxY) / 2
+  return Math.hypot(point.x - cx, point.y - cy)
+}
+
+function distanceToSegmentM(point: DrawingPointM, run: DrawingPipeRun): number {
+  const dx = run.end.xM - run.start.xM
+  const dy = run.end.yM - run.start.yM
+  const lengthSq = dx * dx + dy * dy
+  if (!(lengthSq > 0)) return Math.hypot(point.xM - run.start.xM, point.yM - run.start.yM)
+  const t = Math.max(0, Math.min(1, ((point.xM - run.start.xM) * dx + (point.yM - run.start.yM) * dy) / lengthSq))
+  return Math.hypot(point.xM - (run.start.xM + dx * t), point.yM - (run.start.yM + dy * t))
 }
 
 // ---------------------------------------------------------------------------
 // Pipe labels
 
-interface Aabb {
-  readonly minX: number
-  readonly minY: number
-  readonly maxX: number
-  readonly maxY: number
-}
-
 interface Placed {
   readonly svg: string
-  readonly box: Aabb
+  readonly box: Quad
 }
 
 const LABEL_T_CANDIDATES = [0.5, 0.35, 0.65, 0.22, 0.78] as const
 /** Runs shorter than this in plan carry no label; a stub cannot host three text lines. */
 const MIN_LABELLED_RUN_M = 0.25
 /** A branch label may be up to this many times longer than its run. */
-const MAX_LABEL_OVERHANG = 1.6
+const MAX_LABEL_OVERHANG = 1.3
+/** How far along a connected run (from the junction) a label may overhang it (paper mm). */
+const JUNCTION_LABEL_REACH_MM = 7
 
-function renderPipeLabel(pipe: DrawingPipeRun, frame: Frame, placed: readonly Aabb[]): Placed | null {
+function renderPipeLabel(pipe: DrawingPipeRun, frame: Frame, placed: readonly Quad[]): Placed | null {
   const a = frame.toSvg(pipe.start)
   const b = frame.toSvg(pipe.end)
   const dx = b.x - a.x
@@ -411,8 +467,8 @@ function renderPipeLabel(pipe: DrawingPipeRun, frame: Frame, placed: readonly Aa
   const nx = uy
   const ny = -ux
 
-  const { band, edge } = pipeBandPx(pipe, frame)
-  const halfBand = band / 2 + edge
+  const { band } = pipeBandPx(pipe, frame)
+  const halfBand = band / 2
   const gap = frame.mm(TEXT_STYLE.labelGapMm)
   const diameterPx = frame.mm(TEXT_STYLE.diameterMm)
   const codePx = frame.mm(TEXT_STYLE.systemCodeMm)
@@ -478,7 +534,7 @@ function renderPipeLabel(pipe: DrawingPipeRun, frame: Frame, placed: readonly Aa
   const candidateAt = (layout: (typeof layouts)[number], t: number) => {
     const cx = a.x + dx * t
     const cy = a.y + dy * t
-    return { cx, cy, svg: layout.svg, box: rotatedBox(cx, cy, ux, uy, nx, ny, halfWidth, layout.above, layout.below) }
+    return { cx, cy, svg: layout.svg, box: orientedBox(cx, cy, ux, uy, nx, ny, halfWidth, layout.above, layout.below) }
   }
   // Default: slope above / diameter below at the midpoint. Otherwise the first
   // collision-free spot: shift along the run first, swap sides second.
@@ -507,8 +563,41 @@ function textAt(content: string, fontPx: number, y: number): string {
   return `<text x="0" y="${fmt(y)}" font-size="${fmt(fontPx)}" text-anchor="middle">${escapeXml(content)}</text>`
 }
 
-/** AABB of a rectangle centred at (cx,cy) spanning ±halfWidth along u and [-above, +below] along the down-normal. */
-function rotatedBox(
+interface Pt {
+  readonly x: number
+  readonly y: number
+}
+
+/** Convex quadrilateral obstacle with a cached bounding box for the quick reject. */
+interface Quad {
+  readonly pts: readonly [Pt, Pt, Pt, Pt]
+  readonly minX: number
+  readonly minY: number
+  readonly maxX: number
+  readonly maxY: number
+}
+
+function quadFromPoints(pts: readonly [Pt, Pt, Pt, Pt]): Quad {
+  return {
+    pts,
+    minX: Math.min(...pts.map((p) => p.x)),
+    minY: Math.min(...pts.map((p) => p.y)),
+    maxX: Math.max(...pts.map((p) => p.x)),
+    maxY: Math.max(...pts.map((p) => p.y)),
+  }
+}
+
+function quadFromAabb(minX: number, minY: number, maxX: number, maxY: number): Quad {
+  return quadFromPoints([
+    { x: minX, y: minY },
+    { x: maxX, y: minY },
+    { x: maxX, y: maxY },
+    { x: minX, y: maxY },
+  ])
+}
+
+/** Oriented box centred at (cx,cy) spanning ±halfWidth along u and [-above, +below] across it. */
+function orientedBox(
   cx: number,
   cy: number,
   ux: number,
@@ -518,71 +607,89 @@ function rotatedBox(
   halfWidth: number,
   above: number,
   below: number,
-): Aabb {
-  const corners = [
-    [-halfWidth, -above],
-    [halfWidth, -above],
-    [-halfWidth, below],
-    [halfWidth, below],
-  ].map(([along, perp]) => ({
-    // perp < 0 is "above" → move along +n (n points up on the sheet).
-    x: cx + ux * along - nx * perp,
-    y: cy + uy * along - ny * perp,
-  }))
-  return {
-    minX: Math.min(...corners.map((c) => c.x)),
-    minY: Math.min(...corners.map((c) => c.y)),
-    maxX: Math.max(...corners.map((c) => c.x)),
-    maxY: Math.max(...corners.map((c) => c.y)),
-  }
+): Quad {
+  // perp < 0 is "above" → move along +n (n points up on the sheet).
+  const at = (along: number, perp: number): Pt => ({ x: cx + ux * along - nx * perp, y: cy + uy * along - ny * perp })
+  return quadFromPoints([at(-halfWidth, -above), at(halfWidth, -above), at(halfWidth, below), at(-halfWidth, below)])
 }
 
-/** Axis-aligned box of the rotated fixture symbol. */
-function fixtureBox(fixture: DrawingFixture, frame: Frame): Aabb {
+/** Oriented box of the rotated fixture symbol. */
+function fixtureBox(fixture: DrawingFixture, frame: Frame): Quad {
   const { widthM, depthM } = fixtureSizeM(fixture)
-  const theta = (fixture.rotationDeg * Math.PI) / 180
-  const halfW = ((Math.abs(Math.cos(theta)) * widthM + Math.abs(Math.sin(theta)) * depthM) * frame.pxPerM) / 2
-  const halfD = ((Math.abs(Math.sin(theta)) * widthM + Math.abs(Math.cos(theta)) * depthM) * frame.pxPerM) / 2
+  // Plan CCW rotation → SVG (y down) clockwise; the box is symmetric so the sign only matters for consistency.
+  const theta = (-fixture.rotationDeg * Math.PI) / 180
+  const ux = Math.cos(theta)
+  const uy = Math.sin(theta)
   const c = frame.toSvg(fixture.centre)
-  return { minX: c.x - halfW, minY: c.y - halfD, maxX: c.x + halfW, maxY: c.y + halfD }
+  const hw = (widthM * frame.pxPerM) / 2
+  const hd = (depthM * frame.pxPerM) / 2
+  return orientedBox(c.x, c.y, ux, uy, uy, -ux, hw, hd, hd)
 }
 
-/** A run as a chain of small boxes so diagonal runs do not block their whole bounding box. */
-function pipeBoxes(pipe: DrawingPipeRun, frame: Frame): Aabb[] {
+/** A run as a chain of oriented boxes so a label near one end is not blocked by the far end. */
+function pipeBoxes(pipe: DrawingPipeRun, frame: Frame): Quad[] {
   const a = frame.toSvg(pipe.start)
   const b = frame.toSvg(pipe.end)
   const length = Math.hypot(b.x - a.x, b.y - a.y)
   if (!(length > 0)) return []
-  const { band, edge } = pipeBandPx(pipe, frame)
-  const half = band / 2 + edge
-  const chunk = Math.max(1, Math.ceil(length / frame.mm(8)))
-  const boxes: Aabb[] = []
-  for (let i = 0; i < chunk; i++) {
-    const x0 = a.x + ((b.x - a.x) * i) / chunk
-    const y0 = a.y + ((b.y - a.y) * i) / chunk
-    const x1 = a.x + ((b.x - a.x) * (i + 1)) / chunk
-    const y1 = a.y + ((b.y - a.y) * (i + 1)) / chunk
-    boxes.push({
-      minX: Math.min(x0, x1) - half,
-      minY: Math.min(y0, y1) - half,
-      maxX: Math.max(x0, x1) + half,
-      maxY: Math.max(y0, y1) + half,
-    })
+  const half = pipeBandPx(pipe, frame).band / 2
+  const ux = (b.x - a.x) / length
+  const uy = (b.y - a.y) / length
+  const chunks = Math.max(1, Math.ceil(length / frame.mm(8)))
+  const step = length / chunks
+  const boxes: Quad[] = []
+  for (let i = 0; i < chunks; i++) {
+    const mid = step * (i + 0.5)
+    boxes.push(orientedBox(a.x + ux * mid, a.y + uy * mid, ux, uy, uy, -ux, step / 2, half, half))
   }
   return boxes
 }
 
-function insideSheet(box: Aabb, frame: Frame): boolean {
+function insideSheet(box: Quad, frame: Frame): boolean {
   const bottom = frame.heightPx - frame.mm(SHEET_STYLE.titleStripMm) - frame.marginPx / 2
   return box.minX >= 0 && box.minY >= 0 && box.maxX <= frame.widthPx && box.maxY <= bottom
 }
 
-function containsPoint(box: Aabb, point: { x: number; y: number }): boolean {
-  return point.x >= box.minX && point.x <= box.maxX && point.y >= box.minY && point.y <= box.maxY
+function containsPoint(quad: Quad, point: Pt): boolean {
+  if (point.x < quad.minX || point.x > quad.maxX || point.y < quad.minY || point.y > quad.maxY) return false
+  let sign = 0
+  for (let i = 0; i < 4; i++) {
+    const a = quad.pts[i]
+    const b = quad.pts[(i + 1) % 4]
+    const cross = (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x)
+    if (Math.abs(cross) < 1e-9) continue
+    const s = Math.sign(cross)
+    if (sign === 0) sign = s
+    else if (s !== sign) return false
+  }
+  return true
 }
 
-function overlaps(a: Aabb, b: Aabb): boolean {
-  return a.minX < b.maxX && a.maxX > b.minX && a.minY < b.maxY && a.maxY > b.minY
+/** Separating-axis test for two convex quads (touching edges do not count as overlap). */
+function overlaps(a: Quad, b: Quad): boolean {
+  if (a.minX >= b.maxX || a.maxX <= b.minX || a.minY >= b.maxY || a.maxY <= b.minY) return false
+  for (const quad of [a, b]) {
+    for (let i = 0; i < 4; i++) {
+      const p = quad.pts[i]
+      const q = quad.pts[(i + 1) % 4]
+      const axisX = -(q.y - p.y)
+      const axisY = q.x - p.x
+      const project = (pts: readonly Pt[]) => {
+        let min = Number.POSITIVE_INFINITY
+        let max = Number.NEGATIVE_INFINITY
+        for (const pt of pts) {
+          const d = pt.x * axisX + pt.y * axisY
+          if (d < min) min = d
+          if (d > max) max = d
+        }
+        return { min, max }
+      }
+      const pa = project(a.pts)
+      const pb = project(b.pts)
+      if (pa.max <= pb.min || pb.max <= pa.min) return false
+    }
+  }
+  return true
 }
 
 function textWidthPx(content: string, fontPx: number): number {
@@ -638,7 +745,7 @@ function renderStackSymbol(riser: DrawingRiser, frame: Frame): Placed {
     `<path d="M${fmt(c.x - cross)} ${fmt(c.y)}H${fmt(c.x + cross)}M${fmt(c.x)} ${fmt(c.y - cross)}V${fmt(c.y + cross)}" stroke="${STACK_STYLE.outline}" stroke-width="${fmt(frame.mm(STACK_STYLE.crosshairMm))}"/>` +
     `<circle cx="${fmt(c.x)}" cy="${fmt(c.y)}" r="${fmt(r)}" fill="${style.fill}" stroke="${STACK_STYLE.outline}" stroke-width="${fmt(frame.mm(STACK_STYLE.outlineMm))}"/>` +
     `</g>`
-  return { svg, box: { minX: c.x - cross, minY: c.y - cross, maxX: c.x + cross, maxY: c.y + cross } }
+  return { svg, box: quadFromAabb(c.x - cross, c.y - cross, c.x + cross, c.y + cross) }
 }
 
 const TAG_OFFSETS: ReadonlyArray<readonly [number, number]> = [
@@ -654,7 +761,7 @@ const TAG_OFFSETS: ReadonlyArray<readonly [number, number]> = [
 /** Leader length multipliers tried in order when the near positions are taken. */
 const TAG_DISTANCE_FACTORS = [1, 2, 3.2] as const
 
-function renderStackTag(riser: DrawingRiser, frame: Frame, placed: readonly Aabb[]): Placed {
+function renderStackTag(riser: DrawingRiser, frame: Frame, placed: readonly Quad[]): Placed {
   const c = frame.toSvg(riser.centre)
   const r = stackRadiusPx(riser, frame)
   const fontPx = frame.mm(TEXT_STYLE.tagMm)
@@ -674,7 +781,7 @@ function renderStackTag(riser: DrawingRiser, frame: Frame, placed: readonly Aabb
     TAG_OFFSETS.map(([sx, sy]) => {
       const px = c.x + sx * frame.mm(STACK_STYLE.pillOffsetXMm) * factor + (sx * pillW) / 2
       const py = c.y + sy * frame.mm(STACK_STYLE.pillOffsetYMm) * factor
-      const box: Aabb = { minX: px - pillW / 2, minY: py - pillH / 2, maxX: px + pillW / 2, maxY: py + pillH / 2 + noteH }
+      const box = quadFromAabb(px - pillW / 2, py - pillH / 2, px + pillW / 2, py + pillH / 2 + noteH)
       return { px, py, box, inside: insideSheet(box, frame) }
     }),
   )
