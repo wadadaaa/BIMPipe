@@ -15,6 +15,9 @@ describe('renderFloorDrawingSvg', () => {
     const svg = renderFloorDrawingSvg(buildSyntheticMiniModel(), OPTIONS)
     expect(svg.startsWith('<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg"')).toBe(true)
     expect(svg.endsWith('</svg>')).toBe(true)
+    // Snapshot history: G1 style iterations 1–8; G4 style re-check (sanitary-only
+    // crops) — fixtures drawn as the sheet's plumbing fixtures (dark-green
+    // hairline #004000 / 0.12 mm) instead of pale-teal architecture outlines.
     expect(svg).toMatchSnapshot()
   })
 

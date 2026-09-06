@@ -7,8 +7,9 @@
  * sanitary sheet drawn at 1:100 on A1 (rasterised at 220 dpi):
  *
  * - Architecture is a light-grey underlay: walls filled `#e7e7e2` with a fine
- *   diagonal cross-hatch and a mid-grey outline; fixtures are thin pale-teal
- *   outlines with a light-grey fill; nothing architectural is black.
+ *   diagonal cross-hatch and a mid-grey outline; nothing architectural is
+ *   black. Sanitary fixtures are drawn as the sheet's plumbing fixtures: a
+ *   thin dark-green outline (the system colour) with a light-grey fill.
  * - Pipes are double-line bands at true scale: light green fill with a very
  *   dark green edge for gravity sanitary, dark olive for vent. Ø110 at 1:100
  *   is a 1.1 mm band; Ø50 is clamped to a legible minimum.
@@ -60,9 +61,15 @@ export const UNDERLAY_STYLE = {
   shaftCandidateStroke: '#c4c4c4',
   shaftCandidateStrokeMm: 0.18,
   shaftCandidateDashMm: [0.6, 0.8] as readonly [number, number],
-  // Fixtures are pale teal outlines (#b2d8d8 sampled) on a light-grey fill.
-  fixtureStroke: '#a3cbc7',
-  fixtureStrokeMm: 0.16,
+  // Fixtures: the sheet draws the PLUMBING fixture family as a dark hairline
+  // (#004000 / near-black sampled, ~1 px at 220 dpi ≈ 0.12 mm) over the
+  // architect's pale-teal fixture underlay. The model carries one merged
+  // fixture per sanitary appliance, so it is drawn as the plumbing fixture:
+  // thin dark-green outline, light-grey fill. (G4 style re-check on
+  // sanitary-only crops: iteration 1 named pale-teal-only fixtures as the
+  // biggest gap; iteration 2 read a 0.18 mm outline as "heavy as the pipes".)
+  fixtureStroke: '#004000',
+  fixtureStrokeMm: 0.12,
   fixtureFill: '#ebebeb',
 } as const
 

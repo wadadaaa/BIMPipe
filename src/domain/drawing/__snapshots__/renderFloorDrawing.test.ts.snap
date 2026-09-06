@@ -9,7 +9,7 @@ exports[`renderFloorDrawingSvg > renders the mini model to a stable SVG document
 <path d="M121.26 155.91L381.1 155.91L381.1 138.58L121.26 138.58Z" fill="url(#wall-hatch)" stroke="#a6a6a6" stroke-width="3.46" stroke-linejoin="miter"/>
 </g>
 <g id="fixtures">
-<g transform="translate(207.87 186.22) scale(1 -1) rotate(180)" fill="#ebebeb" stroke="#a3cbc7" stroke-width="1.39" data-fixture="wc-1"><rect x="-16.46" y="-30.31" width="32.91" height="15.76"/><ellipse cx="0" cy="7.88" rx="13.82" ry="22.43"/><ellipse cx="0" cy="9.7" rx="9.87" ry="15.25"/></g>
+<g transform="translate(207.87 186.22) scale(1 -1) rotate(180)" fill="#ebebeb" stroke="#004000" stroke-width="1.04" data-fixture="wc-1"><rect x="-16.46" y="-30.31" width="32.91" height="15.76"/><ellipse cx="0" cy="7.88" rx="13.82" ry="22.43"/><ellipse cx="0" cy="9.7" rx="9.87" ry="15.25"/></g>
 </g>
 <g id="pipes">
 <g data-pipe="run-1" data-role="branch" stroke-linecap="butt"><line x1="207.87" y1="186.22" x2="337.8" y2="251.18" stroke="#004000" stroke-width="9.53"/><line x1="207.87" y1="186.22" x2="337.8" y2="251.18" stroke="#92d050" stroke-width="7.1"/></g>
