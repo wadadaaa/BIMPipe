@@ -1,4 +1,5 @@
 import type { PlanBounds, StoreyId } from '@/domain/types'
+import type { OfficeCoreShaftRules } from './typology'
 
 /**
  * Vertical continuity map (W5).
@@ -155,6 +156,15 @@ export interface StoreyObstructionGrid {
    * the slab extents and voids carve the openings back out ("slab solid").
    */
   blocked: Uint8Array
+  /**
+   * Row-major wall/column-only flags (same indexing as `blocked`), 1 = a wall
+   * or column intersects the cell. Slabs never set this flag, so it measures
+   * structure density independently of slab coverage (office core detection,
+   * `selectOfficeCoreShafts`). Always present on grids built by
+   * {@link buildContinuityMap}; optional so hand-built grids stay valid —
+   * queries treat a missing array as "no structure knowledge".
+   */
+  structureBlocked?: Uint8Array
 }
 
 export type ShaftCandidateSource = 'slab-opening' | 'shaft-named-space' | 'aligned-void'
@@ -373,6 +383,7 @@ function buildObstructionGrid(
       columns: 0,
       rows: 0,
       blocked: new Uint8Array(0),
+      structureBlocked: new Uint8Array(0),
     }
   }
 
@@ -468,6 +479,7 @@ function buildObstructionGrid(
     columns,
     rows,
     blocked,
+    structureBlocked: hardBlocked,
   }
 }
 
@@ -874,4 +886,375 @@ export function snapPointToContinuity(
     kind: 'miss',
     reason: `no shaft candidate or free grid cell within ${maxSnapDistance} ${map.units} on storey ${storeyId}`,
   }
+}
+
+// ---------------------------------------------------------------------------
+// Structure queries (additive, G3): wall/column density and directional probes
+// ---------------------------------------------------------------------------
+
+/** Plan area of a shaft candidate footprint: polygon (shoelace) when present, else its bbox. */
+export function shaftCandidatePlanArea(candidate: Pick<ShaftCandidate, 'bounds' | 'polygon'>): number {
+  if (candidate.polygon !== null && candidate.polygon.length >= 3) {
+    let twice = 0
+    const points = candidate.polygon
+    for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+      twice += points[j].x * points[i].z - points[i].x * points[j].z
+    }
+    const area = Math.abs(twice) / 2
+    if (area > 0) return area
+  }
+  return Math.max(0, candidate.bounds.maxX - candidate.bounds.minX) * Math.max(0, candidate.bounds.maxZ - candidate.bounds.minZ)
+}
+
+/** Longest / shortest bbox side of a candidate; Infinity for a degenerate footprint. */
+export function shaftCandidateAspectRatio(candidate: Pick<ShaftCandidate, 'bounds'>): number {
+  const width = candidate.bounds.maxX - candidate.bounds.minX
+  const depth = candidate.bounds.maxZ - candidate.bounds.minZ
+  const shortSide = Math.min(width, depth)
+  if (shortSide <= 0) return Infinity
+  return Math.max(width, depth) / shortSide
+}
+
+/**
+ * Plan distance from `origin` to the centre of the first wall/column cell met
+ * when walking along `axis` in direction `sign`, up to `maxDistance` (map
+ * units). null when no structure is met, when the grid has no
+ * `structureBlocked` array, or when the origin lies outside the grid. Cells
+ * outside the grid stop the walk (null): the edge of the modelled floor is not
+ * a wall.
+ */
+export function probeStructureAlongAxis(
+  grid: StoreyObstructionGrid,
+  origin: PlanPoint,
+  axis: 'x' | 'z',
+  sign: 1 | -1,
+  maxDistance: number,
+): number | null {
+  const structure = grid.structureBlocked
+  if (structure === undefined || grid.columns === 0 || grid.rows === 0) return null
+  let col = Math.floor((origin.x - grid.origin.x) / grid.cellSize)
+  let row = Math.floor((origin.z - grid.origin.z) / grid.cellSize)
+  if (col < 0 || row < 0 || col >= grid.columns || row >= grid.rows) return null
+  const steps = Math.ceil(maxDistance / grid.cellSize)
+  for (let step = 0; step <= steps; step++) {
+    if (col < 0 || row < 0 || col >= grid.columns || row >= grid.rows) return null
+    if (structure[row * grid.columns + col] === 1) {
+      const center = cellCenter(grid, col, row)
+      const distance = axis === 'x' ? Math.abs(center.x - origin.x) : Math.abs(center.z - origin.z)
+      return distance <= maxDistance ? distance : null
+    }
+    if (axis === 'x') col += sign
+    else row += sign
+  }
+  return null
+}
+
+/** A connected patch of grid windows whose wall/column density reaches the threshold. */
+export interface DenseStructureCluster {
+  /** `dense-structure:<storeyId>:<index>` in row-major order of the first dense window. */
+  id: string
+  storeyId: StoreyId
+  /** Plan bbox of the dense window centres (map units). */
+  bounds: PlanBounds
+  center: PlanPoint
+  /** Number of dense window centres in the cluster. */
+  windowCount: number
+  /** Highest window density observed in the cluster (0–1). */
+  peakDensity: number
+}
+
+/**
+ * Finds core-like patches of structure: square windows of `windowSize` (map
+ * units) whose fraction of wall/column cells (`structureBlocked`; slabs never
+ * count) is ≥ `minDensity`, merged into 4-connected clusters. Deterministic
+ * (row-major). Empty when the grid carries no structure knowledge.
+ */
+export function findDenseStructureClusters(
+  grid: StoreyObstructionGrid,
+  windowSize: number,
+  minDensity: number,
+): DenseStructureCluster[] {
+  const structure = grid.structureBlocked
+  if (structure === undefined || grid.columns === 0 || grid.rows === 0) return []
+  const window = Math.max(1, Math.round(windowSize / grid.cellSize))
+  if (window > grid.columns || window > grid.rows) return []
+  const { columns, rows } = grid
+
+  // Summed-area table (one extra row/column of zeros).
+  const sat = new Uint32Array((columns + 1) * (rows + 1))
+  for (let row = 1; row <= rows; row++) {
+    let rowSum = 0
+    for (let col = 1; col <= columns; col++) {
+      rowSum += structure[(row - 1) * columns + (col - 1)]
+      sat[row * (columns + 1) + col] = sat[(row - 1) * (columns + 1) + col] + rowSum
+    }
+  }
+  const windowSum = (col0: number, row0: number): number => {
+    const col1 = col0 + window
+    const row1 = row0 + window
+    const w = columns + 1
+    return sat[row1 * w + col1] - sat[row0 * w + col1] - sat[row1 * w + col0] + sat[row0 * w + col0]
+  }
+
+  // Density per window, stored at the window's centre cell.
+  const denseCols = columns - window + 1
+  const denseRows = rows - window + 1
+  const density = new Float32Array(denseCols * denseRows)
+  const dense = new Uint8Array(denseCols * denseRows)
+  const cellsPerWindow = window * window
+  for (let row0 = 0; row0 < denseRows; row0++) {
+    for (let col0 = 0; col0 < denseCols; col0++) {
+      const value = windowSum(col0, row0) / cellsPerWindow
+      density[row0 * denseCols + col0] = value
+      if (value >= minDensity) dense[row0 * denseCols + col0] = 1
+    }
+  }
+
+  // 4-connected components over dense windows (iterative flood fill).
+  const visited = new Uint8Array(denseCols * denseRows)
+  const clusters: DenseStructureCluster[] = []
+  const half = window / 2
+  for (let start = 0; start < dense.length; start++) {
+    if (dense[start] === 0 || visited[start] === 1) continue
+    const stack = [start]
+    visited[start] = 1
+    let minCol = Infinity
+    let maxCol = -Infinity
+    let minRow = Infinity
+    let maxRow = -Infinity
+    let sumCol = 0
+    let sumRow = 0
+    let count = 0
+    let peak = 0
+    while (stack.length > 0) {
+      const index = stack.pop()!
+      const col = index % denseCols
+      const row = Math.floor(index / denseCols)
+      minCol = Math.min(minCol, col)
+      maxCol = Math.max(maxCol, col)
+      minRow = Math.min(minRow, row)
+      maxRow = Math.max(maxRow, row)
+      sumCol += col
+      sumRow += row
+      count += 1
+      peak = Math.max(peak, density[index])
+      const neighbours = [
+        col > 0 ? index - 1 : -1,
+        col < denseCols - 1 ? index + 1 : -1,
+        row > 0 ? index - denseCols : -1,
+        row < denseRows - 1 ? index + denseCols : -1,
+      ]
+      for (const next of neighbours) {
+        if (next < 0 || dense[next] === 0 || visited[next] === 1) continue
+        visited[next] = 1
+        stack.push(next)
+      }
+    }
+    // Window (col0,row0) covers cells [col0, col0+window); its centre is col0 + window/2.
+    const toX = (col: number) => grid.origin.x + (col + half) * grid.cellSize
+    const toZ = (row: number) => grid.origin.z + (row + half) * grid.cellSize
+    clusters.push({
+      id: `dense-structure:${grid.storeyId}:${clusters.length}`,
+      storeyId: grid.storeyId,
+      bounds: { minX: toX(minCol), maxX: toX(maxCol), minZ: toZ(minRow), maxZ: toZ(maxRow) },
+      center: { x: toX(sumCol / count), z: toZ(sumRow / count) },
+      windowCount: count,
+      peakDensity: peak,
+    })
+  }
+  return clusters
+}
+
+// ---------------------------------------------------------------------------
+// Office core-shaft selection (G3)
+// ---------------------------------------------------------------------------
+
+/** Rules for {@link selectOfficeCoreShafts}, all in METRES (converted to map units internally); see `typology.ts`. */
+export type OfficeCoreShaftSelectionRules = OfficeCoreShaftRules
+
+/** A stair / lift / atrium void used as a core anchor (never as a stack target). */
+export interface LargeVoidAnchor {
+  candidateId: string
+  center: PlanPoint
+  bounds: PlanBounds
+  areaM2: number
+  /** True for `aligned-void` candidates (repeats on ≥ 3 storeys); false for a single-storey opening. */
+  repeating: boolean
+}
+
+export type OfficeCoreShaftRejection =
+  | 'area-below-min'
+  | 'area-above-max'
+  | 'aspect-above-max'
+  | 'outside-core-radius'
+
+export interface OfficeCoreShaftCandidate {
+  candidate: ShaftCandidate
+  areaM2: number
+  aspectRatio: number
+  /** Passed the shaft-like footprint window (area + aspect). */
+  shaftLike: boolean
+  /** Plan distance (m) from the candidate centre to the nearest dense-structure cluster bounds; null when none exists. */
+  distanceToDenseStructureM: number | null
+  /** Plan distance (m) from the candidate centre to the nearest stair/lift void bounds; null when none exists. */
+  distanceToLargeVoidM: number | null
+  /** Which core anchor put it in range (the nearer one), null when out of range. */
+  coreAnchor: 'dense-structure' | 'stair-lift-void' | null
+  selected: boolean
+  rejection: OfficeCoreShaftRejection | null
+  reason: string
+}
+
+export interface OfficeCoreShaftSelection {
+  storeyId: StoreyId
+  units: LengthUnit
+  /** Every shaft candidate on the storey, sorted by id, with its verdict. */
+  candidates: OfficeCoreShaftCandidate[]
+  /** The selected core shafts (subset of `candidates`), sorted by id. */
+  selected: ShaftCandidate[]
+  denseClusters: DenseStructureCluster[]
+  largeVoids: LargeVoidAnchor[]
+  diagnostics: string[]
+}
+
+/**
+ * Office mode (G3): which shaft candidates of a storey are CORE shafts.
+ *
+ * A candidate is selected when BOTH hold:
+ *  1. its footprint is shaft-like — area within
+ *     [`shaftMinAreaM2`, `shaftMaxAreaM2`] and longest/shortest side ≤
+ *     `shaftMaxAspectRatio` (sleeves are too small; stair / lift / atrium voids
+ *     are too large; slots are too elongated);
+ *  2. it lies within `coreRadiusM` of a core anchor — a dense-structure cluster
+ *     ({@link findDenseStructureClusters} on wall/column cells; slabs never
+ *     count) or a large vertical void (a candidate with area ≥
+ *     `largeVoidMinAreaM2`: an `aligned-void` repeating on ≥ 3 storeys, or on a
+ *     single-storey map a large slab opening, reported as non-repeating).
+ *
+ * Every candidate carries its area, aspect, distances and a reason, selected
+ * or not, so the UI / gated tests can show WHY. Pure and deterministic.
+ */
+export function selectOfficeCoreShafts(
+  map: ContinuityMap,
+  storeyId: StoreyId,
+  rules: OfficeCoreShaftSelectionRules,
+): OfficeCoreShaftSelection {
+  const toM = map.units === 'mm' ? 0.001 : 1
+  const toMap = 1 / toM
+  const diagnostics: string[] = []
+  const grid = map.grids.find((candidate) => candidate.storeyId === storeyId)
+  const storeyCandidates = map.shaftCandidates
+    .filter((candidate) => candidate.storeyIds.includes(storeyId))
+    .sort((a, b) => a.id.localeCompare(b.id))
+
+  const denseClusters =
+    grid === undefined
+      ? []
+      : findDenseStructureClusters(grid, rules.denseWindowM * toMap, rules.denseStructureMinDensity)
+  if (grid === undefined) {
+    diagnostics.push(`no obstruction grid for storey ${storeyId}: dense-structure anchors unavailable`)
+  } else if (grid.structureBlocked === undefined) {
+    diagnostics.push(`obstruction grid for storey ${storeyId} carries no wall/column layer: dense-structure anchors unavailable`)
+  } else if (denseClusters.length === 0) {
+    diagnostics.push(
+      `no window of ${rules.denseWindowM} m reaches ${Math.round(rules.denseStructureMinDensity * 100)} % wall/column density on storey ${storeyId}`,
+    )
+  }
+
+  const largeVoids: LargeVoidAnchor[] = []
+  for (const candidate of storeyCandidates) {
+    const areaM2 = shaftCandidatePlanArea(candidate) * toM * toM
+    if (areaM2 < rules.largeVoidMinAreaM2) continue
+    largeVoids.push({
+      candidateId: candidate.id,
+      center: { ...candidate.center },
+      bounds: { ...candidate.bounds },
+      areaM2,
+      repeating: candidate.source === 'aligned-void',
+    })
+  }
+  if (largeVoids.length > 0 && largeVoids.every((anchor) => !anchor.repeating)) {
+    diagnostics.push(
+      `stair/lift anchors are single-storey slab openings ≥ ${rules.largeVoidMinAreaM2} m² (no aligned voids on this map — build it for ≥ 3 storeys to confirm they repeat)`,
+    )
+  }
+
+  const candidates: OfficeCoreShaftCandidate[] = storeyCandidates.map((candidate) => {
+    const areaM2 = shaftCandidatePlanArea(candidate) * toM * toM
+    const aspectRatio = shaftCandidateAspectRatio(candidate)
+    const distanceToDenseStructureM = nearestBoundsDistance(candidate.center, denseClusters.map((cluster) => cluster.bounds), toM)
+    const distanceToLargeVoidM = nearestBoundsDistance(
+      candidate.center,
+      largeVoids.filter((anchor) => anchor.candidateId !== candidate.id).map((anchor) => anchor.bounds),
+      toM,
+    )
+
+    let rejection: OfficeCoreShaftRejection | null = null
+    if (areaM2 < rules.shaftMinAreaM2) rejection = 'area-below-min'
+    else if (areaM2 > rules.shaftMaxAreaM2) rejection = 'area-above-max'
+    else if (aspectRatio > rules.shaftMaxAspectRatio) rejection = 'aspect-above-max'
+    const shaftLike = rejection === null
+
+    let coreAnchor: OfficeCoreShaftCandidate['coreAnchor'] = null
+    const dense = distanceToDenseStructureM
+    const large = distanceToLargeVoidM
+    const denseInRange = dense !== null && dense <= rules.coreRadiusM
+    const largeInRange = large !== null && large <= rules.coreRadiusM
+    if (denseInRange && largeInRange) coreAnchor = dense! <= large! ? 'dense-structure' : 'stair-lift-void'
+    else if (denseInRange) coreAnchor = 'dense-structure'
+    else if (largeInRange) coreAnchor = 'stair-lift-void'
+    if (shaftLike && coreAnchor === null) rejection = 'outside-core-radius'
+
+    const selected = shaftLike && coreAnchor !== null
+    const footprint = `${areaM2.toFixed(2)} m², aspect ${Number.isFinite(aspectRatio) ? aspectRatio.toFixed(1) : '∞'}`
+    const anchorText =
+      coreAnchor === 'dense-structure'
+        ? `${dense!.toFixed(2)} m from a dense-structure cluster`
+        : coreAnchor === 'stair-lift-void'
+          ? `${large!.toFixed(2)} m from a stair/lift void`
+          : `nearest dense structure ${dense === null ? 'none' : `${dense.toFixed(2)} m`}, nearest stair/lift void ${large === null ? 'none' : `${large.toFixed(2)} m`}`
+    const reason = selected
+      ? `core shaft: ${footprint}; ${anchorText} (≤ ${rules.coreRadiusM} m)`
+      : rejection === 'area-below-min'
+        ? `not a shaft: ${footprint} is below ${rules.shaftMinAreaM2} m² (sleeve / single penetration)`
+        : rejection === 'area-above-max'
+          ? `not a stack target: ${footprint} exceeds ${rules.shaftMaxAreaM2} m² (stair / lift / atrium void${areaM2 >= rules.largeVoidMinAreaM2 ? ', used as a core anchor' : ''})`
+          : rejection === 'aspect-above-max'
+            ? `not a shaft: ${footprint} is more elongated than ${rules.shaftMaxAspectRatio}:1 (slot / trench)`
+            : `outside the core: ${footprint}; ${anchorText} — both beyond ${rules.coreRadiusM} m`
+    return {
+      candidate,
+      areaM2,
+      aspectRatio,
+      shaftLike,
+      distanceToDenseStructureM,
+      distanceToLargeVoidM,
+      coreAnchor,
+      selected,
+      rejection,
+      reason,
+    }
+  })
+
+  return {
+    storeyId,
+    units: map.units,
+    candidates,
+    selected: candidates.filter((entry) => entry.selected).map((entry) => entry.candidate),
+    denseClusters,
+    largeVoids,
+    diagnostics,
+  }
+}
+
+/** Distance (converted by `scale`) from a point to the nearest of several bounds; null when none. */
+function nearestBoundsDistance(point: PlanPoint, boundsList: PlanBounds[], scale: number): number | null {
+  let best: number | null = null
+  for (const bounds of boundsList) {
+    const dx = Math.max(bounds.minX - point.x, 0, point.x - bounds.maxX)
+    const dz = Math.max(bounds.minZ - point.z, 0, point.z - bounds.maxZ)
+    const distance = Math.sqrt(dx * dx + dz * dz) * scale
+    if (best === null || distance < best) best = distance
+  }
+  return best
 }

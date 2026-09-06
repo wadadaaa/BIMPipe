@@ -3,10 +3,13 @@ import type { PlanBounds } from '@/domain/types'
 import {
   buildContinuityMap,
   cellCenter,
+  findDenseStructureClusters,
   findFreeCellWithinBounds,
   isCellBlocked,
   isShaftLikeName,
   probeContinuityCell,
+  probeStructureAlongAxis,
+  selectOfficeCoreShafts,
   snapPointToContinuity,
   type ContinuityMapInput,
   type ContinuityStoreyInput,
@@ -544,5 +547,211 @@ describe('probeContinuityCell / findFreeCellWithinBounds (V3 queries)', () => {
     expect(found!.position.z).toBeGreaterThan(250)
     expect(isCellBlocked(grid, found!.cell.col, found!.cell.row)).toBe(false)
     expect(findFreeCellWithinBounds(grid, { minX: 500, maxX: 1000, minZ: 0, maxZ: 200 }, { x: 750, z: 100 })).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// G3 additive queries: structure layer, dense clusters, office core shafts
+// ---------------------------------------------------------------------------
+
+const mInput = (storeys: ContinuityStoreyInput[]): ContinuityMapInput => ({ units: 'm', storeys })
+
+/**
+ * Synthetic office floor in metres: a 30 × 20 m slab, a facade wall along the
+ * bottom edge, a dense core (lift shaft box + stair enclosure + service walls)
+ * around x 12–18, z 6–14 with a 2.5 × 5 m stair void, two small shaft openings
+ * next to the core, one small shaft opening far away at the facade, one
+ * sleeve (0.05 m²) in the core and one long slot (5 × 0.5 m) in the core.
+ */
+function officeFloor(storeyId: number): ContinuityStoreyInput {
+  return storey(storeyId, {
+    obstructions: [
+      { id: 'slab:1', kind: 'slab', footprint: bbox(0, 30, 0, 20) },
+      { id: 'wall:facade', kind: 'wall', footprint: bbox(0, 30, 0, 0.25) },
+      // Core: lift shaft box 12–15 × 6–9 (four walls), stair enclosure 15–18 × 6–14,
+      // service walls crossing the core block.
+      { id: 'wall:c1', kind: 'wall', footprint: bbox(12, 15, 6, 6.3) },
+      { id: 'wall:c2', kind: 'wall', footprint: bbox(12, 15, 8.7, 9) },
+      { id: 'wall:c3', kind: 'wall', footprint: bbox(12, 12.3, 6, 14) },
+      { id: 'wall:c4', kind: 'wall', footprint: bbox(14.7, 15, 6, 14) },
+      { id: 'wall:c5', kind: 'wall', footprint: bbox(15, 18, 6, 6.3) },
+      { id: 'wall:c6', kind: 'wall', footprint: bbox(15, 18, 13.7, 14) },
+      { id: 'wall:c7', kind: 'wall', footprint: bbox(17.7, 18, 6, 14) },
+      { id: 'wall:c8', kind: 'wall', footprint: bbox(12, 18, 10.5, 10.8) },
+      { id: 'wall:c9', kind: 'wall', footprint: bbox(12, 18, 12.2, 12.5) },
+      { id: 'column:a', kind: 'column', footprint: bbox(13.4, 13.9, 11.2, 11.7) },
+    ],
+    voids: [
+      // Stair void inside the enclosure (large, 2.5 × 5 = 12.5 m²).
+      { id: 'opening:stair', kind: 'slab-opening', hostId: 'slab:1', footprint: bbox(15.3, 17.8, 6.5, 11.5) },
+      // Two core shafts (0.6 × 1.0 and 0.8 × 0.8) just outside the core walls.
+      { id: 'opening:shaft-a', kind: 'slab-opening', hostId: 'slab:1', footprint: bbox(11, 11.6, 7, 8) },
+      { id: 'opening:shaft-b', kind: 'slab-opening', hostId: 'slab:1', footprint: bbox(18.4, 19.2, 12.4, 13.2) },
+      // A shaft-sized opening far from the core (facade, x=2).
+      { id: 'opening:far', kind: 'slab-opening', hostId: 'slab:1', footprint: bbox(2, 2.8, 1, 1.8) },
+      // Sleeve (0.2 × 0.25 = 0.05 m²) in the core.
+      { id: 'opening:sleeve', kind: 'slab-opening', hostId: 'slab:1', footprint: bbox(13, 13.2, 9.5, 9.75) },
+      // Slot (5 × 0.5 = 2.5 m², aspect 10) along the core.
+      { id: 'opening:slot', kind: 'slab-opening', hostId: 'slab:1', footprint: bbox(12.5, 17.5, 14.5, 15) },
+    ],
+  })
+}
+
+const OFFICE_RULES = {
+  shaftMinAreaM2: 0.1,
+  shaftMaxAreaM2: 6,
+  shaftMaxAspectRatio: 4,
+  coreRadiusM: 6,
+  denseWindowM: 3,
+  denseStructureMinDensity: 0.3,
+  largeVoidMinAreaM2: 4,
+}
+
+describe('structure layer + directional probe', () => {
+  it('records walls/columns in structureBlocked and never slabs', () => {
+    const map = buildContinuityMap(mInput([officeFloor(1)]))
+    const grid = map.grids[0]
+    expect(grid.structureBlocked).toBeDefined()
+    // A slab-only cell: blocked (slab) but not structure.
+    const slabOnly = probeContinuityCell(map, 1, { x: 5, z: 10 })
+    expect(slabOnly.status).toBe('blocked')
+    const slabIndex = (slabOnly as { cell: { col: number; row: number } }).cell
+    expect(grid.structureBlocked![slabIndex.row * grid.columns + slabIndex.col]).toBe(0)
+    // A facade wall cell: structure.
+    const wall = probeContinuityCell(map, 1, { x: 5, z: 0.1 }) as { cell: { col: number; row: number } }
+    expect(grid.structureBlocked![wall.cell.row * grid.columns + wall.cell.col]).toBe(1)
+  })
+
+  it('probes toward the nearest wall along an axis and reports null when nothing is met', () => {
+    const map = buildContinuityMap(mInput([officeFloor(1)]))
+    const grid = map.grids[0]
+    // From open floor at (5, 1.5) walking -z hits the facade wall (~1.4 m away).
+    const toFacade = probeStructureAlongAxis(grid, { x: 5, z: 1.5 }, 'z', -1, 3)
+    expect(toFacade).not.toBeNull()
+    expect(toFacade!).toBeGreaterThan(1)
+    expect(toFacade!).toBeLessThan(1.6)
+    // Walking +z from the same point finds nothing within 3 m.
+    expect(probeStructureAlongAxis(grid, { x: 5, z: 1.5 }, 'z', 1, 3)).toBeNull()
+    // Grids without the layer answer null.
+    expect(probeStructureAlongAxis({ ...grid, structureBlocked: undefined }, { x: 5, z: 1.5 }, 'z', -1, 3)).toBeNull()
+  })
+})
+
+describe('findDenseStructureClusters', () => {
+  it('finds the core as one cluster and ignores a lone facade wall', () => {
+    const map = buildContinuityMap(mInput([officeFloor(1)]))
+    const clusters = findDenseStructureClusters(map.grids[0], 3, 0.3)
+    expect(clusters.length).toBeGreaterThanOrEqual(1)
+    // Every cluster lies in the core block, none along the facade.
+    for (const cluster of clusters) {
+      expect(cluster.center.x).toBeGreaterThan(11)
+      expect(cluster.center.x).toBeLessThan(19)
+      expect(cluster.center.z).toBeGreaterThan(5)
+      expect(cluster.center.z).toBeLessThan(15)
+      expect(cluster.peakDensity).toBeGreaterThanOrEqual(0.3)
+    }
+    // Deterministic ids.
+    expect(clusters.map((cluster) => cluster.id)).toEqual(clusters.map((_, index) => `dense-structure:1:${index}`))
+  })
+
+  it('returns nothing without a structure layer or when the window exceeds the grid', () => {
+    const map = buildContinuityMap(mInput([officeFloor(1)]))
+    expect(findDenseStructureClusters({ ...map.grids[0], structureBlocked: undefined }, 3, 0.3)).toEqual([])
+    expect(findDenseStructureClusters(map.grids[0], 500, 0.3)).toEqual([])
+  })
+})
+
+describe('selectOfficeCoreShafts', () => {
+  it('keeps only shaft-like openings near the core and explains every verdict', () => {
+    const map = buildContinuityMap(mInput([officeFloor(1)]))
+    const selection = selectOfficeCoreShafts(map, 1, OFFICE_RULES)
+    const byId = new Map(selection.candidates.map((entry) => [entry.candidate.id, entry]))
+
+    const shaftA = byId.get('slab-opening:1:opening:shaft-a')!
+    const shaftB = byId.get('slab-opening:1:opening:shaft-b')!
+    const far = byId.get('slab-opening:1:opening:far')!
+    const stair = byId.get('slab-opening:1:opening:stair')!
+    const sleeve = byId.get('slab-opening:1:opening:sleeve')!
+    const slot = byId.get('slab-opening:1:opening:slot')!
+
+    expect(shaftA.selected).toBe(true)
+    expect(shaftA.areaM2).toBeCloseTo(0.6, 6)
+    expect(shaftA.coreAnchor).not.toBeNull()
+    expect(shaftA.reason).toMatch(/^core shaft/)
+    expect(shaftB.selected).toBe(true)
+    expect(shaftB.areaM2).toBeCloseTo(0.64, 6)
+
+    expect(far.selected).toBe(false)
+    expect(far.shaftLike).toBe(true)
+    expect(far.rejection).toBe('outside-core-radius')
+    expect(far.distanceToDenseStructureM!).toBeGreaterThan(OFFICE_RULES.coreRadiusM)
+
+    expect(stair.selected).toBe(false)
+    expect(stair.rejection).toBe('area-above-max')
+    expect(stair.areaM2).toBeCloseTo(12.5, 6)
+    expect(stair.reason).toContain('used as a core anchor')
+
+    expect(sleeve.selected).toBe(false)
+    expect(sleeve.rejection).toBe('area-below-min')
+
+    expect(slot.selected).toBe(false)
+    expect(slot.rejection).toBe('aspect-above-max')
+    expect(slot.aspectRatio).toBeCloseTo(10, 6)
+
+    expect(selection.selected.map((candidate) => candidate.id)).toEqual([
+      'slab-opening:1:opening:shaft-a',
+      'slab-opening:1:opening:shaft-b',
+    ])
+    expect(selection.largeVoids).toHaveLength(1)
+    expect(selection.largeVoids[0].repeating).toBe(false)
+    expect(selection.diagnostics.some((line) => line.includes('single-storey'))).toBe(true)
+  })
+
+  it('anchors on a stair void alone when the grid has no structure layer', () => {
+    const map = buildContinuityMap(mInput([officeFloor(1)]))
+    const stripped = { ...map, grids: map.grids.map((grid) => ({ ...grid, structureBlocked: undefined })) }
+    const selection = selectOfficeCoreShafts(stripped, 1, OFFICE_RULES)
+    expect(selection.denseClusters).toEqual([])
+    const shaftA = selection.candidates.find((entry) => entry.candidate.id === 'slab-opening:1:opening:shaft-a')!
+    expect(shaftA.selected).toBe(true)
+    expect(shaftA.coreAnchor).toBe('stair-lift-void')
+    expect(shaftA.distanceToDenseStructureM).toBeNull()
+    const far = selection.candidates.find((entry) => entry.candidate.id === 'slab-opening:1:opening:far')!
+    expect(far.selected).toBe(false)
+    expect(selection.diagnostics.some((line) => line.includes('no wall/column layer'))).toBe(true)
+  })
+
+  it('marks repeating stair voids from aligned-void candidates and converts mm maps to metres', () => {
+    const floors = [1, 2, 3].map((id) => {
+      const floor = officeFloor(id)
+      const scale = (footprint: PlanFootprint): PlanFootprint =>
+        footprint.shape === 'bbox'
+          ? bbox(footprint.bounds.minX * 1000, footprint.bounds.maxX * 1000, footprint.bounds.minZ * 1000, footprint.bounds.maxZ * 1000)
+          : footprint
+      return {
+        ...floor,
+        obstructions: floor.obstructions.map((o) => ({ ...o, footprint: scale(o.footprint) })),
+        voids: floor.voids.map((v) => ({ ...v, footprint: scale(v.footprint) })),
+      }
+    })
+    const map = buildContinuityMap(mmInput(floors))
+    const selection = selectOfficeCoreShafts(map, 2, OFFICE_RULES)
+    expect(selection.units).toBe('mm')
+    const repeating = selection.largeVoids.filter((anchor) => anchor.repeating)
+    expect(repeating.length).toBeGreaterThanOrEqual(1)
+    expect(repeating[0].areaM2).toBeCloseTo(12.5, 6)
+    const shaftA = selection.candidates.find((entry) => entry.candidate.id === 'slab-opening:2:opening:shaft-a')!
+    expect(shaftA.selected).toBe(true)
+    expect(shaftA.areaM2).toBeCloseTo(0.6, 6)
+    // Same input twice → identical output.
+    expect(selectOfficeCoreShafts(map, 2, OFFICE_RULES)).toEqual(selection)
+  })
+
+  it('reports an unknown storey explicitly', () => {
+    const map = buildContinuityMap(mInput([officeFloor(1)]))
+    const selection = selectOfficeCoreShafts(map, 99, OFFICE_RULES)
+    expect(selection.candidates).toEqual([])
+    expect(selection.selected).toEqual([])
+    expect(selection.diagnostics[0]).toContain('no obstruction grid for storey 99')
   })
 })

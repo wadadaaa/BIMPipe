@@ -3,12 +3,21 @@ import {
   isCellBlocked,
   cellCenter,
   probeContinuityCell,
+  probeStructureAlongAxis,
+  selectOfficeCoreShafts,
   type ContinuityMap,
+  type OfficeCoreShaftSelection,
   type PlanPoint,
   type ShaftCandidate,
   type StoreyObstructionGrid,
 } from './continuityMap'
-import type { Fixture, PlanBounds, StoreyId } from './types'
+import {
+  DEFAULT_BUILDING_TYPOLOGY,
+  TYPOLOGY_PLACEMENT_RULES,
+  type BuildingTypology,
+  type RowCollectorRules,
+} from './typology'
+import type { Fixture, FixtureKind, PlanBounds, StoreyId } from './types'
 
 /**
  * Wet cores and one-stack-per-core placement (V3).
@@ -44,6 +53,15 @@ import type { Fixture, PlanBounds, StoreyId } from './types'
  *  (d) CENTROID, FLAGGED — when a map covers the storey but every candidate
  *      within the snap distance is obstructed, the stack stays at the centroid
  *      and carries an explicit `flagged` reason for the UI. Never silent.
+ *
+ * OFFICE typology (G3, `typology: 'office'`, see `src/domain/typology.ts`):
+ * the chain is replaced by ONE rule — the nearest CORE shaft
+ * (`selectOfficeCoreShafts`: shaft-like slab openings within
+ * `OFFICE_CORE_RADIUS_M` of dense structure or a stair/lift void) within
+ * `MAX_SNAP_OFFICE_M` of the core footprint. No free-cell and no wall-side
+ * fallback: with no core shaft in range (or no continuity map at all) the
+ * stack stays at the centroid, FLAGGED, with the reason. Residential is the
+ * default and untouched.
  *
  * Kitchen areas are NOT clustered here: kitchen waste commonly runs in its own
  * stack, and kitchen areas are spaces rather than fixtures, so the caller keeps
@@ -290,6 +308,16 @@ export interface PlaceWetCoreStackOptions {
   floorPlanBounds?: PlanBounds | null
   /** Outward clearance for the wall-side-edge rule; defaults to the 150 mm pair. */
   wallClearance?: number
+  /**
+   * Building typology (G3). Omitted / 'residential' = the documented chain
+   * above; 'office' = core shafts only (flagged when none is in `maxSnap`).
+   */
+  typology?: BuildingTypology
+  /**
+   * Office only: the storey's core-shaft selection, precomputed by the caller
+   * so several cores of one storey share it. Computed here when omitted.
+   */
+  officeCoreShafts?: OfficeCoreShaftSelection | null
 }
 
 export function resolveWetCoreWallClearance(units: WetCorePlanUnits, override?: number): number {
@@ -300,6 +328,10 @@ export function resolveWetCoreWallClearance(units: WetCorePlanUnits, override?: 
 export function placeWetCoreStack(core: WetCore, options: PlaceWetCoreStackOptions): WetCoreStackPlacement {
   const map = options.continuityMap ?? null
   const structure = map === null ? null : describeStructureCoverage(map, core.storeyId, options.units)
+
+  if ((options.typology ?? DEFAULT_BUILDING_TYPOLOGY) === 'office') {
+    return placeOfficeCoreStack(core, options, map, structure)
+  }
 
   if (structure !== null && structure.usable) {
     // (a) shaft candidates work with or without an obstruction grid for the storey.
@@ -358,6 +390,303 @@ export function placeWetCoreStack(core: WetCore, options: PlaceWetCoreStackOptio
     flagged: false,
     reason: `${structureNote} and no storey plan bounds; stack left at the core centroid`,
   }
+}
+
+// ---------------------------------------------------------------------------
+// Office placement (G3): core shafts only
+// ---------------------------------------------------------------------------
+
+/**
+ * Office rule: nearest selected core shaft within `maxSnap` of the core
+ * footprint (centre cell, or the nearest free cell inside the shaft when its
+ * centre is blocked). Anything else is a FLAGGED centroid with the reason —
+ * never a wall-side guess, never a free cell in open floor.
+ */
+function placeOfficeCoreStack(
+  core: WetCore,
+  options: PlaceWetCoreStackOptions,
+  map: ContinuityMap | null,
+  structure: StructureCoverage | null,
+): WetCoreStackPlacement {
+  const snapText = formatLength(options.maxSnap, options.units)
+  if (map === null || structure === null) {
+    return {
+      rule: 'centroid',
+      position: { ...core.centroid },
+      flagged: true,
+      reason: 'office typology places stacks on core shafts only, but no continuity map is loaded; stack left at the core centroid',
+    }
+  }
+  if (!structure.usable) {
+    return {
+      rule: 'centroid',
+      position: { ...core.centroid },
+      flagged: true,
+      reason: `office typology places stacks on core shafts only, but ${structure.reason}; stack left at the core centroid`,
+    }
+  }
+  const coreShaftRules = TYPOLOGY_PLACEMENT_RULES.office.coreShafts!
+  const selection =
+    options.officeCoreShafts ?? selectOfficeCoreShafts(map, core.storeyId, coreShaftRules)
+  const selectedIds = new Set(selection.selected.map((candidate) => candidate.id))
+  const coreShaftMap: ContinuityMap = {
+    ...map,
+    shaftCandidates: map.shaftCandidates.filter((candidate) => selectedIds.has(candidate.id)),
+  }
+  const shaft = snapCoreToShaft(core, coreShaftMap, structure.grid, options.maxSnap)
+  if (shaft !== null && shaft.rule === 'shaft') {
+    const verdict = selection.candidates.find((entry) => entry.candidate.id === shaft.shaftId)
+    return {
+      ...shaft,
+      reason: `office: ${shaft.reason}${verdict === undefined ? '' : ` — ${verdict.reason}`}`,
+    }
+  }
+  const rejected = selection.candidates.filter((entry) => !entry.selected)
+  const notShaftLike = rejected.filter((entry) => !entry.shaftLike).length
+  const outsideCore = rejected.length - notShaftLike
+  const inRangeButBlocked = selection.selected.filter(
+    (candidate) => distanceFromBounds(core.bbox, candidate.center) <= options.maxSnap,
+  ).length
+  return {
+    rule: 'centroid',
+    position: { ...core.centroid },
+    flagged: true,
+    reason:
+      `office: no core shaft within ${snapText} of the core footprint ` +
+      `(${selection.selected.length} core shaft(s) on the storey${inRangeButBlocked > 0 ? `, ${inRangeButBlocked} in range but fully obstructed` : ''}; ` +
+      `${selection.candidates.length} shaft candidate(s) checked: ${notShaftLike} not shaft-like, ${outsideCore} outside the core` +
+      `${selection.denseClusters.length === 0 && selection.largeVoids.length === 0 ? '; no dense-structure cluster or stair/lift void found' : ''}); ` +
+      'stack left at the core centroid — needs a core shaft or a manual placement',
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Toilet rows (G3, office): ≥ 3 same-kind fixtures roughly collinear
+// ---------------------------------------------------------------------------
+
+export type FixtureRowSideReason = 'wall-cell' | 'plan-centre' | 'core-centroid' | 'default'
+
+/**
+ * A row of same-kind fixtures inside one wet core that drains through a
+ * collector running parallel to the row on its wall side. Plan axes as in
+ * `Fixture.position` (x across, z down-plan); lengths in `units`.
+ */
+export interface FixtureRow {
+  /** `row:<coreId>:<kind>:<axis>:<index>` — stable for the same members. */
+  id: string
+  coreId: string
+  storeyId: StoreyId
+  kind: FixtureKind
+  /** Axis the row runs along. */
+  axis: 'x' | 'z'
+  /** Members ordered along the row (ascending along-coordinate, then express id). */
+  memberExpressIds: number[]
+  /** Perpendicular coordinate of the row line (mean of the member centres). */
+  lineCoord: number
+  /** Perpendicular coordinate of the collector line: `lineCoord + side × offset`. */
+  collectorLineCoord: number
+  /** Direction from the row toward the collector along the perpendicular axis. */
+  side: 1 | -1
+  sideReason: FixtureRowSideReason
+  /** Extent of the members along the row axis. */
+  alongMin: number
+  alongMax: number
+  /** Largest gap between neighbouring members along the row. */
+  maxSpacing: number
+  units: WetCorePlanUnits
+  reason: string
+}
+
+export interface DetectFixtureRowsOptions {
+  units: WetCorePlanUnits
+  /** Row rules in METRES (converted to `units`); defaults to the office table. */
+  rules?: RowCollectorRules
+  /** Continuity map for the wall-side decision (wall/column cells); optional. */
+  continuityMap?: ContinuityMap | null
+  /** Storey plan bounds for the plan-centre fallback; optional. */
+  floorPlanBounds?: PlanBounds | null
+}
+
+/**
+ * Detects rows inside a wet core: for every fixture kind with ≥ `minFixtures`
+ * members, fixtures whose centres scatter ≤ `collinearityTolerance` around a
+ * line parallel to a plan axis and whose neighbours along that line are ≤
+ * `maxSpacing` apart. Each fixture joins at most one row (larger rows first,
+ * x-rows before z-rows, then lower along-coordinate). The collector sits on
+ * the wall side: the core-bbox edge (perpendicular to the row) nearest a
+ * wall/column cell of the continuity grid within `wallSearch`; else the side
+ * away from the storey plan centre; else away from the core centroid; else +.
+ * Pure and deterministic.
+ */
+export function detectFixtureRows(core: WetCore, options: DetectFixtureRowsOptions): FixtureRow[] {
+  const rules = options.rules ?? TYPOLOGY_PLACEMENT_RULES.office.rowCollectors!
+  const scale = options.units === 'mm' ? 1000 : 1
+  const tolerance = rules.collinearityToleranceM * scale
+  const maxSpacing = rules.maxSpacingM * scale
+  const offset = rules.collectorOffsetM * scale
+  const wallSearch = rules.wallSearchM * scale
+
+  const byKind = new Map<FixtureKind, PositionedFixture[]>()
+  for (const member of core.members) {
+    const list = byKind.get(member.kind)
+    if (list === undefined) byKind.set(member.kind, [member as PositionedFixture])
+    else list.push(member as PositionedFixture)
+  }
+
+  interface RowCandidate {
+    kind: FixtureKind
+    axis: 'x' | 'z'
+    members: PositionedFixture[]
+    lineCoord: number
+    alongMin: number
+    alongMax: number
+    maxSpacing: number
+  }
+  const candidates: RowCandidate[] = []
+  for (const kind of [...byKind.keys()].sort()) {
+    const members = byKind.get(kind)!
+    if (members.length < rules.minFixtures) continue
+    for (const axis of ['x', 'z'] as const) {
+      const perp = (fixture: PositionedFixture) => (axis === 'x' ? fixture.position.z : fixture.position.x)
+      const along = (fixture: PositionedFixture) => (axis === 'x' ? fixture.position.x : fixture.position.z)
+      const byPerp = [...members].sort((a, b) => perp(a) - perp(b) || a.expressId - b.expressId)
+      // Cluster on the perpendicular coordinate (running mean within tolerance).
+      const clusters: PositionedFixture[][] = []
+      for (const fixture of byPerp) {
+        const current = clusters[clusters.length - 1]
+        if (current !== undefined) {
+          const mean = current.reduce((sum, f) => sum + perp(f), 0) / current.length
+          if (Math.abs(perp(fixture) - mean) <= tolerance) {
+            current.push(fixture)
+            continue
+          }
+        }
+        clusters.push([fixture])
+      }
+      for (const cluster of clusters) {
+        const ordered = [...cluster].sort((a, b) => along(a) - along(b) || a.expressId - b.expressId)
+        let run: PositionedFixture[] = []
+        const flush = () => {
+          if (run.length >= rules.minFixtures) {
+            let spacing = 0
+            for (let i = 1; i < run.length; i++) spacing = Math.max(spacing, along(run[i]) - along(run[i - 1]))
+            candidates.push({
+              kind,
+              axis,
+              members: run,
+              lineCoord: run.reduce((sum, f) => sum + perp(f), 0) / run.length,
+              alongMin: along(run[0]),
+              alongMax: along(run[run.length - 1]),
+              maxSpacing: spacing,
+            })
+          }
+          run = []
+        }
+        for (const fixture of ordered) {
+          if (run.length > 0 && along(fixture) - along(run[run.length - 1]) > maxSpacing) flush()
+          run.push(fixture)
+        }
+        flush()
+      }
+    }
+  }
+
+  candidates.sort(
+    (a, b) =>
+      b.members.length - a.members.length ||
+      (a.axis === b.axis ? 0 : a.axis === 'x' ? -1 : 1) ||
+      a.alongMin - b.alongMin ||
+      a.lineCoord - b.lineCoord ||
+      a.kind.localeCompare(b.kind),
+  )
+
+  const used = new Set<number>()
+  const rows: FixtureRow[] = []
+  const grid = resolveGrid(options.continuityMap ?? null, core.storeyId, options.units)
+  for (const candidate of candidates) {
+    if (candidate.members.some((member) => used.has(member.expressId))) continue
+    for (const member of candidate.members) used.add(member.expressId)
+    const side = chooseRowCollectorSide(core, candidate, grid, wallSearch, options.floorPlanBounds ?? null)
+    const index = rows.filter((row) => row.kind === candidate.kind && row.axis === candidate.axis).length
+    rows.push({
+      id: `row:${core.id}:${candidate.kind}:${candidate.axis}:${index}`,
+      coreId: core.id,
+      storeyId: core.storeyId,
+      kind: candidate.kind,
+      axis: candidate.axis,
+      memberExpressIds: candidate.members.map((member) => member.expressId),
+      lineCoord: candidate.lineCoord,
+      collectorLineCoord: candidate.lineCoord + side.side * offset,
+      side: side.side,
+      sideReason: side.reason,
+      alongMin: candidate.alongMin,
+      alongMax: candidate.alongMax,
+      maxSpacing: candidate.maxSpacing,
+      units: options.units,
+      reason:
+        `${candidate.members.length} ${candidate.kind} in a row along ${candidate.axis} ` +
+        `(${formatLength(candidate.alongMax - candidate.alongMin, options.units)} long, max spacing ${formatLength(candidate.maxSpacing, options.units)}); ` +
+        `collector ${formatLength(offset, options.units)} on the ${side.side > 0 ? '+' : '−'}${candidate.axis === 'x' ? 'z' : 'x'} side — ${side.text}`,
+    })
+  }
+  return rows
+}
+
+function resolveGrid(map: ContinuityMap | null, storeyId: StoreyId, units: WetCorePlanUnits): StoreyObstructionGrid | null {
+  if (map === null || map.units !== units) return null
+  const grid = map.grids.find((candidate) => candidate.storeyId === storeyId)
+  return grid !== undefined && grid.columns > 0 && grid.rows > 0 ? grid : null
+}
+
+/**
+ * Wall side of a row: probe outward from both core-bbox edges perpendicular
+ * to the row (at every member's along-coordinate) for the nearest wall/column
+ * cell; the edge with the nearer hit wins. Fallbacks in order: away from the
+ * storey plan centre, away from the core centroid, +.
+ */
+function chooseRowCollectorSide(
+  core: WetCore,
+  row: { axis: 'x' | 'z'; lineCoord: number; members: PositionedFixture[] },
+  grid: StoreyObstructionGrid | null,
+  wallSearch: number,
+  floorPlanBounds: PlanBounds | null,
+): { side: 1 | -1; reason: FixtureRowSideReason; text: string } {
+  const perpAxis: 'x' | 'z' = row.axis === 'x' ? 'z' : 'x'
+  if (grid !== null) {
+    // Probe from the row line itself (not the core bbox edge) so a second row
+    // inside the same core is not pulled towards the first row's wall. For a
+    // single row the line and the bbox edge coincide. A tie (the fixtures sit
+    // inside a wall cell themselves) falls through to the geometric rules.
+    let nearestMinus: number | null = null
+    let nearestPlus: number | null = null
+    for (const member of row.members) {
+      const along = row.axis === 'x' ? member.position.x : member.position.z
+      const origin: PlanPoint = perpAxis === 'z' ? { x: along, z: row.lineCoord } : { x: row.lineCoord, z: along }
+      const minus = probeStructureAlongAxis(grid, origin, perpAxis, -1, wallSearch)
+      const plus = probeStructureAlongAxis(grid, origin, perpAxis, 1, wallSearch)
+      if (minus !== null && (nearestMinus === null || minus < nearestMinus)) nearestMinus = minus
+      if (plus !== null && (nearestPlus === null || plus < nearestPlus)) nearestPlus = plus
+    }
+    if (nearestMinus !== null && (nearestPlus === null || nearestMinus < nearestPlus)) {
+      return { side: -1, reason: 'wall-cell', text: `wall cell ${nearestMinus.toFixed(2)} beyond the row on the ${perpAxis === 'z' ? 'minZ' : 'minX'} edge` }
+    }
+    if (nearestPlus !== null && (nearestMinus === null || nearestPlus < nearestMinus)) {
+      return { side: 1, reason: 'wall-cell', text: `wall cell ${nearestPlus.toFixed(2)} beyond the row on the ${perpAxis === 'z' ? 'maxZ' : 'maxX'} edge` }
+    }
+  }
+  if (floorPlanBounds !== null && isFiniteBounds(floorPlanBounds)) {
+    const centre = perpAxis === 'z' ? (floorPlanBounds.minZ + floorPlanBounds.maxZ) / 2 : (floorPlanBounds.minX + floorPlanBounds.maxX) / 2
+    if (row.lineCoord !== centre) {
+      const side: 1 | -1 = row.lineCoord > centre ? 1 : -1
+      return { side, reason: 'plan-centre', text: `no wall cell within reach${grid === null ? ' (no grid)' : ''}; side away from the storey plan centre` }
+    }
+  }
+  const centroid = perpAxis === 'z' ? core.centroid.z : core.centroid.x
+  if (row.lineCoord !== centroid) {
+    const side: 1 | -1 = row.lineCoord > centroid ? 1 : -1
+    return { side, reason: 'core-centroid', text: 'no wall cell and no plan bounds; side away from the core centroid' }
+  }
+  return { side: 1, reason: 'default', text: 'no wall cell, no plan bounds and the row is at the core centre; + side by convention' }
 }
 
 type StructureCoverage =
