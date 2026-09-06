@@ -1,3 +1,30 @@
+# Goal 4 — gauntlet: blind A/B against the engineer's drawing (096 storey 01 residential, second project MEP storey office)
+
+Branch: `goal/gauntlet-ab` (off `main` @ `a334168`) · Started: 2026-09-06 · Status legend: ⏳ pending · 🔄 in progress · ✅ done · ⛔ blocked
+
+Privacy rule: `external/` and `refs/` are never committed. Per-round renderings, critic transcripts and the progress page live under `external/gauntlet/` (gitignored). This file records only round numbers, metrics and verdict counts.
+
+| Task | Status | Notes |
+| --- | --- | --- |
+| G0 — Branch, `FloorDrawingModel` contract (`src/domain/drawing/floorDrawingModel.ts`) | ✅ | shared renderer input for our suggestion and the engineer network |
+| G1 — Drawing renderer (pure model → SVG/PNG), style-critic calibration vs reference sheet, "Drawing preview" export in Risers panel | ⏳ | |
+| G2 — Engineer floor adapter: storey-scoped stacks + SW-GRV branches, ø, slopes from invert elevations → `FloorDrawingModel`; our-suggestion adapter | ⏳ | |
+| G3 — Typology switch residential \| office on upload; office placement (core shafts only, row collectors, raised branch limit placeholder) | ⏳ | |
+| G4 — Gauntlet harness: hard metrics, anonymized A/B pairs, fresh-context critic protocol, per-round log under `external/gauntlet/` | ⏳ | after G1–G3 |
+| G5 — Round loop (≤ 12 rounds, both floors every round) | ⏳ | stop at ≤ 6/10 engineer preferences on both floors |
+| G6 — Gated tests pinning final metrics, final gate, push | ⏳ | |
+
+## Goal 4 round table
+
+| Round | Floor | Obstruction | Stacks ours/eng | Mean dist to eng stack (m) | Branch ratio | Routed | Metrics | Critic: engineer preferred (of 10) | Gap named |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+
+## Goal 4 milestones
+
+(entries are appended per task as they land)
+
+---
+
 # Goal 3 — real floors: tower recovery, wet-core placement, routing (V0–V7)
 
 Branch: `goal/real-floors-v0-v7` (off `main` after the goal-2 merge) · Started: 2026-09-03 · Status legend: ⏳ pending · 🔄 in progress · ✅ done · ⛔ blocked
