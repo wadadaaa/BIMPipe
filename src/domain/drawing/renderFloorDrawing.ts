@@ -72,14 +72,20 @@ export function renderFloorDrawingSvg(
   parts.push(`</g>`)
 
   const pipes = sortPipes(model.pipes)
-  parts.push(`<g id="pipes">`)
-  for (const pipe of pipes) parts.push(renderPipeBand(pipe, frame))
-  parts.push(`</g>`)
-  parts.push(`<g id="fittings">${renderFittings(pipes, model.risers, frame)}</g>`)
-
+  const fittings = deriveFittings(pipes, model.risers, frame)
+  // Sleeves sit UNDER the bands: the pipe reads through the box.
   parts.push(`<g id="sleeves">`)
   for (const sleeve of sortById(sleeves)) parts.push(renderSleeve(sleeve, frame))
   parts.push(`</g>`)
+  // Elbow quarter-rounds sit UNDER the bands: only the outer corner shows.
+  parts.push(`<g id="elbows">${fittings.elbows}</g>`)
+  // Fitting bodies first (one outline around all the pieces of a body), then
+  // the runs, whose square ends cover the port side of a body.
+  parts.push(`<g id="fitting-bodies">${renderFittingBodies(pipes.filter((pipe) => pipe.fitting), frame)}</g>`)
+  parts.push(`<g id="pipes">`)
+  for (const pipe of pipes) if (!pipe.fitting) parts.push(renderPipeBand(pipe, frame))
+  parts.push(`</g>`)
+  parts.push(`<g id="fittings">${fittings.jointLines}</g>`)
 
   const risers = sortById(model.risers)
   parts.push(`<g id="stacks">`)
@@ -96,14 +102,18 @@ export function renderFloorDrawingSvg(
   const bandBoxesByPipe = new Map(pipes.map((pipe) => [pipe.id, pipeBoxes(pipe, frame)]))
   const labelBoxes: Quad[] = []
   parts.push(`<g id="pipe-labels" fill="${TEXT_STYLE.colour}">`)
-  for (const pipe of pipes) {
+  // One label per straight line: collinear, connected pieces of one run (a
+  // collector cut at every tee) are labelled once, as on the sheet.
+  for (const chain of labelChains(pipes)) {
+    const pipe = chainRun(chain)
+    const members = new Set(chain.map((piece) => piece.id))
     // Bands of other runs block the label, except the stretch of a connected
     // run right at the junction (tee, elbow, collector): a short branch label
     // may overhang its own junction the way the sheet's fixture-connection
     // labels do, but never run across the rest of another pipe.
     const junctionReach = frame.mm(JUNCTION_LABEL_REACH_MM)
     const otherBands = pipes.flatMap((other) => {
-      if (other.id === pipe.id) return []
+      if (members.has(other.id)) return []
       const boxes = bandBoxesByPipe.get(other.id) ?? []
       const junctions = junctionPoints(pipe, other).map((point) => frame.toSvg(point))
       if (junctions.length === 0) return boxes
@@ -245,7 +255,12 @@ function renderFixture(fixture: DrawingFixture, frame: Frame): string {
   const w = widthM * frame.pxPerM
   const d = depthM * frame.pxPerM
   const centre = frame.toSvg(fixture.centre)
-  const stroke = `fill="${UNDERLAY_STYLE.fixtureFill}" stroke="${UNDERLAY_STYLE.fixtureStroke}" stroke-width="${fmt(frame.mm(UNDERLAY_STYLE.fixtureStrokeMm))}"`
+  // WC: plumbing family (dark hairline, white). Others: architect underlay.
+  const plumbing = fixture.kind === 'toilet'
+  const stroke =
+    `fill="${plumbing ? UNDERLAY_STYLE.fixtureFill : UNDERLAY_STYLE.architectFixtureFill}" ` +
+    `stroke="${plumbing ? UNDERLAY_STYLE.fixtureStroke : UNDERLAY_STYLE.architectFixtureStroke}" ` +
+    `stroke-width="${fmt(frame.mm(UNDERLAY_STYLE.fixtureStrokeMm))}"`
   const body = fixtureSymbol(fixture.kind, w, d)
   return `<g transform="translate(${fmt(centre.x)} ${fmt(centre.y)}) scale(1 -1) rotate(${fmt(fixture.rotationDeg)})" ${stroke} data-fixture="${escapeXml(fixture.id)}">${body}</g>`
 }
@@ -263,29 +278,42 @@ function fixtureSizeM(fixture: DrawingFixture): { widthM: number; depthM: number
 }
 
 function fixtureSymbol(kind: DrawingFixture['kind'], w: number, d: number): string {
-  const rect = (x: number, y: number, rw: number, rh: number, rx = 0) =>
-    `<rect x="${fmt(x)}" y="${fmt(y)}" width="${fmt(rw)}" height="${fmt(rh)}"${rx > 0 ? ` rx="${fmt(rx)}"` : ''}/>`
+  const rect = (x: number, y: number, rw: number, rh: number, rx = 0, extra = '') =>
+    `<rect x="${fmt(x)}" y="${fmt(y)}" width="${fmt(rw)}" height="${fmt(rh)}"${rx > 0 ? ` rx="${fmt(rx)}"` : ''}${extra}/>`
   const ellipse = (cx: number, cy: number, rx: number, ry: number) =>
     `<ellipse cx="${fmt(cx)}" cy="${fmt(cy)}" rx="${fmt(rx)}" ry="${fmt(ry)}"/>`
   const circle = (cx: number, cy: number, r: number) => `<circle cx="${fmt(cx)}" cy="${fmt(cy)}" r="${fmt(r)}"/>`
   switch (kind) {
     case 'toilet': {
-      const cisternD = d * 0.26
-      const bowlCy = -d / 2 + cisternD + (d - cisternD) / 2
+      // The sheet's WC (plumbing fixture family, S1-3 at 220 dpi: 57 × 33 px
+      // for a 0.66 × 0.38 m WC): a rounded cistern box ~0.21 of the length,
+      // then a bullet-shaped bowl — full width at the round front, narrowing to
+      // ~0.72 of the width where it meets the cistern — drawn as a double
+      // outline (rim ≈ 2 px ≈ 0.06 of the width); the group's fill is none.
+      const cisternD = d * 0.21
+      const yBack = -d / 2 + cisternD
+      const rim = w * 0.06
+      const bowl = (halfW: number, halfBack: number, back: number, front: number) => {
+        const r = halfW
+        const yc = front - r
+        return `<path d="M${fmt(-halfBack)} ${fmt(back)}L${fmt(-halfW)} ${fmt(yc)}A${fmt(r)} ${fmt(r)} 0 0 0 ${fmt(halfW)} ${fmt(yc)}L${fmt(halfBack)} ${fmt(back)}Z"/>`
+      }
       return (
-        rect(-w / 2, -d / 2, w, cisternD) +
-        ellipse(0, bowlCy, w * 0.42, (d - cisternD) / 2) +
-        ellipse(0, bowlCy + d * 0.03, w * 0.3, (d - cisternD) * 0.34)
+        rect(-w * 0.45, -d / 2, w * 0.9, cisternD, cisternD * 0.15) +
+        bowl(w / 2, w * 0.36, yBack, d / 2) +
+        bowl(w / 2 - rim, w * 0.36 - rim, yBack + rim, d / 2 - rim)
       )
     }
     case 'bidet': {
       return ellipse(0, 0, w / 2, d / 2) + ellipse(0, d * 0.05, w * 0.34, d * 0.34)
     }
     case 'basin':
+      // Sheet (architect underlay): rounded counter with an oval bowl nearly
+      // as wide as the counter, and a small drain circle.
       return (
         rect(-w / 2, -d / 2, w, d, w * 0.15) +
-        rect(-w * 0.4, -d * 0.36, w * 0.8, d * 0.7, w * 0.14) +
-        circle(0, -d * 0.08, w * 0.04)
+        ellipse(0, d * 0.02, w * 0.4, d * 0.34) +
+        circle(0, -d * 0.06, w * 0.04)
       )
     case 'sink':
       return (
@@ -331,84 +359,155 @@ function pipeDiameterMm(pipe: DrawingPipeRun): number {
   return pipe.diameterMm ?? PIPE_STYLE.fallbackDiameterMm[pipe.role]
 }
 
-function pipeBandPx(pipe: DrawingPipeRun, frame: Frame): { band: number; edge: number } {
+/**
+ * Band metrics in px: `band` is the true-scale width (the outline the edge
+ * hairlines are centred on), `edge` the hairline weight. The dark stroke is
+ * `band + edge` wide and the fill `band - edge`, so each edge straddles the
+ * true-scale outline the way the sheet's does.
+ */
+function pipeBandPx(pipe: DrawingPipeRun, frame: Frame): { band: number; edge: number; outer: number; inner: number } {
   const band = frame.mm(pipeBandWidthMm(pipeDiameterMm(pipe), frame.scale))
-  const edge = frame.mm(pipe.role === 'collector' ? PIPE_STYLE.collectorEdgeMm : PIPE_STYLE.edgeMm)
-  return { band, edge }
+  const edge = frame.mm(PIPE_STYLE.edgeMm)
+  return { band, edge, outer: band + edge, inner: Math.max(band * 0.4, band - edge) }
+}
+
+function pipeLineAttrs(pipe: DrawingPipeRun, frame: Frame): string | null {
+  const a = frame.toSvg(pipe.start)
+  const b = frame.toSvg(pipe.end)
+  if (!(Math.hypot(b.x - a.x, b.y - a.y) > 0)) return null
+  return `x1="${fmt(a.x)}" y1="${fmt(a.y)}" x2="${fmt(b.x)}" y2="${fmt(b.y)}"`
 }
 
 function renderPipeBand(pipe: DrawingPipeRun, frame: Frame): string {
-  const a = frame.toSvg(pipe.start)
-  const b = frame.toSvg(pipe.end)
-  if (!(Math.hypot(b.x - a.x, b.y - a.y) > 0)) return ''
+  const line = pipeLineAttrs(pipe, frame)
+  if (line === null) return ''
   const style = PIPE_SYSTEM_STYLE[pipe.system]
-  const { band, edge } = pipeBandPx(pipe, frame)
-  const line = `x1="${fmt(a.x)}" y1="${fmt(a.y)}" x2="${fmt(b.x)}" y2="${fmt(b.y)}"`
-  // A fitting-body piece is capped round so the connectors of one body close
-  // their corner (elbow, tee) instead of leaving a mitre notch; pipes are drawn
-  // after connectors (id order) and their square ends cover the port side.
-  const linecap = pipe.fitting ? 'round' : 'butt'
-  const fittingAttr = pipe.fitting ? ' data-fitting="true"' : ''
+  const { outer, inner } = pipeBandPx(pipe, frame)
   return [
-    `<g data-pipe="${escapeXml(pipe.id)}" data-role="${pipe.role}"${fittingAttr} stroke-linecap="${linecap}">`,
-    // Edges sit inside the true-scale band so the overall width stays ø / scale.
-    `<line ${line} stroke="${style.edge}" stroke-width="${fmt(band)}"/>`,
-    `<line ${line} stroke="${style.fill}" stroke-width="${fmt(Math.max(band * 0.4, band - 2 * edge))}"/>`,
+    `<g data-pipe="${escapeXml(pipe.id)}" data-role="${pipe.role}" stroke-linecap="butt">`,
+    `<line ${line} stroke="${style.edge}" stroke-width="${fmt(outer)}"/>`,
+    `<line ${line} stroke="${style.fill}" stroke-width="${fmt(inner)}"/>`,
     `</g>`,
   ].join('')
 }
 
 /**
- * Fitting symbols at run ends: a hub ring where a run meets another run or a
- * stack (tee, elbow, stack entry) and a short collar at a free end (fixture
- * connection). Purely derived from geometry, so adapters need not model fittings.
+ * Fitting-body connectors (`fitting: true`) are drawn as ONE body: every
+ * piece's dark edge first, then every piece's fill, round-capped, so the fill
+ * union hides the seams between the pieces and only the outer outline shows —
+ * the sheet's elbow reads as a smooth mitred body, not a string of beads
+ * (S1-2: the per-piece edge+fill order left dark arcs inside each corner).
  */
-function renderFittings(pipes: readonly DrawingPipeRun[], risers: readonly DrawingRiser[], frame: Frame): string {
+function renderFittingBodies(pieces: readonly DrawingPipeRun[], frame: Frame): string {
+  const edges: string[] = []
+  const fills: string[] = []
+  for (const pipe of pieces) {
+    const line = pipeLineAttrs(pipe, frame)
+    if (line === null) continue
+    const style = PIPE_SYSTEM_STYLE[pipe.system]
+    const { outer, inner } = pipeBandPx(pipe, frame)
+    edges.push(`<line ${line} stroke="${style.edge}" stroke-width="${fmt(outer)}"/>`)
+    fills.push(
+      `<line ${line} stroke="${style.fill}" stroke-width="${fmt(inner)}" data-pipe="${escapeXml(pipe.id)}" data-role="${pipe.role}" data-fitting="true"/>`,
+    )
+  }
+  if (edges.length === 0) return ''
+  return `<g stroke-linecap="round">${edges.join('')}${fills.join('')}</g>`
+}
+
+/**
+ * Fitting marks derived from run geometry, so adapters need not model them:
+ *
+ * - a free run end (fixture connection) closes the band with a dark line
+ *   across it, the way the sheet's pipe outlines are closed;
+ * - a run end entering a fitting body (a port) gets the same line across the
+ *   run's band — the sheet marks every pipe-to-fitting joint this way;
+ * - an elbow — exactly two run ends meeting where no other run passes — gets
+ *   a disc of the band's own width under the bands, so the outer corner reads
+ *   as a quarter-round instead of a mitre notch;
+ * - tees and stack entries get nothing: the through run's edge (or the stack
+ *   disc) already reads as the joint.
+ *
+ * Fitting-body connectors (`fitting: true`) are drawn as one round-capped body
+ * (`renderFittingBodies`), so their own ends emit no mark.
+ */
+function deriveFittings(
+  pipes: readonly DrawingPipeRun[],
+  risers: readonly DrawingRiser[],
+  frame: Frame,
+): { elbows: string; jointLines: string } {
   const tol = PIPE_STYLE.junctionToleranceM
-  type Collar = { point: DrawingPointM; angleDeg: number; band: number; system: DrawingPipeRun['system'] }
-  const hubs = new Map<string, Collar>()
-  const sockets: Collar[] = []
+  type RunEnd = { pipe: DrawingPipeRun; point: DrawingPointM; angleDeg: number }
+  const keyOf = (point: DrawingPointM) => `${Math.round(point.xM / tol)}|${Math.round(point.yM / tol)}`
+  const endsByPoint = new Map<string, RunEnd[]>()
   for (const pipe of pipes) {
-    // A connector's ends are the body origin and a port: the collar belongs to
-    // the pipe end that enters the body, so connectors emit none.
-    if (pipe.fitting) continue
-    const { band } = pipeBandPx(pipe, frame)
     const dx = pipe.end.xM - pipe.start.xM
     const dy = pipe.end.yM - pipe.start.yM
-    const length = Math.hypot(dx, dy)
-    if (!(length > 0)) continue
-    for (const [end, sign] of [
+    if (!(Math.hypot(dx, dy) > 0)) continue
+    for (const [point, sign] of [
       [pipe.start, 1],
       [pipe.end, -1],
     ] as const) {
-      // Collar pointing from the run end back along the run (SVG angle, y down).
+      // Direction from the run end back along the run (SVG angle, y down).
       const angleDeg = (Math.atan2(-dy * sign, dx * sign) * 180) / Math.PI
-      const collar: Collar = { point: end, angleDeg, band, system: pipe.system }
-      const touchesRun = pipes.some((other) => other.id !== pipe.id && distanceToSegmentM(end, other) <= tol)
-      const touchesStack = risers.some((riser) => Math.hypot(riser.centre.xM - end.xM, riser.centre.yM - end.yM) <= tol)
-      if (touchesRun || touchesStack) {
-        // One hub per junction point, drawn on the narrowest run entering it
-        // (the branch), the way a tee's socket sits on the branch side.
-        const key = `${Math.round(end.xM / tol)}|${Math.round(end.yM / tol)}`
-        const existing = hubs.get(key)
-        if (existing === undefined || existing.band > band) hubs.set(key, collar)
-      } else {
-        sockets.push(collar)
-      }
+      const key = keyOf(point)
+      const list = endsByPoint.get(key) ?? []
+      list.push({ pipe, point, angleDeg })
+      endsByPoint.set(key, list)
     }
   }
-  const hubKeys = [...hubs.keys()].sort()
-  const parts = hubKeys.map((key) => renderCollar(hubs.get(key) as Collar, PIPE_STYLE.hubWidthFactor, PIPE_STYLE.hubLengthFactor, frame))
-  for (const socket of sockets) parts.push(renderCollar(socket, PIPE_STYLE.socketWidthFactor, PIPE_STYLE.socketLengthFactor, frame))
-  return parts.join('')
 
-  function renderCollar(collar: Collar, widthFactor: number, lengthFactor: number, frame: Frame): string {
-    const style = PIPE_SYSTEM_STYLE[collar.system]
-    const c = frame.toSvg(collar.point)
-    const w = collar.band * widthFactor
-    const l = collar.band * lengthFactor
-    return `<rect x="0" y="${fmt(-w / 2)}" width="${fmt(l)}" height="${fmt(w)}" transform="translate(${fmt(c.x)} ${fmt(c.y)}) rotate(${fmt(collar.angleDeg)})" fill="${style.fill}" stroke="${style.edge}" stroke-width="${fmt(frame.mm(PIPE_STYLE.edgeMm))}"/>`
+  const elbows: string[] = []
+  const jointLines: string[] = []
+  const endTransform = (end: RunEnd) => {
+    const c = frame.toSvg(end.point)
+    return `transform="translate(${fmt(c.x)} ${fmt(c.y)}) rotate(${fmt(end.angleDeg)})"`
   }
+  const jointLine = (end: RunEnd, kind: 'end' | 'port') => {
+    const style = PIPE_SYSTEM_STYLE[end.pipe.system]
+    const half = pipeBandPx(end.pipe, frame).outer / 2
+    return `<line x1="0" y1="${fmt(-half)}" x2="0" y2="${fmt(half)}" ${endTransform(end)} stroke="${style.edge}" stroke-width="${fmt(frame.mm(PIPE_STYLE.jointLineMm))}" data-joint="${kind}"/>`
+  }
+  // Free end: a socket a little proud of the band, closed by a line at each
+  // end (the outline's far side and the joint line at the inner one).
+  const socket = (end: RunEnd) => {
+    const style = PIPE_SYSTEM_STYLE[end.pipe.system]
+    const { outer, edge } = pipeBandPx(end.pipe, frame)
+    const half = outer / 2 + frame.mm(PIPE_STYLE.socketFlareMm)
+    const length = frame.mm(PIPE_STYLE.socketLengthMm)
+    return (
+      `<rect x="0" y="${fmt(-half)}" width="${fmt(length)}" height="${fmt(half * 2)}" ${endTransform(end)} fill="${style.fill}" stroke="${style.edge}" stroke-width="${fmt(edge)}" data-socket="end"/>` +
+      `<line x1="${fmt(length)}" y1="${fmt(-half)}" x2="${fmt(length)}" y2="${fmt(half)}" ${endTransform(end)} stroke="${style.edge}" stroke-width="${fmt(frame.mm(PIPE_STYLE.jointLineMm))}" data-joint="end"/>`
+    )
+  }
+  for (const key of [...endsByPoint.keys()].sort()) {
+    const ends = endsByPoint.get(key) as RunEnd[]
+    const point = ends[0].point
+    const touchesStack = risers.some((riser) => Math.hypot(riser.centre.xM - point.xM, riser.centre.yM - point.yM) <= tol)
+    const passingRun = pipes.some(
+      (other) => !ends.some((end) => end.pipe.id === other.id) && distanceToSegmentM(point, other) <= tol,
+    )
+    if (touchesStack || passingRun) continue
+    const runEnds = ends.filter((end) => !end.pipe.fitting)
+    const bodyEnds = ends.length - runEnds.length
+    if (ends.length === 1) {
+      if (runEnds.length === 1) jointLines.push(socket(runEnds[0]))
+    } else if (bodyEnds > 0) {
+      // Port(s) of a fitting body: mark each run entering it.
+      for (const end of runEnds) jointLines.push(jointLine(end, 'port'))
+    } else if (ends.length === 2) {
+      // Corner of the narrower run (the branch turns into the collector).
+      const narrow = ends.map((end) => end.pipe).sort((a, b) => pipeBandPx(a, frame).band - pipeBandPx(b, frame).band)[0]
+      const { band, edge } = pipeBandPx(narrow, frame)
+      const style = PIPE_SYSTEM_STYLE[narrow.system]
+      const c = frame.toSvg(point)
+      // Stroke centred on the true-scale outline, like the band's edges.
+      elbows.push(
+        `<circle cx="${fmt(c.x)}" cy="${fmt(c.y)}" r="${fmt(band / 2)}" fill="${style.fill}" stroke="${style.edge}" stroke-width="${fmt(edge)}"/>`,
+      )
+    }
+  }
+  return { elbows: elbows.join(''), jointLines: jointLines.join('') }
 }
 
 /** Points where an end of either run lies on the other run (tee, elbow, wye). */
@@ -451,6 +550,80 @@ const MAX_LABEL_OVERHANG = 1.3
 /** How far along a connected run (from the junction) a label may overhang it (paper mm). */
 const JUNCTION_LABEL_REACH_MM = 7
 
+/** Two run directions within this angle are collinear for labelling (degrees). */
+const CHAIN_ANGLE_TOLERANCE_DEG = 1
+
+/**
+ * Groups runs into label chains: pieces of one straight line that touch end to
+ * end and carry the same system, ø and slope (a collector cut at each tee, a
+ * branch split at a sleeve, the first piece before the first tee whatever its
+ * role). The sheet labels such a line once. Order is the pipes' order (chains
+ * keep the position of their first piece), so output stays deterministic.
+ */
+function labelChains(pipes: readonly DrawingPipeRun[]): DrawingPipeRun[][] {
+  const tol = PIPE_STYLE.junctionToleranceM
+  const runs = pipes.filter((pipe) => !pipe.fitting && Math.hypot(pipe.end.xM - pipe.start.xM, pipe.end.yM - pipe.start.yM) > 0)
+  const parent = new Map<string, string>(runs.map((run) => [run.id, run.id]))
+  const find = (id: string): string => {
+    const p = parent.get(id) as string
+    if (p === id) return id
+    const root = find(p)
+    parent.set(id, root)
+    return root
+  }
+  const touches = (a: DrawingPipeRun, b: DrawingPipeRun) =>
+    [a.start, a.end].some((p) => [b.start, b.end].some((q) => Math.hypot(p.xM - q.xM, p.yM - q.yM) <= tol))
+  const sameLine = (a: DrawingPipeRun, b: DrawingPipeRun) => {
+    const angleA = Math.atan2(a.end.yM - a.start.yM, a.end.xM - a.start.xM)
+    const angleB = Math.atan2(b.end.yM - b.start.yM, b.end.xM - b.start.xM)
+    let delta = Math.abs(angleA - angleB) % Math.PI
+    delta = Math.min(delta, Math.PI - delta)
+    if (delta > (CHAIN_ANGLE_TOLERANCE_DEG * Math.PI) / 180) return false
+    // b's far end must lie on a's line (not only share the junction point).
+    const ux = Math.cos(angleA)
+    const uy = Math.sin(angleA)
+    return [b.start, b.end].every((p) => Math.abs((p.xM - a.start.xM) * uy - (p.yM - a.start.yM) * ux) <= tol)
+  }
+  for (let i = 0; i < runs.length; i++) {
+    for (let j = i + 1; j < runs.length; j++) {
+      const a = runs[i]
+      const b = runs[j]
+      if (a.system !== b.system || a.diameterMm !== b.diameterMm || a.slopePercent !== b.slopePercent) continue
+      if (!touches(a, b) || !sameLine(a, b)) continue
+      parent.set(find(b.id), find(a.id))
+    }
+  }
+  const chains = new Map<string, DrawingPipeRun[]>()
+  for (const run of runs) {
+    const root = find(run.id)
+    const chain = chains.get(root) ?? []
+    chain.push(run)
+    chains.set(root, chain)
+  }
+  return [...chains.values()]
+}
+
+/**
+ * The straight line a chain covers, as one run carrying the first piece's
+ * identity; a collector anywhere in the chain makes the line a collector.
+ */
+function chainRun(chain: readonly DrawingPipeRun[]): DrawingPipeRun {
+  const first = chain[0]
+  if (chain.length === 1) return first
+  const role = chain.some((piece) => piece.role === 'collector') ? 'collector' : first.role
+  const ux = first.end.xM - first.start.xM
+  const uy = first.end.yM - first.start.yM
+  const along = (p: DrawingPointM) => (p.xM - first.start.xM) * ux + (p.yM - first.start.yM) * uy
+  const points = chain.flatMap((piece) => [piece.start, piece.end])
+  let start = first.start
+  let end = first.end
+  for (const p of points) {
+    if (along(p) < along(start)) start = p
+    if (along(p) > along(end)) end = p
+  }
+  return { ...first, role, start, end }
+}
+
 function renderPipeLabel(
   pipe: DrawingPipeRun,
   frame: Frame,
@@ -481,8 +654,7 @@ function renderPipeLabel(
   const nx = uy
   const ny = -ux
 
-  const { band } = pipeBandPx(pipe, frame)
-  const halfBand = band / 2
+  const halfBand = pipeBandPx(pipe, frame).outer / 2
   const gap = frame.mm(TEXT_STYLE.labelGapMm)
   const diameterPx = frame.mm(TEXT_STYLE.diameterMm)
   const codePx = frame.mm(TEXT_STYLE.systemCodeMm)
@@ -517,14 +689,27 @@ function renderPipeLabel(
     return { extent, svg }
   }
   const diameterBlock = (side: -1 | 1) => {
-    const first = side < 0 ? -(halfBand + gap) : halfBand + gap + cap(diameterText === null ? codePx : diameterPx)
     if (diameterText === null) {
-      return { extent: side < 0 ? -first + cap(codePx) : first, svg: textAt(style.code, codePx, first) }
+      const baseline = side < 0 ? -(halfBand + gap) : halfBand + gap + cap(codePx)
+      return { extent: side < 0 ? -baseline + cap(codePx) : baseline, svg: textAt(style.code, codePx, baseline) }
     }
-    const second = side < 0 ? first - cap(diameterPx) - gap * 0.6 : first + gap * 0.6 + cap(codePx)
+    // Reading order on the sheet is always "ø110 mm" over "SW-GRV", whichever
+    // side of the run the block sits on: above the run the code is the line
+    // nearest the band, below it the diameter is.
+    const lineGap = frame.mm(TEXT_STYLE.codeLineGapMm)
+    if (side < 0) {
+      const codeBaseline = -(halfBand + gap)
+      const diameterBaseline = codeBaseline - cap(codePx) - lineGap
+      return {
+        extent: -diameterBaseline + cap(diameterPx),
+        svg: textAt(diameterText, diameterPx, diameterBaseline) + textAt(style.code, codePx, codeBaseline),
+      }
+    }
+    const diameterBaseline = halfBand + gap + cap(diameterPx)
+    const codeBaseline = diameterBaseline + lineGap + cap(codePx)
     return {
-      extent: side < 0 ? -second + cap(codePx) : second,
-      svg: textAt(diameterText, diameterPx, first) + textAt(style.code, codePx, second),
+      extent: codeBaseline,
+      svg: textAt(diameterText, diameterPx, diameterBaseline) + textAt(style.code, codePx, codeBaseline),
     }
   }
 
@@ -582,8 +767,17 @@ function textAt(content: string, fontPx: number, y: number): string {
   const h = fontPx * TEXT_STYLE.capHeightEm + 2 * pad
   return (
     `<rect x="${fmt(-w / 2)}" y="${fmt(y - h + pad)}" width="${fmt(w)}" height="${fmt(h)}" fill="${TEXT_STYLE.maskFill}" stroke="none"/>` +
-    `<text x="0" y="${fmt(y)}" font-size="${fmt(fontPx)}" text-anchor="middle">${escapeXml(content)}</text>`
+    condensedText(0, y, fontPx, content, 'text-anchor="middle"')
   )
+}
+
+/**
+ * A text element condensed horizontally by the sheet's width factor about its
+ * anchor x: the glyphs are scaled, the baseline is not.
+ */
+function condensedText(x: number, y: number, fontPx: number, content: string, attributes: string): string {
+  const k = TEXT_STYLE.widthFactor
+  return `<text x="${fmt(x / k)}" y="${fmt(y)}" font-size="${fmt(fontPx)}" transform="scale(${fmt(k)} 1)" ${attributes}>${escapeXml(content)}</text>`
 }
 
 interface Pt {
@@ -655,7 +849,7 @@ function pipeBoxes(pipe: DrawingPipeRun, frame: Frame): Quad[] {
   const b = frame.toSvg(pipe.end)
   const length = Math.hypot(b.x - a.x, b.y - a.y)
   if (!(length > 0)) return []
-  const half = pipeBandPx(pipe, frame).band / 2
+  const half = pipeBandPx(pipe, frame).outer / 2
   const ux = (b.x - a.x) / length
   const uy = (b.y - a.y) / length
   const chunks = Math.max(1, Math.ceil(length / frame.mm(8)))
@@ -716,7 +910,7 @@ function overlaps(a: Quad, b: Quad): boolean {
 }
 
 function textWidthPx(content: string, fontPx: number): number {
-  return content.length * fontPx * TEXT_STYLE.glyphAdvanceEm
+  return content.length * fontPx * TEXT_STYLE.glyphAdvanceEm * TEXT_STYLE.widthFactor
 }
 
 /** "ø110 mm" — lowercase ø, one space before the unit. */
@@ -732,20 +926,25 @@ export function formatSlopePercent(slopePercent: number): string {
 // ---------------------------------------------------------------------------
 // Sleeves
 
+/**
+ * The sheet's wall sleeve: a heavy black box the wall thickness long and wider
+ * than the band, pale-yellow inside, with one tick across the run at the wall
+ * centre. Drawn UNDER the pipes, so the band shows through and only the yellow
+ * margin and the outline read as the sleeve.
+ */
 function renderSleeve(sleeve: DrawingSleeve, frame: Frame): string {
   const centre = frame.toSvg(sleeve.at)
+  const stroke = frame.mm(SLEEVE_STYLE.outlineMm)
   const bandMm = pipeBandWidthMm(sleeve.pipeDiameterMm ?? PIPE_STYLE.fallbackDiameterMm.branch, frame.scale)
   const width = frame.mm(Math.max(SLEEVE_STYLE.minWidthMm, bandMm * SLEEVE_STYLE.widthFactor))
   const length = (sleeve.lengthM ?? SLEEVE_STYLE.fallbackLengthM) * frame.pxPerM
-  const stroke = frame.mm(SLEEVE_STYLE.outlineMm)
+  const tick = frame.mm(SLEEVE_STYLE.tickLengthMm) / 2
   // Plan CCW angle → SVG clockwise rotation (y down).
   const rotation = -sleeve.directionDeg
-  const hl = length / 2
-  const hw = width / 2
   return (
-    `<g transform="translate(${fmt(centre.x)} ${fmt(centre.y)}) rotate(${fmt(rotation)})" data-sleeve="${escapeXml(sleeve.id)}">` +
-    `<rect x="${fmt(-hl)}" y="${fmt(-hw)}" width="${fmt(length)}" height="${fmt(width)}" fill="${SLEEVE_STYLE.fill}" stroke="${SLEEVE_STYLE.outline}" stroke-width="${fmt(stroke)}"/>` +
-    `<path d="M${fmt(-hl)} ${fmt(-hw)}L${fmt(hl)} ${fmt(hw)}M${fmt(-hl)} ${fmt(hw)}L${fmt(hl)} ${fmt(-hw)}" stroke="${SLEEVE_STYLE.outline}" stroke-width="${fmt(stroke)}"/>` +
+    `<g transform="translate(${fmt(centre.x)} ${fmt(centre.y)}) rotate(${fmt(rotation)})" data-sleeve="${escapeXml(sleeve.id)}" stroke="${SLEEVE_STYLE.outline}">` +
+    `<rect x="${fmt(-length / 2)}" y="${fmt(-width / 2)}" width="${fmt(length)}" height="${fmt(width)}" fill="${SLEEVE_STYLE.fill}" stroke-width="${fmt(stroke)}"/>` +
+    `<line x1="0" y1="${fmt(-tick)}" x2="0" y2="${fmt(tick)}" stroke-width="${fmt(frame.mm(SLEEVE_STYLE.tickMm))}"/>` +
     `</g>`
   )
 }
@@ -753,33 +952,36 @@ function renderSleeve(sleeve: DrawingSleeve, frame: Frame): string {
 // ---------------------------------------------------------------------------
 // Stacks
 
-function stackRadiusPx(riser: DrawingRiser, frame: Frame): number {
-  const bandMm = pipeBandWidthMm(riser.diameterMm ?? PIPE_STYLE.fallbackDiameterMm.collector, frame.scale)
-  return frame.mm(Math.max(STACK_STYLE.minDiameterMm, bandMm * STACK_STYLE.bandFactor)) / 2
+/** Outer radius of the riser symbol on paper (a symbol, the same for every ø). */
+function stackRadiusPx(frame: Frame): number {
+  return frame.mm(STACK_STYLE.symbolDiameterMm) / 2
 }
 
 function renderStackSymbol(riser: DrawingRiser, frame: Frame): Placed {
   const c = frame.toSvg(riser.centre)
-  const r = stackRadiusPx(riser, frame)
-  const cross = r * STACK_STYLE.crosshairFactor
+  const outline = frame.mm(STACK_STYLE.outlineMm)
+  // The ring is drawn inside the symbol diameter.
+  const r = stackRadiusPx(frame) - outline / 2
+  const cross = frame.mm(STACK_STYLE.crosshairLengthMm) / 2
   const style = PIPE_SYSTEM_STYLE[riser.system]
   // Sanitary: solid disc in the system colour. Vent: open (white) circle with
   // a centre dot in the vent colour — a different symbol, not only a colour.
+  // Ring and crosshair are the system's dark edge green, as on the sheet.
   const vent = riser.system === 'vent'
-  const disc = `<circle cx="${fmt(c.x)}" cy="${fmt(c.y)}" r="${fmt(r)}" fill="${vent ? STACK_STYLE.ventOpenFill : style.fill}" stroke="${STACK_STYLE.outline}" stroke-width="${fmt(frame.mm(STACK_STYLE.outlineMm))}"/>`
+  const disc = `<circle cx="${fmt(c.x)}" cy="${fmt(c.y)}" r="${fmt(r)}" fill="${vent ? STACK_STYLE.ventOpenFill : style.fill}" stroke="${style.edge}" stroke-width="${fmt(outline)}"/>`
   const dot = vent ? `<circle cx="${fmt(c.x)}" cy="${fmt(c.y)}" r="${fmt(r * STACK_STYLE.ventDotFactor)}" fill="${style.fill}"/>` : ''
   const svg =
     `<g data-stack="${escapeXml(riser.id)}" data-system="${riser.system}">` +
-    `<path d="M${fmt(c.x - cross)} ${fmt(c.y)}H${fmt(c.x + cross)}M${fmt(c.x)} ${fmt(c.y - cross)}V${fmt(c.y + cross)}" stroke="${STACK_STYLE.outline}" stroke-width="${fmt(frame.mm(STACK_STYLE.crosshairMm))}"/>` +
+    `<path d="M${fmt(c.x - cross)} ${fmt(c.y)}H${fmt(c.x + cross)}M${fmt(c.x)} ${fmt(c.y - cross)}V${fmt(c.y + cross)}" stroke="${style.edge}" stroke-width="${fmt(frame.mm(STACK_STYLE.crosshairMm))}"/>` +
     disc +
     dot +
     `</g>`
   return { svg, box: quadFromAabb(c.x - cross, c.y - cross, c.x + cross, c.y + cross) }
 }
 
-/** Pill text: system code, diameter, sheet tag — e.g. "VNT ø110 mm (1.4ק)". */
+/** Pill text: diameter and sheet tag — "ø110 mm (1.4ק)"; vents lead with their code, "VNT ø110 mm (1.4ק)". */
 export function formatStackTagText(riser: Pick<DrawingRiser, 'system' | 'diameterMm' | 'tag'>): string {
-  const code = STACK_STYLE.tagWithSystemCode ? `${PIPE_SYSTEM_STYLE[riser.system].code} ` : ''
+  const code = STACK_STYLE.tagSystemCode[riser.system] ? `${PIPE_SYSTEM_STYLE[riser.system].code} ` : ''
   return riser.diameterMm === null ? `${code}(${riser.tag})` : `${code}${formatDiameter(riser.diameterMm)} (${riser.tag})`
 }
 
@@ -796,19 +998,21 @@ const TAG_OFFSETS: ReadonlyArray<readonly [number, number]> = [
 /** Leader length multipliers tried in order when the near positions are taken. */
 const TAG_DISTANCE_FACTORS = [1, 2, 3.2] as const
 
+/**
+ * Stack tag: the sheet's stadium pill with the diameter and the floor tag,
+ * nothing else — the storeys a stack spans (`spansStoreyLabels`) stay in the
+ * model for the panels and are not printed on the drawing.
+ */
 function renderStackTag(riser: DrawingRiser, frame: Frame, placed: readonly Quad[]): Placed {
   const c = frame.toSvg(riser.centre)
-  const r = stackRadiusPx(riser, frame)
+  const r = stackRadiusPx(frame)
   const fontPx = frame.mm(TEXT_STYLE.tagMm)
   const cap = fontPx * TEXT_STYLE.capHeightEm
   const content = formatStackTagText(riser)
   const padX = frame.mm(STACK_STYLE.pillPaddingXMm)
   const padY = frame.mm(STACK_STYLE.pillPaddingYMm)
   const pillW = textWidthPx(content, fontPx) + 2 * padX
-  const pillH = cap * 1.35 + 2 * padY
-  const note = riser.spansStoreyLabels !== undefined && riser.spansStoreyLabels.length > 0 ? formatSpanNote(riser.spansStoreyLabels) : null
-  const notePx = frame.mm(TEXT_STYLE.noteMm)
-  const noteH = note === null ? 0 : notePx * 1.3
+  const pillH = cap + 2 * padY
 
   // Up-right by default, then the other quadrants; a pill must stay on the
   // sheet and prefers not to overlap anything already placed.
@@ -816,7 +1020,7 @@ function renderStackTag(riser: DrawingRiser, frame: Frame, placed: readonly Quad
     TAG_OFFSETS.map(([sx, sy]) => {
       const px = c.x + sx * frame.mm(STACK_STYLE.pillOffsetXMm) * factor + (sx * pillW) / 2
       const py = c.y + sy * frame.mm(STACK_STYLE.pillOffsetYMm) * factor
-      const box = quadFromAabb(px - pillW / 2, py - pillH / 2, px + pillW / 2, py + pillH / 2 + noteH)
+      const box = quadFromAabb(px - pillW / 2, py - pillH / 2, px + pillW / 2, py + pillH / 2)
       return { px, py, box, inside: insideSheet(box, frame) }
     }),
   )
@@ -835,17 +1039,9 @@ function renderStackTag(riser: DrawingRiser, frame: Frame, placed: readonly Quad
     `<g data-tag-for="${escapeXml(riser.id)}">` +
     leader +
     `<rect x="${fmt(centreX - pillW / 2)}" y="${fmt(centreY - pillH / 2)}" width="${fmt(pillW)}" height="${fmt(pillH)}" rx="${fmt(pillH / 2)}" fill="${STACK_STYLE.pillFill}" stroke="${STACK_STYLE.pillStroke}" stroke-width="${fmt(frame.mm(STACK_STYLE.pillStrokeMm))}"/>` +
-    `<text x="${fmt(centreX)}" y="${fmt(centreY + cap / 2)}" font-size="${fmt(fontPx)}" text-anchor="middle" direction="ltr" unicode-bidi="bidi-override">${escapeXml(content)}</text>` +
-    (note === null
-      ? ''
-      : `<text x="${fmt(centreX)}" y="${fmt(centreY + pillH / 2 + notePx)}" font-size="${fmt(notePx)}" text-anchor="middle" direction="ltr" unicode-bidi="bidi-override">${escapeXml(note)}</text>`) +
+    condensedText(centreX, centreY + cap / 2, fontPx, content, 'text-anchor="middle" direction="ltr" unicode-bidi="bidi-override"') +
     `</g>`
   return { svg, box: pill }
-}
-
-function formatSpanNote(labels: readonly string[]): string {
-  if (labels.length === 1) return labels[0]
-  return `${labels[0]} – ${labels[labels.length - 1]}`
 }
 
 function leaderPath(
