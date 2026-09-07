@@ -130,15 +130,28 @@ node tools/gauntlet/tally-round.ts --round 00                     # after the cr
   engineer's stacks, branch-length ratio on the fixtures both sides serve (gated;
   the full-set ratios on the drawn union set and the literal band are reported
   alongside), coverage counts, routed fraction, verdict + reds; `models/summary.json`
-  adds the shared-set sensitivity at 0.75 / 1.0 / 1.5 m), `engineer.png` / `ours.png` (`render-drawing.mjs --anonymize`, same
+  adds the shared-set sensitivity at 0.75 / 1.0 / 1.5 m, each with the WC diameter rule
+  on and off), `engineer.png` / `ours.png` (`render-drawing.mjs --anonymize`, same
   scale/dpi), `verdict.json`, `key.json` (which side is ours — hidden, outside the trial
   folders), `prompts.json` (exact critic prompt per trial) and `trial-<t>/A.png, B.png`
   in a seeded random order (mulberry32; default seed derived from the round number).
 - A red metric writes `verdict.json = { result: 'loss', reason }` and no trial folders;
   `--force-trials` writes them anyway (verdict unchanged) so the gap can still be named.
+- Diagnostic shared-set variant (round 3): when the two sides serve different fixture
+  populations (`fixturesOnlyEngineerServes + fixturesOnlyWeServe > 0`), the round also
+  writes `rounds/NN/<F>S/` — both sheets restricted to the fixtures both sides serve
+  (`src/shared/drawing/sharedFixtureVariant.ts` → `restrictFloorDrawingToFixtures`:
+  ours keeps the route segments carrying ≥ 1 shared fixture and the stacks they still
+  reach; the engineer's runs are unchanged; unshared fixture symbols leave both
+  sheets), with its own renders, seeded trial pairs and `verdict.json = { result:
+  'diagnostic' }`. It is tallied like a floor but never gated — the `<F>` pair is the
+  round's result; the variant only tells whether the unserved fixtures drove the critics.
+  The export step writes the restricted models as `engineer.shared.json` /
+  `ours.shared.json` (+ `summary.json.sharedVariant`) on every floor.
 - `tally-round.ts` parses `critic/trial-<t>.txt` (WINNER / CONFIDENCE / GAP), maps
   sides through `key.json`, writes `verdicts.json` and `summary.json` (engineer
-  preferred x/N, confidence spread, gap histogram, `gapToFixNext`).
+  preferred x/N, confidence spread, gap histogram, `gapToFixNext`); variant folders
+  are labelled "diagnostic, not gated" in its output.
 - The critic protocol (fresh-context agent per trial, exact prompt, what never enters a
   prompt) is in `gauntlet/CRITIC.md`.
 - Runs on Node ≥ 22.18; imports nothing from `src/` (delegates to

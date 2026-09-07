@@ -75,6 +75,9 @@ export function parseCriticReply(raw: string): ParsedCriticReply | { error: stri
 interface KeyFile {
   round: string
   floor: string
+  /** Set on the diagnostic shared-set variant folders (`<F>S`). */
+  variant?: string
+  baseFloor?: string
   seed: number
   trials: Array<{ trial: string; ours: 'A' | 'B' }>
 }
@@ -160,6 +163,8 @@ function tallyFloor(floorDir: string): string {
   const summary = {
     round: key.round,
     floor: key.floor,
+    variant: key.variant ?? null,
+    baseFloor: key.baseFloor ?? null,
     trials: key.trials.length,
     answered: verdicts.length,
     missing,
@@ -177,8 +182,12 @@ function tallyFloor(floorDir: string): string {
   writeJson(path.join(floorDir, 'summary.json'), summary)
   if (verdictFile !== null && verdictFile.result === 'pending-critic') {
     writeJson(verdictPath, { result: 'critic-tallied', engineerPreferred, of: verdicts.length, gapToFixNext: mostFrequentGap })
+  } else if (verdictFile !== null && verdictFile.result === 'diagnostic') {
+    // Shared-set variant (round 3): tallied and reported, never gated.
+    writeJson(verdictPath, { result: 'diagnostic-tallied', note: verdictFile.note, engineerPreferred, of: verdicts.length, gapToFixNext: mostFrequentGap })
   }
-  return `${key.floor}: engineer preferred ${engineerPreferred}/${verdicts.length} · confidence low ${confidence.low} / medium ${confidence.medium} / high ${confidence.high} · gap to fix: ${mostFrequentGap ?? 'none (ours preferred every time)'}${missing.length > 0 ? ` · missing replies: ${missing.join(', ')}` : ''}${unparsed.length > 0 ? ` · unparsed: ${unparsed.map((entry) => `${entry.trial} (${entry.error})`).join(', ')}` : ''}`
+  const label = key.variant !== undefined ? `${key.floor} (diagnostic: ${key.variant}, not gated)` : key.floor
+  return `${label}: engineer preferred ${engineerPreferred}/${verdicts.length} · confidence low ${confidence.low} / medium ${confidence.medium} / high ${confidence.high} · gap to fix: ${mostFrequentGap ?? 'none (ours preferred every time)'}${missing.length > 0 ? ` · missing replies: ${missing.join(', ')}` : ''}${unparsed.length > 0 ? ` · unparsed: ${unparsed.map((entry) => `${entry.trial} (${entry.error})`).join(', ')}` : ''}`
 }
 
 function main(): number {

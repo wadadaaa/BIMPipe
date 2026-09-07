@@ -2,6 +2,11 @@ import type { DrawingFixture } from '@/domain/drawing/floorDrawingModel'
 import type { Fixture } from '@/domain/types'
 import { fixtureKindToDrawing, viewerPlanToDrawing } from './drawingFrame'
 
+/** Drawing id of a detected fixture (shared by both adapters and the restricted variant). */
+export function drawingFixtureId(expressId: number): string {
+  return `fixture-${expressId}`
+}
+
 /**
  * Detected fixtures (viewer frame, metres) → drawing fixtures. Rotation is
  * unknown from the detection output (0 by contract); footprints are omitted so
@@ -21,7 +26,7 @@ export function buildDrawingFixtures(
       continue
     }
     drawn.push({
-      id: `fixture-${fixture.expressId}`,
+      id: drawingFixtureId(fixture.expressId),
       kind: fixtureKindToDrawing(fixture.kind),
       centre: viewerPlanToDrawing(fixture.position),
       rotationDeg: 0,

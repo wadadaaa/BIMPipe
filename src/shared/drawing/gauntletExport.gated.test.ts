@@ -7,6 +7,7 @@ import { drawingContentOutsideBounds, drawingLabelsContaining, drawingModelHasNo
 import { parseGauntletFloorSpec, runGauntletFloorPipeline, type GauntletFloorSpec } from './gauntletFloorPipeline'
 import { closeSpecModels, GAUNTLET_BUILTIN_FLOOR_SPECS, openSpecModels, resolveSpecPaths, specFilesExist } from './gauntletFloorSpecs'
 import { gauntletMetricsInputFromPipeline } from './gauntletMetricsInput'
+import { buildSharedFixtureVariant } from './sharedFixtureVariant'
 
 /**
  * Export "script test" behind `GAUNTLET_EXPORT=1` — the node-side entry point
@@ -121,6 +122,23 @@ describe.skipIf(!ENABLED)('gauntlet floor export (GAUNTLET_EXPORT=1)', () => {
             }
           }),
         )
+        // R3 diagnostic variant: both sheets restricted to the shared fixture set
+        // (gated result stays the unrestricted one; `run-round.ts` pairs this
+        // variant only when the two sides' fixture populations differ).
+        const sharedVariant = buildSharedFixtureVariant({
+          engineer: engineer.model,
+          ours: ours.model,
+          ourBranchRoutes: metricsInput.comparisonInput.ourBranchRoutes,
+          sharedFixtureExpressIds: metrics.sharedFixtures.sharedFixtureExpressIds,
+        })
+        for (const [side, model] of [
+          ['engineer', sharedVariant.engineer],
+          ['ours', sharedVariant.ours],
+        ] as const) {
+          expect(drawingModelHasNonFinite(model), `${side} (shared variant): non-finite number`).toBe(false)
+          expect(drawingLabelsContaining(model, forbidden), `${side} (shared variant): file name in labels`).toEqual([])
+          writeJson(path.join(outDir, `${side}.shared.json`), model)
+        }
         const summary = {
           floor: spec.floor,
           storeyLabel: spec.storeyLabel,
@@ -146,8 +164,9 @@ describe.skipIf(!ENABLED)('gauntlet floor export (GAUNTLET_EXPORT=1)', () => {
           report: metricsInput.report,
           metrics,
           sharedSensitivity,
+          sharedVariant: sharedVariant.diagnostics,
           pipelineDiagnostics: metricsInput.diagnostics,
-          files: ['engineer.json', 'ours.json', 'metrics-input.json', 'metrics.json', 'summary.json'],
+          files: ['engineer.json', 'ours.json', 'engineer.shared.json', 'ours.shared.json', 'metrics-input.json', 'metrics.json', 'summary.json'],
         }
         writeJson(path.join(outDir, 'summary.json'), summary)
         console.info(`[gauntlet export] wrote ${outDir}`)

@@ -19,9 +19,13 @@
  *   rounds/NN/<F>/key.json       HIDDEN: which side is ours per trial — never inside a trial folder
  *   rounds/NN/<F>/prompts.json   the exact critic prompt per trial (see CRITIC.md)
  *   rounds/NN/<F>/trial-<t>/A.png, B.png   copies in a seeded random order
+ *   rounds/NN/<F>S/…                diagnostic variant (round 3): both sheets restricted to the
+ *                                    fixtures both sides serve; written only when the two sides'
+ *                                    fixture populations differ; verdict.json = { result: 'diagnostic' }
  *
- * The floor codes `F1`/`F2` are the only names a critic ever sees in a path;
- * the trial folders carry nothing else (no model JSON, no key, no file names).
+ * The floor codes `F1`/`F2` (plus the `S` variant suffix) are the only names a
+ * critic ever sees in a path; the trial folders carry nothing else (no model
+ * JSON, no key, no file names).
  *
  * `--force-trials` writes the trial pairs even when the metrics are red — the
  * verdict stays `loss` (thresholds are never softened); the A/B then serves
@@ -32,7 +36,7 @@
  * `render-drawing.mjs` (Vite SSR loader), so it imports nothing from `src/`.
  */
 import { spawnSync } from 'node:child_process'
-import { copyFileSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -178,7 +182,71 @@ function formatNumber(value: number | null, digits = 2): string {
   return value === null ? 'n/a' : value.toFixed(digits)
 }
 
-function runFloor(repoRoot: string, roundDir: string, code: string, args: CliArgs, seed: number): { metrics: HardMetrics; trials: number } {
+/** Suffix of the diagnostic shared-fixture-set variant folder (`F2S`): reveals nothing about either side. */
+const SHARED_VARIANT_SUFFIX = 'S'
+
+function renderSide(repoRoot: string, modelFile: string, outDir: string, side: 'engineer' | 'ours', args: CliArgs): void {
+  run(repoRoot, 'node', [
+    'tools/render-drawing.mjs',
+    modelFile,
+    path.join(outDir, `${side}.svg`),
+    '--png',
+    path.join(outDir, `${side}.png`),
+    '--anonymize',
+    '--scale',
+    String(args.scale),
+    '--dpi',
+    String(args.dpi),
+  ])
+}
+
+/** Blind A/B pairs: copies only, seeded order, key outside the trial folders. */
+function writeTrialPairs(dir: string, code: string, args: CliArgs, seed: number, floorSeed: number, extraKey: Record<string, unknown>): void {
+  const random = seededRandom(floorSeed)
+  const key: Array<{ trial: string; ours: 'A' | 'B' }> = []
+  const prompts: Array<{ trial: string; prompt: string }> = []
+  for (let t = 1; t <= args.trials; t += 1) {
+    const trial = `trial-${String(t).padStart(2, '0')}`
+    const trialDir = path.join(dir, trial)
+    rmSync(trialDir, { recursive: true, force: true })
+    mkdirSync(trialDir, { recursive: true })
+    const oursIsA = random() < 0.5
+    copyFileSync(path.join(dir, oursIsA ? 'ours.png' : 'engineer.png'), path.join(trialDir, 'A.png'))
+    copyFileSync(path.join(dir, oursIsA ? 'engineer.png' : 'ours.png'), path.join(trialDir, 'B.png'))
+    key.push({ trial, ours: oursIsA ? 'A' : 'B' })
+    prompts.push({ trial, prompt: CRITIC_PROMPT(path.resolve(trialDir)) })
+  }
+  writeJson(path.join(dir, 'key.json'), { round: args.round, floor: code, seed, floorSeed, ...extraKey, trials: key })
+  writeJson(path.join(dir, 'prompts.json'), prompts)
+}
+
+/**
+ * Diagnostic variant (round 3): when the two sides serve different fixture
+ * populations, pair both sheets restricted to the shared set as well
+ * (`<code>S/`). Its verdict is never gated — the unrestricted pair is the
+ * result; this one only tells whether the unserved fixtures drove the critics.
+ */
+function runSharedVariant(repoRoot: string, roundDir: string, code: string, args: CliArgs, seed: number, metrics: HardMetrics, modelsDir: string): { code: string; trials: number } | null {
+  const differ = metrics.sharedFixtures.fixturesOnlyEngineerServes + metrics.sharedFixtures.fixturesOnlyWeServe > 0
+  const engineerModel = path.join(modelsDir, 'engineer.shared.json')
+  const oursModel = path.join(modelsDir, 'ours.shared.json')
+  if (!differ || !existsSync(engineerModel) || !existsSync(oursModel)) return null
+  const variantCode = `${code}${SHARED_VARIANT_SUFFIX}`
+  const dir = path.join(roundDir, variantCode)
+  rmSync(dir, { recursive: true, force: true })
+  mkdirSync(dir, { recursive: true })
+  renderSide(repoRoot, engineerModel, dir, 'engineer', args)
+  renderSide(repoRoot, oursModel, dir, 'ours', args)
+  writeJson(path.join(dir, 'verdict.json'), {
+    result: 'diagnostic',
+    note: `Both sheets restricted to the ${metrics.sharedFixtures.shared} fixture(s) both sides serve (only engineer ${metrics.sharedFixtures.fixturesOnlyEngineerServes}, only us ${metrics.sharedFixtures.fixturesOnlyWeServe} on the full set); not gated — the ${code} pair is the round's result.`,
+  })
+  const floorSeed = seed + (Object.keys(FLOORS).indexOf(code) + Object.keys(FLOORS).length) * 1_000_003
+  writeTrialPairs(dir, variantCode, args, seed, floorSeed, { variant: 'shared-fixture-set', baseFloor: code })
+  return { code: variantCode, trials: args.trials }
+}
+
+function runFloor(repoRoot: string, roundDir: string, code: string, args: CliArgs, seed: number): { metrics: HardMetrics; trials: number; sharedVariant: { code: string; trials: number } | null } {
   const floor = FLOORS[code]
   if (floor === undefined) throw new Error(`Unknown floor code ${code}; known: ${Object.keys(FLOORS).join(', ')}`)
   const floorDir = path.join(roundDir, code)
@@ -198,26 +266,13 @@ function runFloor(repoRoot: string, roundDir: string, code: string, args: CliArg
   writeJson(path.join(floorDir, 'metrics.json'), metrics)
 
   // 3. anonymized renders, identical options on both sides
-  for (const side of ['engineer', 'ours'] as const) {
-    run(repoRoot, 'node', [
-      'tools/render-drawing.mjs',
-      path.join(modelsDir, `${side}.json`),
-      path.join(floorDir, `${side}.svg`),
-      '--png',
-      path.join(floorDir, `${side}.png`),
-      '--anonymize',
-      '--scale',
-      String(args.scale),
-      '--dpi',
-      String(args.dpi),
-    ])
-  }
+  for (const side of ['engineer', 'ours'] as const) renderSide(repoRoot, path.join(modelsDir, `${side}.json`), floorDir, side, args)
 
   // 4. verdict gate
   const red = metrics.verdict === 'red'
   if (red && !args.forceTrials) {
     writeJson(path.join(floorDir, 'verdict.json'), { result: 'loss', reason: metrics.reds })
-    return { metrics, trials: 0 }
+    return { metrics, trials: 0, sharedVariant: null }
   }
   writeJson(
     path.join(floorDir, 'verdict.json'),
@@ -226,26 +281,13 @@ function runFloor(repoRoot: string, roundDir: string, code: string, args: CliArg
       : { result: 'pending-critic' },
   )
 
-  // 5. blind A/B pairs: copies only, seeded order (per floor, so the two floors
-  //    do not share one A/B sequence), key outside the trial folders
+  // 5. blind A/B pairs (per-floor seed, so the two floors do not share one A/B sequence)
   const floorSeed = seed + Object.keys(FLOORS).indexOf(code) * 1_000_003
-  const random = seededRandom(floorSeed)
-  const key: Array<{ trial: string; ours: 'A' | 'B' }> = []
-  const prompts: Array<{ trial: string; prompt: string }> = []
-  for (let t = 1; t <= args.trials; t += 1) {
-    const trial = `trial-${String(t).padStart(2, '0')}`
-    const trialDir = path.join(floorDir, trial)
-    rmSync(trialDir, { recursive: true, force: true })
-    mkdirSync(trialDir, { recursive: true })
-    const oursIsA = random() < 0.5
-    copyFileSync(path.join(floorDir, oursIsA ? 'ours.png' : 'engineer.png'), path.join(trialDir, 'A.png'))
-    copyFileSync(path.join(floorDir, oursIsA ? 'engineer.png' : 'ours.png'), path.join(trialDir, 'B.png'))
-    key.push({ trial, ours: oursIsA ? 'A' : 'B' })
-    prompts.push({ trial, prompt: CRITIC_PROMPT(path.resolve(trialDir)) })
-  }
-  writeJson(path.join(floorDir, 'key.json'), { round: args.round, floor: code, seed, floorSeed, trials: key })
-  writeJson(path.join(floorDir, 'prompts.json'), prompts)
-  return { metrics, trials: args.trials }
+  writeTrialPairs(floorDir, code, args, seed, floorSeed, {})
+
+  // 6. diagnostic shared-set variant, only when the fixture populations differ
+  const sharedVariant = runSharedVariant(repoRoot, roundDir, code, args, seed, metrics, modelsDir)
+  return { metrics, trials: args.trials, sharedVariant }
 }
 
 function main(): number {
@@ -271,7 +313,7 @@ function main(): number {
 
   const rows: string[] = []
   for (const code of args.floors) {
-    const { metrics, trials } = runFloor(repoRoot, roundDir, code, args, seed)
+    const { metrics, trials, sharedVariant } = runFloor(repoRoot, roundDir, code, args, seed)
     rows.push(
       [
         `${code}: ${metrics.verdict.toUpperCase()}`,
@@ -284,6 +326,7 @@ function main(): number {
         trials > 0 ? `${trials} trial pair(s) → run the critic (CRITIC.md), then tally-round.ts` : 'no trials (loss by metrics)',
       ].join(' · '),
     )
+    if (sharedVariant !== null) rows.push(`    ${sharedVariant.code}: diagnostic shared-set variant, ${sharedVariant.trials} trial pair(s) (not gated)`)
     for (const line of metrics.reds) rows.push(`    red: ${line}`)
   }
   console.log(`Round ${args.round} → ${roundDir} (seed ${seed})`)

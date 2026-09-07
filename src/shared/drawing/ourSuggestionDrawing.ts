@@ -67,6 +67,11 @@ export interface OurFloorDrawingResult {
   diagnostics: OurFloorDrawingDiagnostics
 }
 
+/** Drawing id of one of our route segments (the restricted variant maps it back to the served fixtures). */
+export function ourPipeDrawingId(segmentId: string): string {
+  return `our-pipe-${segmentId}`
+}
+
 /** "R3" → 3; null when the label carries no digits. */
 export function stackLabelIndex(stackLabel: string): number | null {
   return parseFloorNumberFromStoreyLabel(stackLabel)
@@ -157,7 +162,7 @@ export function buildOurFloorDrawing(input: OurFloorDrawingInput): OurFloorDrawi
       else branches += 1
       diametersMm[String(segment.diameterMm)] = (diametersMm[String(segment.diameterMm)] ?? 0) + 1
       pipes.push({
-        id: `our-pipe-${segment.id}`,
+        id: ourPipeDrawingId(segment.id),
         system: 'sanitary',
         diameterMm: segment.diameterMm,
         slopePercent,
