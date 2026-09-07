@@ -1,0 +1,883 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`planner parity on the bundled Duplex sample (plain + demo/ADAM path, UUIDs masked) > produces byte-identical plain and demo-path planner dumps > demo/ADAM path (toilet-anchored stacks + sanitary routing plan) 1`] = `
+"{
+ "storey": {
+  "id": 39,
+  "name": "Level 1"
+ },
+ "risers": [
+  {
+   "id": "<uuid-1>",
+   "stackId": "<uuid-2>",
+   "stackLabel": "R1",
+   "storeyId": 39,
+   "position": {
+    "x": 0.5010215830950934,
+    "y": 1.3065000000000002,
+    "z": 12.567745206915644
+   },
+   "source": "detected",
+   "systemType": "sanitary",
+   "levelRange": {
+    "from": 39,
+    "to": 39
+   }
+  },
+  {
+   "id": "<uuid-3>",
+   "stackId": "<uuid-4>",
+   "stackLabel": "R2",
+   "storeyId": 39,
+   "position": {
+    "x": 0.5010215830950934,
+    "y": 1.3065000000000002,
+    "z": 12.567745206915644
+   },
+   "source": "detected",
+   "systemType": "sanitary",
+   "levelRange": {
+    "from": 39,
+    "to": 39
+   }
+  },
+  {
+   "id": "<uuid-5>",
+   "stackId": "<uuid-6>",
+   "stackLabel": "R3",
+   "storeyId": 39,
+   "position": {
+    "x": 3.6585250000000293,
+    "y": 0.3841749999999834,
+    "z": 8.00392847277372
+   },
+   "source": "detected",
+   "systemType": "sanitary",
+   "levelRange": {
+    "from": 39,
+    "to": 39
+   }
+  },
+  {
+   "id": "<uuid-7>",
+   "stackId": "<uuid-8>",
+   "stackLabel": "R4",
+   "storeyId": 39,
+   "position": {
+    "x": 5.141474999999996,
+    "y": 0.3841749999999834,
+    "z": 9.796311243142876
+   },
+   "source": "detected",
+   "systemType": "sanitary",
+   "levelRange": {
+    "from": 39,
+    "to": 39
+   }
+  },
+  {
+   "id": "<uuid-9>",
+   "stackId": "<uuid-10>",
+   "stackLabel": "R5",
+   "storeyId": 39,
+   "position": {
+    "x": 8.298978416904903,
+    "y": 1.3065000000000002,
+    "z": 5.2322547930843575
+   },
+   "source": "detected",
+   "systemType": "sanitary",
+   "levelRange": {
+    "from": 39,
+    "to": 39
+   }
+  },
+  {
+   "id": "<uuid-11>",
+   "stackId": "<uuid-12>",
+   "stackLabel": "R6",
+   "storeyId": 39,
+   "position": {
+    "x": 8.298978416904903,
+    "y": 1.3065000000000002,
+    "z": 5.2322547930843575
+   },
+   "source": "detected",
+   "systemType": "sanitary",
+   "levelRange": {
+    "from": 39,
+    "to": 39
+   }
+  }
+ ],
+ "snapOutcomes": [],
+ "plan": {
+  "routes": [
+   {
+    "fixtureExpressId": 118498,
+    "fixtureName": "M_Water Closet - Flush Tank:Private - 6.1 Lpf:Private - 6.1 Lpf:582915",
+    "fixtureKind": "TOILETPAN",
+    "riserId": "<uuid-5>",
+    "targetRiserId": "<uuid-5>",
+    "routeGroupId": "storey-39-zone-1",
+    "pipeDiameterMm": 110,
+    "startHeightAboveFloorM": 0.2,
+    "slope": 0.02,
+    "segments": [
+     {
+      "from": {
+       "x": 5.141474999999996,
+       "y": 0.3841749999999834,
+       "z": 9.796311243142876
+      },
+      "to": {
+       "x": 3.6585250000000293,
+       "y": 0.3841749999999834,
+       "z": 8.00392847277372
+      },
+      "kind": "main",
+      "pipeDiameterMm": 110,
+      "routeRole": "toiletRoute",
+      "diameterMm": 110,
+      "slopePercent": 2,
+      "sourceFixtureId": 118498,
+      "sourceFixtureType": "TOILETPAN",
+      "targetRiserId": "<uuid-5>",
+      "routeGroupId": "storey-39-zone-1",
+      "label": "Ø110 toilet 2.0%",
+      "debugReason": "WC/toilet route uses Ø110 intent to the selected group riser."
+     }
+    ]
+   },
+   {
+    "fixtureExpressId": 120371,
+    "fixtureName": "M_Lavatory - Oval:535 mmx485 mm - Private:535 mmx485 mm - Private:582916",
+    "fixtureKind": "WASHHANDBASIN",
+    "riserId": "<uuid-5>",
+    "targetRiserId": "<uuid-5>",
+    "routeGroupId": "storey-39-zone-1",
+    "pipeDiameterMm": 50,
+    "startHeightAboveFloorM": 0.15,
+    "slope": 0.02,
+    "segments": [
+     {
+      "from": {
+       "x": 5.012500000000049,
+       "y": 0.8271000002450282,
+       "z": 9.157499999999999
+      },
+      "to": {
+       "x": 3.6585250000000293,
+       "y": 0.3841749999999834,
+       "z": 8.00392847277372
+      },
+      "kind": "main",
+      "pipeDiameterMm": 63,
+      "routeRole": "collectionMain",
+      "diameterMm": 63,
+      "slopePercent": 2,
+      "sourceFixtureId": 120371,
+      "sourceFixtureType": "WASHHANDBASIN",
+      "targetRiserId": "<uuid-5>",
+      "routeGroupId": "storey-39-zone-1",
+      "label": "Ø63 main 2.0%",
+      "debugReason": "Farthest small fixture defines the shared Ø63 collection main toward the selected riser."
+     }
+    ]
+   },
+   {
+    "fixtureExpressId": 120537,
+    "fixtureName": "M_Lavatory - Oval:535 mmx485 mm - Private:535 mmx485 mm - Private:582919",
+    "fixtureKind": "WASHHANDBASIN",
+    "riserId": "<uuid-5>",
+    "targetRiserId": "<uuid-5>",
+    "routeGroupId": "storey-39-zone-1",
+    "pipeDiameterMm": 50,
+    "startHeightAboveFloorM": 0.15,
+    "slope": 0.02,
+    "segments": [
+     {
+      "from": {
+       "x": 3.7874999999999535,
+       "y": 0.8271000002450282,
+       "z": 8.642500000000004
+      },
+      "to": {
+       "x": 4.0484877277446465,
+       "y": 0.8271000002450282,
+       "z": 8.336172346852397
+      },
+      "kind": "branch",
+      "pipeDiameterMm": 50,
+      "routeRole": "fixtureBranch",
+      "diameterMm": 50,
+      "slopePercent": 2,
+      "sourceFixtureId": 120537,
+      "sourceFixtureType": "WASHHANDBASIN",
+      "targetRiserId": "<uuid-5>",
+      "routeGroupId": "storey-39-zone-1",
+      "label": "Ø50 branch 2.0%",
+      "debugReason": "Small fixture joins the shared collection main with Ø50 branch intent."
+     }
+    ]
+   }
+  ],
+  "limitations": [
+   "Sanitary route skipped for fixture 120501 in route group storey-39-zone-1 because fixture point coincides with riser <uuid-5>."
+  ],
+  "debugGroups": [
+   {
+    "routeGroupId": "storey-39-zone-1",
+    "storeyId": 39,
+    "fixtureIds": [
+     118498,
+     120371,
+     120501,
+     120537
+    ],
+    "targetRiserId": "<uuid-5>",
+    "targetRiserReason": "Selected nearest same-storey riser <uuid-5> using toilet centroid from 2 toilet fixtures; service zone has 4 fixtures and 2 toilet fixtures.",
+    "selectedMainFixtureId": 120371,
+    "branchCount": 1,
+    "diameters": [
+     50,
+     63,
+     110
+    ],
+    "skippedFixtureIds": [
+     120501
+    ],
+    "fallbackReasons": [
+     "Fixture 120501 coincides with target riser <uuid-5>."
+    ],
+    "selectedMain": {
+     "from": {
+      "x": 5.012500000000049,
+      "y": 0.8271000002450282,
+      "z": 9.157499999999999
+     },
+     "to": {
+      "x": 3.6585250000000293,
+      "y": 0.3841749999999834,
+      "z": 8.00392847277372
+     }
+    }
+   }
+  ]
+ }
+}"
+`;
+
+exports[`planner parity on the bundled Duplex sample (plain + demo/ADAM path, UUIDs masked) > produces byte-identical plain and demo-path planner dumps > plain path (wet-core stacks + branch runs) 1`] = `
+"{
+ "storey": {
+  "id": 39,
+  "name": "Level 1"
+ },
+ "risers": [
+  {
+   "id": "<uuid-1>",
+   "stackId": "<uuid-2>",
+   "stackLabel": "R1",
+   "storeyId": 39,
+   "position": {
+    "x": 5.291474999999997,
+    "y": 0.6056375001225058,
+    "z": 8.900119857958298
+   },
+   "source": "detected",
+   "systemType": "sanitary",
+   "levelRange": {
+    "from": 39,
+    "to": 43
+   }
+  },
+  {
+   "id": "<uuid-3>",
+   "stackId": "<uuid-2>",
+   "stackLabel": "R1",
+   "storeyId": 43,
+   "position": {
+    "x": 5.291474999999997,
+    "y": 3.7056375001228776,
+    "z": 8.900119857958298
+   },
+   "source": "detected",
+   "systemType": "sanitary",
+   "levelRange": {
+    "from": 39,
+    "to": 43
+   }
+  },
+  {
+   "id": "<uuid-4>",
+   "stackId": "<uuid-5>",
+   "stackLabel": "R2",
+   "storeyId": 39,
+   "position": {
+    "x": 0.5010215830950934,
+    "y": 1.3065000000000002,
+    "z": 12.567745206915644
+   },
+   "source": "detected",
+   "systemType": "sanitary",
+   "levelRange": {
+    "from": 39,
+    "to": 39
+   }
+  },
+  {
+   "id": "<uuid-6>",
+   "stackId": "<uuid-7>",
+   "stackLabel": "R3",
+   "storeyId": 39,
+   "position": {
+    "x": 8.298978416904903,
+    "y": 1.3065000000000002,
+    "z": 5.2322547930843575
+   },
+   "source": "detected",
+   "systemType": "sanitary",
+   "levelRange": {
+    "from": 39,
+    "to": 39
+   }
+  },
+  {
+   "id": "<uuid-8>",
+   "stackId": "<uuid-9>",
+   "stackLabel": "R4",
+   "storeyId": 39,
+   "position": {
+    "x": 0.5010215830950934,
+    "y": 1.3065000000000002,
+    "z": 12.567745206915644
+   },
+   "source": "detected",
+   "systemType": "sanitary",
+   "levelRange": {
+    "from": 39,
+    "to": 39
+   }
+  },
+  {
+   "id": "<uuid-10>",
+   "stackId": "<uuid-11>",
+   "stackLabel": "R5",
+   "storeyId": 39,
+   "position": {
+    "x": 8.298978416904903,
+    "y": 1.3065000000000002,
+    "z": 5.2322547930843575
+   },
+   "source": "detected",
+   "systemType": "sanitary",
+   "levelRange": {
+    "from": 39,
+    "to": 39
+   }
+  }
+ ],
+ "stacks": [
+  {
+   "stackId": "<uuid-2>",
+   "stackLabel": "R1",
+   "anchor": "wet-core",
+   "position": {
+    "x": 5.291474999999997,
+    "y": 0.6056375001225058,
+    "z": 8.900119857958298
+   },
+   "placement": {
+    "rule": "wall-side-edge",
+    "position": {
+     "x": 5.291474999999997,
+     "z": 8.900119857958298
+    },
+    "edge": "maxX",
+    "clearance": 0.15,
+    "flagged": false,
+    "reason": "no continuity map loaded; stack placed 0.15 m outside the core's maxX edge (farthest from the storey plan centre) — approximation without wall geometry"
+   }
+  },
+  {
+   "stackId": "<uuid-5>",
+   "stackLabel": "R2",
+   "anchor": "kitchen",
+   "position": {
+    "x": 0.5010215830950934,
+    "y": 1.3065000000000002,
+    "z": 12.567745206915644
+   }
+  },
+  {
+   "stackId": "<uuid-7>",
+   "stackLabel": "R3",
+   "anchor": "kitchen",
+   "position": {
+    "x": 8.298978416904903,
+    "y": 1.3065000000000002,
+    "z": 5.2322547930843575
+   }
+  },
+  {
+   "stackId": "<uuid-9>",
+   "stackLabel": "R4",
+   "anchor": "kitchen",
+   "position": {
+    "x": 0.5010215830950934,
+    "y": 1.3065000000000002,
+    "z": 12.567745206915644
+   }
+  },
+  {
+   "stackId": "<uuid-11>",
+   "stackLabel": "R5",
+   "anchor": "kitchen",
+   "position": {
+    "x": 8.298978416904903,
+    "y": 1.3065000000000002,
+    "z": 5.2322547930843575
+   }
+  }
+ ],
+ "cores": [
+  {
+   "id": "wet-core:39:118498+120371+120501+120537",
+   "storeyId": 39,
+   "members": [
+    {
+     "expressId": 118498,
+     "name": "M_Water Closet - Flush Tank:Private - 6.1 Lpf:Private - 6.1 Lpf:582915",
+     "kind": "TOILETPAN",
+     "storeyId": 39,
+     "isKitchenSink": false,
+     "position": {
+      "x": 5.141474999999996,
+      "y": 0.3841749999999834,
+      "z": 9.796311243142876
+     }
+    },
+    {
+     "expressId": 120371,
+     "name": "M_Lavatory - Oval:535 mmx485 mm - Private:535 mmx485 mm - Private:582916",
+     "kind": "WASHHANDBASIN",
+     "storeyId": 39,
+     "isKitchenSink": false,
+     "position": {
+      "x": 5.012500000000049,
+      "y": 0.8271000002450282,
+      "z": 9.157499999999999
+     }
+    },
+    {
+     "expressId": 120501,
+     "name": "M_Water Closet - Flush Tank:Private - 6.1 Lpf:Private - 6.1 Lpf:582918",
+     "kind": "TOILETPAN",
+     "storeyId": 39,
+     "isKitchenSink": false,
+     "position": {
+      "x": 3.6585250000000293,
+      "y": 0.3841749999999834,
+      "z": 8.00392847277372
+     }
+    },
+    {
+     "expressId": 120537,
+     "name": "M_Lavatory - Oval:535 mmx485 mm - Private:535 mmx485 mm - Private:582919",
+     "kind": "WASHHANDBASIN",
+     "storeyId": 39,
+     "isKitchenSink": false,
+     "position": {
+      "x": 3.7874999999999535,
+      "y": 0.8271000002450282,
+      "z": 8.642500000000004
+     }
+    }
+   ],
+   "memberExpressIds": [
+    118498,
+    120371,
+    120501,
+    120537
+   ],
+   "centroid": {
+    "x": 4.4000000000000075,
+    "z": 8.90005992897915
+   },
+   "centroidY": 0.6056375001225058,
+   "bbox": {
+    "minX": 3.6585250000000293,
+    "maxX": 5.141474999999996,
+    "minZ": 8.00392847277372,
+    "maxZ": 9.796311243142876
+   },
+   "kindsFingerprint": "TOILETPAN+WASHHANDBASIN",
+   "kindCounts": {
+    "TOILETPAN": 2,
+    "WASHHANDBASIN": 2
+   }
+  }
+ ],
+ "stackExtents": [
+  {
+   "stackLabel": "R1",
+   "extent": {
+    "storeyIds": [
+     39,
+     43
+    ],
+    "collectorStoreyId": 39,
+    "topStoreyId": 43,
+    "anchorCoreFingerprint": "TOILETPAN+WASHHANDBASIN",
+    "reasons": [
+     "anchor core on Level 1: TOILETPAN+WASHHANDBASIN (wet-core membership)",
+     "continuity bound skipped: no continuity map loaded",
+     "collector: Level 1 (lowest storey excluding roof/technical names)",
+     "roof excluded: Roof is a roof/technical storey"
+    ]
+   }
+  },
+  {
+   "stackLabel": "R2",
+   "extent": {
+    "storeyIds": [
+     39
+    ],
+    "collectorStoreyId": 39,
+    "topStoreyId": 39,
+    "anchorCoreFingerprint": "",
+    "reasons": [
+     "anchor core on Level 1: none (fixture kinds within 2.60 m of the stack position)",
+     "continuity bound skipped: no continuity map loaded",
+     "collector: Level 1 (lowest storey excluding roof/technical names)",
+     "no matching core on Level 2: found none, anchor core is none",
+     "roof excluded: Roof (roof/technical storeys never receive auto risers)"
+    ]
+   }
+  },
+  {
+   "stackLabel": "R3",
+   "extent": {
+    "storeyIds": [
+     39
+    ],
+    "collectorStoreyId": 39,
+    "topStoreyId": 39,
+    "anchorCoreFingerprint": "",
+    "reasons": [
+     "anchor core on Level 1: none (fixture kinds within 2.60 m of the stack position)",
+     "continuity bound skipped: no continuity map loaded",
+     "collector: Level 1 (lowest storey excluding roof/technical names)",
+     "no matching core on Level 2: found none, anchor core is none",
+     "roof excluded: Roof (roof/technical storeys never receive auto risers)"
+    ]
+   }
+  },
+  {
+   "stackLabel": "R4",
+   "extent": {
+    "storeyIds": [
+     39
+    ],
+    "collectorStoreyId": 39,
+    "topStoreyId": 39,
+    "anchorCoreFingerprint": "",
+    "reasons": [
+     "anchor core on Level 1: none (fixture kinds within 2.60 m of the stack position)",
+     "continuity bound skipped: no continuity map loaded",
+     "collector: Level 1 (lowest storey excluding roof/technical names)",
+     "no matching core on Level 2: found none, anchor core is none",
+     "roof excluded: Roof (roof/technical storeys never receive auto risers)"
+    ]
+   }
+  },
+  {
+   "stackLabel": "R5",
+   "extent": {
+    "storeyIds": [
+     39
+    ],
+    "collectorStoreyId": 39,
+    "topStoreyId": 39,
+    "anchorCoreFingerprint": "",
+    "reasons": [
+     "anchor core on Level 1: none (fixture kinds within 2.60 m of the stack position)",
+     "continuity bound skipped: no continuity map loaded",
+     "collector: Level 1 (lowest storey excluding roof/technical names)",
+     "no matching core on Level 2: found none, anchor core is none",
+     "roof excluded: Roof (roof/technical storeys never receive auto risers)"
+    ]
+   }
+  }
+ ],
+ "assignments": [
+  {
+   "fixtureExpressId": 118498,
+   "kind": "TOILETPAN",
+   "storeyId": 39,
+   "unassigned": false,
+   "riserId": "<uuid-1>",
+   "stackId": "<uuid-2>",
+   "fixturePosition": {
+    "x": 5.141474999999996,
+    "y": 0.3841749999999834,
+    "z": 9.796311243142876
+   },
+   "riserPosition": {
+    "x": 5.291474999999997,
+    "y": 0.6056375001225058,
+    "z": 8.900119857958298
+   },
+   "planDistance": 0.9086578007583779,
+   "units": "m",
+   "assignedBy": "wet-core",
+   "exceedsMaxBranchLength": false
+  },
+  {
+   "fixtureExpressId": 120371,
+   "kind": "WASHHANDBASIN",
+   "storeyId": 39,
+   "unassigned": false,
+   "riserId": "<uuid-1>",
+   "stackId": "<uuid-2>",
+   "fixturePosition": {
+    "x": 5.012500000000049,
+    "y": 0.8271000002450282,
+    "z": 9.157499999999999
+   },
+   "riserPosition": {
+    "x": 5.291474999999997,
+    "y": 0.6056375001225058,
+    "z": 8.900119857958298
+   },
+   "planDistance": 0.37956763315959474,
+   "units": "m",
+   "assignedBy": "wet-core",
+   "exceedsMaxBranchLength": false
+  },
+  {
+   "fixtureExpressId": 120501,
+   "kind": "TOILETPAN",
+   "storeyId": 39,
+   "unassigned": false,
+   "riserId": "<uuid-1>",
+   "stackId": "<uuid-2>",
+   "fixturePosition": {
+    "x": 3.6585250000000293,
+    "y": 0.3841749999999834,
+    "z": 8.00392847277372
+   },
+   "riserPosition": {
+    "x": 5.291474999999997,
+    "y": 0.6056375001225058,
+    "z": 8.900119857958298
+   },
+   "planDistance": 1.8627089685130485,
+   "units": "m",
+   "assignedBy": "wet-core",
+   "exceedsMaxBranchLength": false
+  },
+  {
+   "fixtureExpressId": 120537,
+   "kind": "WASHHANDBASIN",
+   "storeyId": 39,
+   "unassigned": false,
+   "riserId": "<uuid-1>",
+   "stackId": "<uuid-2>",
+   "fixturePosition": {
+    "x": 3.7874999999999535,
+    "y": 0.8271000002450282,
+    "z": 8.642500000000004
+   },
+   "riserPosition": {
+    "x": 5.291474999999997,
+    "y": 0.6056375001225058,
+    "z": 8.900119857958298
+   },
+   "planDistance": 1.525879678034799,
+   "units": "m",
+   "assignedBy": "wet-core",
+   "exceedsMaxBranchLength": false
+  }
+ ],
+ "routes": [
+  {
+   "storeyId": 39,
+   "planUnits": "m",
+   "segments": [
+    {
+     "start": {
+      "x": 3.6590000000000003,
+      "z": 8.004,
+      "elevation": 0.05056000000000002
+     },
+     "end": {
+      "x": 5.291,
+      "z": 8.004,
+      "elevation": 0.017920000000000016
+     },
+     "axis": "x",
+     "kind": "fixture-branch",
+     "servedFixtureExpressIds": [
+      120501
+     ],
+     "id": "branch-seg|39|<uuid-1>|0",
+     "diameterMm": 110,
+     "riserId": "<uuid-1>",
+     "riserStackId": "<uuid-2>"
+    },
+    {
+     "start": {
+      "x": 3.787,
+      "z": 8.643,
+      "elevation": 0.03522
+     },
+     "end": {
+      "x": 5.291,
+      "z": 8.643,
+      "elevation": 0.0051399999999999935
+     },
+     "axis": "x",
+     "kind": "fixture-branch",
+     "servedFixtureExpressIds": [
+      120537
+     ],
+     "id": "branch-seg|39|<uuid-1>|1",
+     "diameterMm": 50,
+     "riserId": "<uuid-1>",
+     "riserStackId": "<uuid-2>"
+    },
+    {
+     "start": {
+      "x": 5.013,
+      "z": 9.157,
+      "elevation": 0.010700000000000003
+     },
+     "end": {
+      "x": 5.291,
+      "z": 9.157,
+      "elevation": 0.0051399999999999935
+     },
+     "axis": "x",
+     "kind": "fixture-branch",
+     "servedFixtureExpressIds": [
+      120371
+     ],
+     "id": "branch-seg|39|<uuid-1>|2",
+     "diameterMm": 50,
+     "riserId": "<uuid-1>",
+     "riserStackId": "<uuid-2>"
+    },
+    {
+     "start": {
+      "x": 5.141,
+      "z": 9.796,
+      "elevation": 0.020919999999999987
+     },
+     "end": {
+      "x": 5.291,
+      "z": 9.796,
+      "elevation": 0.01791999999999998
+     },
+     "axis": "x",
+     "kind": "fixture-branch",
+     "servedFixtureExpressIds": [
+      118498
+     ],
+     "id": "branch-seg|39|<uuid-1>|3",
+     "diameterMm": 110,
+     "riserId": "<uuid-1>",
+     "riserStackId": "<uuid-2>"
+    },
+    {
+     "start": {
+      "x": 5.291,
+      "z": 8.004,
+      "elevation": 0.017920000000000016
+     },
+     "end": {
+      "x": 5.291,
+      "z": 8.643,
+      "elevation": 0.0051399999999999935
+     },
+     "axis": "z",
+     "kind": "fixture-branch",
+     "servedFixtureExpressIds": [
+      120501
+     ],
+     "id": "branch-seg|39|<uuid-1>|4",
+     "diameterMm": 110,
+     "riserId": "<uuid-1>",
+     "riserStackId": "<uuid-2>"
+    },
+    {
+     "start": {
+      "x": 5.291,
+      "z": 8.643,
+      "elevation": 0.0051399999999999935
+     },
+     "end": {
+      "x": 5.291,
+      "z": 8.9,
+      "elevation": 0
+     },
+     "axis": "z",
+     "kind": "trunk",
+     "servedFixtureExpressIds": [
+      120501,
+      120537
+     ],
+     "id": "branch-seg|39|<uuid-1>|5",
+     "diameterMm": 110,
+     "riserId": "<uuid-1>",
+     "riserStackId": "<uuid-2>"
+    },
+    {
+     "start": {
+      "x": 5.291,
+      "z": 9.796,
+      "elevation": 0.01791999999999998
+     },
+     "end": {
+      "x": 5.291,
+      "z": 9.157,
+      "elevation": 0.0051399999999999935
+     },
+     "axis": "z",
+     "kind": "fixture-branch",
+     "servedFixtureExpressIds": [
+      118498
+     ],
+     "id": "branch-seg|39|<uuid-1>|6",
+     "diameterMm": 110,
+     "riserId": "<uuid-1>",
+     "riserStackId": "<uuid-2>"
+    },
+    {
+     "start": {
+      "x": 5.291,
+      "z": 9.157,
+      "elevation": 0.0051399999999999935
+     },
+     "end": {
+      "x": 5.291,
+      "z": 8.9,
+      "elevation": 0
+     },
+     "axis": "z",
+     "kind": "trunk",
+     "servedFixtureExpressIds": [
+      118498,
+      120371
+     ],
+     "id": "branch-seg|39|<uuid-1>|7",
+     "diameterMm": 110,
+     "riserId": "<uuid-1>",
+     "riserStackId": "<uuid-2>"
+    }
+   ]
+  }
+ ]
+}"
+`;
