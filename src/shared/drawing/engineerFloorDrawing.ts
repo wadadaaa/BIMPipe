@@ -10,18 +10,21 @@ import {
   ENGINEER_FITTING_BRIDGE_TOLERANCE_M,
   ENGINEER_JUNCTION_TOLERANCE_M,
   ENGINEER_SANITARY_SYSTEM_PREFIXES,
+  ENGINEER_SLOPE_AGREEMENT_TOLERANCE_PERCENT,
   ENGINEER_VENT_SYSTEM_PREFIXES,
-  engineerSegmentSlopePercent,
   isFittingConnector,
+  resolveEngineerSegmentSlope,
   selectEngineerServedStacks,
   selectEngineerStoreyHorizontals,
   stacksIntersectingBand,
   storeySlabBandM,
+  type EngineerDrawnSlopeSource,
   type EngineerPipeNetwork,
   type EngineerPipeSegment,
   type EngineerRiserClassification,
   type EngineerRiserStack,
   type EngineerRunRole,
+  type EngineerSlopeResult,
   type EngineerStoreyHorizontal,
   type EngineerStoreyHorizontalRule,
 } from '@/domain/engineerPipes'
@@ -48,7 +51,10 @@ import { resolveRiserTag } from './riserTag'
  * - Pipes: horizontal SW-GRV (and VNT) runs ON the storey — Z in the storey
  *   band or in the hang band under its slab (`ENGINEER_HANG_DEPTH_M`); each
  *   rule's count is reported. Runs are oriented upstream → downstream (start
- *   is the higher end) so `slopePercent` is the fall along the run. Fitting
+ *   is the higher end) so `slopePercent` is the fall along the run; the slope
+ *   comes from the pipe's both-end invert elevations when the file carries
+ *   them, else from the centreline endpoint Z (`resolveEngineerSegmentSlope`;
+ *   the source of every drawn slope is recorded in `diagnostics.slope`). Fitting
  *   connectors (R3: IfcFlowFitting body origin → port) are drawn as
  *   `fitting: true` runs so the network is continuous where pipes meet through
  *   elbow / tee / wye bodies; they carry no slope or label.
@@ -123,6 +129,21 @@ export interface EngineerFloorDrawingDiagnostics {
     /** withSlope / (runs derived from an extrusion axis), 0–1; null when there are none. */
     extrusionCoverage: number | null
     extrusionRuns: number
+    /** Pipe runs carrying invert elevations at both ends (the invert source is possible) vs. not. */
+    withEndInverts: number
+    withoutEndInverts: number
+    /** Pipe runs with a resolved slope (drawn value or outlier verdict) by the source it came from. */
+    bySource: Record<EngineerDrawnSlopeSource, number>
+    /** Source of each drawn pipe run's slope, keyed by pipe id; runs with no resolved slope are absent. */
+    sourceByPipeId: Record<string, EngineerDrawnSlopeSource>
+    /**
+     * Runs where both sources produced a number, binned by |invert − endpoint-Z|
+     * in percentage points (bin key = upper bound, `>1` for the rest).
+     */
+    agreementHistogram: { '<=0.1': number; '<=0.5': number; '<=1': number; '>1': number }
+    agreementTolerancePercent: number
+    /** Runs whose two sources differ by more than the tolerance (invert drawn, disagreement counted). */
+    disagreements: Array<{ pipeId: string; invertPercent: number; endpointZPercent: number }>
   }
   collectors: {
     toleranceM: number
@@ -141,6 +162,13 @@ export interface EngineerFloorDrawingDiagnostics {
 export interface EngineerFloorDrawingResult {
   model: FloorDrawingModel
   diagnostics: EngineerFloorDrawingDiagnostics
+}
+
+/** Numeric value of a slope result that produced one: the drawn percent, or an outlier's raw percent. */
+function slopeNumber(result: EngineerSlopeResult): number {
+  if (result.slopePercent !== null) return result.slopePercent
+  if (result.outlier) return result.rawPercent
+  throw new Error('slope result carries no number')
 }
 
 function countRules(horizontals: readonly EngineerStoreyHorizontal[]): Record<EngineerStoreyHorizontalRule, number> {
@@ -227,6 +255,12 @@ export function buildEngineerFloorDrawing(input: EngineerFloorDrawingInput): Eng
   let extrusionWithSlope = 0
   const outliers: Array<{ pipeId: string; rawPercent: number }> = []
   const diametersMm: Record<string, number> = {}
+  let withEndInverts = 0
+  let withoutEndInverts = 0
+  const bySource: Record<EngineerDrawnSlopeSource, number> = { invert: 0, 'endpoint-z': 0 }
+  const sourceByPipeId: Record<string, EngineerDrawnSlopeSource> = {}
+  const agreementHistogram = { '<=0.1': 0, '<=0.5': 0, '<=1': 0, '>1': 0 }
+  const disagreements: Array<{ pipeId: string; invertPercent: number; endpointZPercent: number }> = []
   const pipes: DrawingPipeRun[] = drawnHorizontals.map(({ entry, system }) => {
     const segment = entry.segment
     if (isFittingConnector(segment)) {
@@ -251,7 +285,28 @@ export function buildEngineerFloorDrawing(input: EngineerFloorDrawingInput): Eng
       ;[start, end] = [end, start]
       flipped += 1
     }
-    const slope = engineerSegmentSlopePercent({ start, end, invertElevationM: segment.invertElevationM }, scale)
+    const resolved = resolveEngineerSegmentSlope(
+      { start, end, invertElevationM: segment.invertElevationM, endInvertElevationsM: segment.endInvertElevationsM },
+      scale,
+    )
+    const slope = resolved.slope
+    if (resolved.invert === null) withoutEndInverts += 1
+    else withEndInverts += 1
+    if (resolved.source !== null) {
+      bySource[resolved.source] += 1
+      sourceByPipeId[id] = resolved.source
+    }
+    if (resolved.differencePercent !== null) {
+      const difference = resolved.differencePercent
+      if (difference <= 0.1) agreementHistogram['<=0.1'] += 1
+      else if (difference <= 0.5) agreementHistogram['<=0.5'] += 1
+      else if (difference <= 1) agreementHistogram['<=1'] += 1
+      else agreementHistogram['>1'] += 1
+      if (resolved.disagrees) {
+        // Both sources produced a number here (differencePercent is non-null): drawn value or outlier raw value.
+        disagreements.push({ pipeId: id, invertPercent: slopeNumber(resolved.invert!), endpointZPercent: slopeNumber(resolved.endpointZ) })
+      }
+    }
     if (segment.endpointSource === 'extrusion-axis') extrusionRuns += 1
     if (slope.slopePercent !== null) {
       withSlope += 1
@@ -356,6 +411,13 @@ export function buildEngineerFloorDrawing(input: EngineerFloorDrawingInput): Eng
       outliers,
       extrusionCoverage: extrusionRuns === 0 ? null : extrusionWithSlope / extrusionRuns,
       extrusionRuns,
+      withEndInverts,
+      withoutEndInverts,
+      bySource,
+      sourceByPipeId,
+      agreementHistogram,
+      agreementTolerancePercent: ENGINEER_SLOPE_AGREEMENT_TOLERANCE_PERCENT,
+      disagreements,
     },
     collectors: {
       toleranceM: roles.toleranceM,

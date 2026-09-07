@@ -18,6 +18,7 @@ import {
   ENGINEER_HANG_DEPTH_MM,
   ENGINEER_JUNCTION_TOLERANCE_M,
   ENGINEER_JUNCTION_TOLERANCE_MM,
+  ENGINEER_SLOPE_AGREEMENT_TOLERANCE_PERCENT,
   ENGINEER_SLOPE_MAX_REPORTED_PERCENT,
   ENGINEER_SLOPE_MIN_DATA_M,
   ENGINEER_SLOPE_MIN_DATA_MM,
@@ -35,6 +36,7 @@ import {
   engineerSegmentHorizontalLengthM,
   engineerSegmentSlopePercent,
   isVerticalEngineerSegment,
+  resolveEngineerSegmentSlope,
   selectEngineerBranchSegments,
   selectEngineerStoreyHorizontals,
   slopePercentFromInvertElevations,
@@ -756,6 +758,97 @@ describe('slope math', () => {
     expect(ENGINEER_SLOPE_MIN_DATA_M).toBeCloseTo(ENGINEER_SLOPE_MIN_DATA_MM / 1000, 12)
     expect(ENGINEER_SLOPE_MIN_RUN_M).toBeCloseTo(ENGINEER_SLOPE_MIN_RUN_MM / 1000, 12)
     expect(ENGINEER_SLOPE_MAX_REPORTED_PERCENT).toBe(10)
+  })
+})
+
+describe('resolveEngineerSegmentSlope (invert elevations with endpoint-Z fallback)', () => {
+  // 4 m run along X falling 8 cm start → end by its centreline (2 %).
+  const falling = (overrides: Partial<EngineerPipeSegment> = {}) => horizontal(1, 0, 0, 400, 0, 108, 100, overrides)
+  // Inverts on their own datum (Revit's are not the geometry's): 20 m above, same 8 cm fall.
+  const agreeingInverts = { upperEndM: 21.0, lowerEndM: 20.92 }
+
+  it('draws the invert slope when both ends carry an invert, and reports agreement with endpoint Z', () => {
+    const result = resolveEngineerSegmentSlope(falling({ endInvertElevationsM: agreeingInverts }), 0.01)
+    expect(result.source).toBe('invert')
+    expect(result.slope.slopePercent).toBeCloseTo(2, 9)
+    expect(result.slope.source).toBe('invert-elevations')
+    expect(result.invert!.slopePercent).toBeCloseTo(2, 9)
+    expect(result.endpointZ.slopePercent).toBeCloseTo(2, 9)
+    expect(result.differencePercent).toBeCloseTo(0, 9)
+    expect(result.disagrees).toBe(false)
+    expect(result.agreementTolerancePercent).toBe(ENGINEER_SLOPE_AGREEMENT_TOLERANCE_PERCENT)
+  })
+
+  it('prefers the invert slope over endpoint Z when they disagree beyond the tolerance, and flags the run', () => {
+    // Inverts say 4 cm over 4 m = 1 %; the centreline says 2 %: 1 pp apart.
+    const result = resolveEngineerSegmentSlope(falling({ endInvertElevationsM: { upperEndM: 21.0, lowerEndM: 20.96 } }), 0.01)
+    expect(result.source).toBe('invert')
+    expect(result.slope.slopePercent).toBeCloseTo(1, 9)
+    expect(result.endpointZ.slopePercent).toBeCloseTo(2, 9)
+    expect(result.differencePercent).toBeCloseTo(1, 9)
+    expect(result.disagrees).toBe(true)
+    // A wider tolerance turns the same pair into an agreement; the drawn value is unchanged.
+    const lenient = resolveEngineerSegmentSlope(falling({ endInvertElevationsM: { upperEndM: 21.0, lowerEndM: 20.96 } }), 0.01, {
+      agreementTolerancePercent: 1.5,
+    })
+    expect(lenient.disagrees).toBe(false)
+    expect(lenient.slope.slopePercent).toBeCloseTo(1, 9)
+  })
+
+  it('falls back to endpoint Z when the run carries no both-end inverts — a single invert is never a slope', () => {
+    for (const segment of [falling(), falling({ endInvertElevationsM: null }), falling({ invertElevationM: 20.92 })]) {
+      const result = resolveEngineerSegmentSlope(segment, 0.01)
+      expect(result.source).toBe('endpoint-z')
+      expect(result.slope).toEqual({ slopePercent: 2, source: 'endpoint-z', outlier: false, flat: false })
+      expect(result.invert).toBeNull()
+      expect(result.differencePercent).toBeNull()
+      expect(result.disagrees).toBe(false)
+    }
+  })
+
+  it('signs the invert slope along start → end from the centreline (a rising run is negative, like endpoint Z)', () => {
+    const rising = horizontal(1, 0, 0, 400, 0, 100, 108, { endInvertElevationsM: agreeingInverts })
+    const result = resolveEngineerSegmentSlope(rising, 0.01)
+    expect(result.source).toBe('invert')
+    expect(result.slope.slopePercent).toBeCloseTo(-2, 9)
+    expect(result.endpointZ.slopePercent).toBeCloseTo(-2, 9)
+    expect(result.disagrees).toBe(false)
+  })
+
+  it('uses the absolute difference of a pair written the wrong way round', () => {
+    const result = resolveEngineerSegmentSlope(falling({ endInvertElevationsM: { upperEndM: 20.92, lowerEndM: 21.0 } }), 0.01)
+    expect(result.slope.slopePercent).toBeCloseTo(2, 9)
+    expect(result.source).toBe('invert')
+  })
+
+  it('reports an invert 0 % as a measured flat, and compares outliers by their raw value', () => {
+    const flat = resolveEngineerSegmentSlope(falling({ endInvertElevationsM: { upperEndM: 21.0, lowerEndM: 21.0 } }), 0.01)
+    expect(flat.slope).toEqual({ slopePercent: 0, source: 'invert-elevations', outlier: false, flat: true })
+    expect(flat.disagrees).toBe(true) // 0 % vs the centreline's 2 %
+    // 45° offset: both sources say ~100 %, both outliers, no disagreement.
+    const offset = horizontal(1, 0, 0, 30, 0, 340, 310, { endInvertElevationsM: { upperEndM: 3.3, lowerEndM: 3.0 } })
+    const result = resolveEngineerSegmentSlope(offset, 0.01)
+    expect(result.source).toBe('invert')
+    expect(result.slope.slopePercent).toBeNull()
+    expect(result.slope.outlier).toBe(true)
+    expect(result.differencePercent).toBeCloseTo(0, 6)
+    expect(result.disagrees).toBe(false)
+  })
+
+  it('falls through to endpoint Z (also unresolved) when the run is too short for either source to resolve', () => {
+    const tiny = horizontal(1, 0, 0, 5, 0, 100, 100.05, { endInvertElevationsM: { upperEndM: 1.0005, lowerEndM: 1.0 } })
+    const result = resolveEngineerSegmentSlope(tiny, 0.01)
+    expect(result.source).toBeNull()
+    expect(result.slope.slopePercent).toBeNull()
+    expect(result.invert!.source).toBeNull()
+    expect(result.differencePercent).toBeNull()
+  })
+
+  it('has no slope at all without a centreline, even with inverts', () => {
+    const result = resolveEngineerSegmentSlope(segment({ expressId: 1, start: null, end: null, endInvertElevationsM: agreeingInverts }), 0.01)
+    expect(result.source).toBeNull()
+    expect(result.invert).toBeNull()
+    expect(result.slope).toEqual({ slopePercent: null, source: null, outlier: false, reason: 'no resolved centreline' })
   })
 })
 

@@ -235,6 +235,66 @@ describe('buildEngineerFloorDrawing (synthetic)', () => {
     expect(diagnostics.slope.extrusionCoverage).toBeCloseTo(6 / 7, 9)
   })
 
+  it('records that every slope came from endpoint Z when no run carries both-end inverts', () => {
+    const { diagnostics } = build()
+    expect(diagnostics.slope.withEndInverts).toBe(0)
+    expect(diagnostics.slope.withoutEndInverts).toBe(7)
+    // 6 drawn values + the outlier verdict on h7, all from the centreline.
+    expect(diagnostics.slope.bySource).toEqual({ invert: 0, 'endpoint-z': 7 })
+    expect(Object.keys(diagnostics.slope.sourceByPipeId).sort()).toEqual(
+      ['engineer-pipe-11', 'engineer-pipe-12', 'engineer-pipe-13', 'engineer-pipe-14', 'engineer-pipe-15', 'engineer-pipe-17', 'engineer-pipe-18'],
+    )
+    expect(diagnostics.slope.agreementHistogram).toEqual({ '<=0.1': 0, '<=0.5': 0, '<=1': 0, '>1': 0 })
+    expect(diagnostics.slope.agreementTolerancePercent).toBe(0.5)
+    expect(diagnostics.slope.disagreements).toEqual([])
+  })
+
+  it('draws slopes from both-end invert elevations where present, falls back to endpoint Z elsewhere, and counts disagreements', () => {
+    const network = syntheticNetwork()
+    network.segments = network.segments.map((segment) => {
+      // h1: inverts on their own datum agreeing with the centreline (12 cm over 6 m = 2 %).
+      if (segment.expressId === 11) return { ...segment, endInvertElevationsM: { upperEndM: 50.12, lowerEndM: 50.0 } }
+      // h4 (drawn flipped): inverts say 3 cm over 3 m = 1 %, the centreline 4 cm = 1.33 % → agree within 0.5 pp.
+      if (segment.expressId === 14) return { ...segment, endInvertElevationsM: { upperEndM: 50.03, lowerEndM: 50.0 } }
+      // h5: inverts say 9 cm over 3 m = 3 %, the centreline 12 cm = 4 % → disagreement; invert drawn.
+      if (segment.expressId === 15) return { ...segment, endInvertElevationsM: { upperEndM: 50.09, lowerEndM: 50.0 } }
+      // h8 (vent, flat by geometry): a single Pset invert only — never a slope source.
+      if (segment.expressId === 18) return { ...segment, invertElevationM: 4.96 }
+      return segment
+    })
+    const classification = classifyEngineerRiserStacks(network, CLASSES)
+    const { model, diagnostics } = build({ network, classification })
+    const byId = new Map(model.pipes.map((pipe) => [pipe.id, pipe]))
+    expect(byId.get('engineer-pipe-11')!.slopePercent).toBeCloseTo(2, 9)
+    expect(byId.get('engineer-pipe-14')!.slopePercent).toBeCloseTo(1, 9)
+    expect(byId.get('engineer-pipe-15')!.slopePercent).toBeCloseTo(3, 9)
+    expect(byId.get('engineer-pipe-12')!.slopePercent).toBeCloseTo(2, 9)
+    expect(byId.get('engineer-pipe-18')!.slopePercent).toBe(0)
+    // Flipped runs keep a positive fall from either source.
+    for (const pipe of model.pipes) if (pipe.slopePercent !== null) expect(pipe.slopePercent).toBeGreaterThanOrEqual(0)
+
+    expect(diagnostics.slope.withEndInverts).toBe(3)
+    expect(diagnostics.slope.withoutEndInverts).toBe(4)
+    expect(diagnostics.slope.bySource).toEqual({ invert: 3, 'endpoint-z': 4 })
+    expect(diagnostics.slope.sourceByPipeId).toEqual({
+      'engineer-pipe-11': 'invert',
+      'engineer-pipe-12': 'endpoint-z',
+      'engineer-pipe-13': 'endpoint-z',
+      'engineer-pipe-14': 'invert',
+      'engineer-pipe-15': 'invert',
+      'engineer-pipe-17': 'endpoint-z',
+      'engineer-pipe-18': 'endpoint-z',
+    })
+    expect(diagnostics.slope.agreementHistogram).toEqual({ '<=0.1': 1, '<=0.5': 1, '<=1': 1, '>1': 0 })
+    expect(diagnostics.slope.disagreements).toHaveLength(1)
+    expect(diagnostics.slope.disagreements[0].pipeId).toBe('engineer-pipe-15')
+    expect(diagnostics.slope.disagreements[0].invertPercent).toBeCloseTo(3, 9)
+    expect(diagnostics.slope.disagreements[0].endpointZPercent).toBeCloseTo(4, 9)
+    // Coverage / flat / outlier counts are source-independent here.
+    expect(diagnostics.slope.withSlope).toBe(6)
+    expect(diagnostics.slope.outliers.map((outlier) => outlier.pipeId)).toEqual(['engineer-pipe-17'])
+  })
+
   it('marks the run joined by two upstream branches as the collector', () => {
     const { model, diagnostics } = build()
     expect(model.pipes.filter((pipe) => pipe.role === 'collector').map((pipe) => pipe.id)).toEqual(['engineer-pipe-11'])

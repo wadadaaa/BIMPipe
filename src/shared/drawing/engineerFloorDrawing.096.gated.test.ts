@@ -43,6 +43,13 @@ const PIN_SANITARY_TOTAL = 125
 // pieces at ~100 %, one at 15.6 %) drawn without a slope.
 const MIN_SLOPE_COVERAGE = 0.8
 const PIN_SLOPE_COVERAGE = 0.896
+// Slope source (S2): this export carries a single Pset_FlowSegmentPipeSegment
+// InvertElevation per pipe and no per-end Revit inverts (0 of 413 model pipes),
+// so no run has a both-end invert pair and every resolved slope (112 values +
+// 11 outlier verdicts) comes from centreline endpoint Z. Nothing to disagree.
+const PIN_SLOPE_WITH_END_INVERTS = 0
+const PIN_SLOPE_BY_SOURCE = { invert: 0, 'endpoint-z': 123 }
+const PIN_SLOPE_DISAGREEMENTS = 0
 // Collector role at the strict 50 mm endpoint-coincidence rule. R3 draws the
 // IfcFlowFitting bodies as port connectors, so a pipe end now meets a
 // connector end at the port and most junctions ARE endpoint-coincident
@@ -156,6 +163,11 @@ gated('engineer + our floor drawings on 096 storey 01 (gated: requires local cli
         }
         // Every outlier is a steep offset piece, never drawn as a slope.
         for (const outlier of engineer.diagnostics.slope.outliers) expect(Math.abs(outlier.rawPercent)).toBeGreaterThan(10)
+        expect(engineer.diagnostics.slope.withEndInverts).toBe(PIN_SLOPE_WITH_END_INVERTS)
+        expect(engineer.diagnostics.slope.withoutEndInverts).toBe(PIN_SANITARY_TOTAL)
+        expect(engineer.diagnostics.slope.bySource).toEqual(PIN_SLOPE_BY_SOURCE)
+        expect(engineer.diagnostics.slope.disagreements).toHaveLength(PIN_SLOPE_DISAGREEMENTS)
+        expect(new Set(Object.values(engineer.diagnostics.slope.sourceByPipeId))).toEqual(new Set(['endpoint-z']))
 
         expect(engineer.diagnostics.collectors.count).toBe(PIN_COLLECTORS_STRICT)
         expect(engineer.diagnostics.collectors.bridged.count).toBeGreaterThanOrEqual(PIN_COLLECTORS_STRICT)

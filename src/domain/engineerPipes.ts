@@ -67,6 +67,16 @@ export interface EngineerPipeSegment {
   /** Pset_FlowSegmentPipeSegment.InvertElevation in metres; null when absent. */
   invertElevationM: number | null
   /**
+   * Invert elevation at BOTH ends of the run (metres, one shared datum) when
+   * the model carries them — Revit exports write `Upper End Invert Elevation`
+   * / `Lower End Invert Elevation` when its property sets are included. The
+   * datum may differ from `invertElevationM`'s (measured on the second
+   * project: 18 m apart), so only the DIFFERENCE is meaningful; see
+   * {@link resolveEngineerSegmentSlope}. Optional so older fixtures stay
+   * valid; null when either end is missing (a single invert is not a slope).
+   */
+  endInvertElevationsM?: EngineerEndInvertElevationsM | null
+  /**
    * `fitting` marks a synthetic connector derived from an IfcFlowFitting body
    * (its placement origin → one of its IfcDistributionPorts, see
    * {@link fittingConnectorExpressId}); absent or `pipe` for a real
@@ -80,6 +90,12 @@ export interface EngineerPipeSegment {
 
 /** Which IFC element a segment was derived from. Absent means `pipe`. */
 export type EngineerSegmentElementKind = 'pipe' | 'fitting'
+
+/** Invert elevations of a run's higher and lower end, metres on one shared datum. */
+export interface EngineerEndInvertElevationsM {
+  upperEndM: number
+  lowerEndM: number
+}
 
 export interface EngineerPipeNetwork {
   /** Explicit source-unit conversion (metres per one source unit). */
@@ -728,6 +744,108 @@ export function engineerSegmentSlopePercent(
   }
   const fallM = (segment.start.z - segment.end.z) * metersPerSourceUnit
   return classifySlope(fallM, horizontalM, 'endpoint-z')
+}
+
+/**
+ * The invert-derived and endpoint-Z slopes of one run agree when they differ
+ * by at most this many percentage points. For a constant-diameter pipe both
+ * describe the same fall (invert = centreline − radius at either end), so a
+ * larger difference means the file's parameters and its geometry disagree;
+ * the invert value is preferred and the disagreement is counted. 0.5 pp is
+ * five label steps (labels print one decimal) and, on the 100 mm shortest run
+ * that resolves a slope, equals the 1 mm data resolution — so no run that
+ * resolves at all can disagree on rounding noise alone.
+ */
+export const ENGINEER_SLOPE_AGREEMENT_TOLERANCE_PERCENT = 0.5
+
+/** Where a drawn slope came from: both-end invert elevations, or the centreline endpoint Z. */
+export type EngineerDrawnSlopeSource = 'invert' | 'endpoint-z'
+
+export interface EngineerResolvedSegmentSlope {
+  /** The slope to draw (see `source`). */
+  slope: EngineerSlopeResult
+  /** Source of `slope`; null when neither source resolved a slope. */
+  source: EngineerDrawnSlopeSource | null
+  /** Endpoint-Z slope, always computed as the comparison baseline. */
+  endpointZ: EngineerSlopeResult
+  /** Invert-derived slope; null when the run carries no both-end inverts. */
+  invert: EngineerSlopeResult | null
+  /**
+   * |invert − endpoint-Z| in percentage points when both sources produced a
+   * number (outliers compare by their raw value); null otherwise.
+   */
+  differencePercent: number | null
+  /** `differencePercent` exceeds the agreement tolerance. */
+  disagrees: boolean
+  agreementTolerancePercent: number
+}
+
+export interface ResolveEngineerSegmentSlopeOptions {
+  /** Overrides {@link ENGINEER_SLOPE_AGREEMENT_TOLERANCE_PERCENT}. */
+  agreementTolerancePercent?: number
+}
+
+/** Numeric slope of a result for comparison: the drawn value, or an outlier's raw value. */
+function slopeValueForComparison(result: EngineerSlopeResult): number | null {
+  if (result.slopePercent !== null) return result.slopePercent
+  return result.outlier ? result.rawPercent : null
+}
+
+/**
+ * Slope of one run, positive when it falls from `start` to `end`, from the
+ * best source the segment carries:
+ *
+ * 1. `invert` — when the model gives the invert elevation at BOTH ends
+ *    (`endInvertElevationsM`): fall = upper − lower over the plan length,
+ *    signed along start → end by the centreline (a run whose end is the higher
+ *    endpoint gets a negative slope, exactly as the endpoint-Z rule does, so a
+ *    caller that flips rising runs treats both sources alike). A pair written
+ *    the wrong way round is used by its absolute difference. A single invert
+ *    value (`invertElevationM`) is never turned into a slope: without the other
+ *    end's invert it says nothing about the fall.
+ * 2. `endpoint-z` — otherwise, or when the inverts cannot resolve a slope (run
+ *    shorter than the data resolution): the centreline endpoint Z difference,
+ *    via {@link engineerSegmentSlopePercent}.
+ *
+ * Both are computed whenever possible and compared; when they differ by more
+ * than `agreementTolerancePercent` the invert value is still preferred and the
+ * run is flagged (`disagrees`) so the caller can count it. Pure and
+ * deterministic; all lengths in metres.
+ */
+export function resolveEngineerSegmentSlope(
+  segment: Pick<EngineerPipeSegment, 'start' | 'end' | 'invertElevationM' | 'endInvertElevationsM'>,
+  metersPerSourceUnit: number,
+  options: ResolveEngineerSegmentSlopeOptions = {},
+): EngineerResolvedSegmentSlope {
+  const agreementTolerancePercent = options.agreementTolerancePercent ?? ENGINEER_SLOPE_AGREEMENT_TOLERANCE_PERCENT
+  const endpointZ = engineerSegmentSlopePercent(segment, metersPerSourceUnit)
+
+  let invert: EngineerSlopeResult | null = null
+  const inverts = segment.endInvertElevationsM ?? null
+  if (inverts !== null && Number.isFinite(inverts.upperEndM) && Number.isFinite(inverts.lowerEndM) && segment.start !== null && segment.end !== null) {
+    const horizontalM = engineerSegmentHorizontalLengthM(segment, metersPerSourceUnit)
+    const fallM = Math.abs(inverts.upperEndM - inverts.lowerEndM)
+    // Sign along start → end from the centreline: start higher (or level) → falls, else rises.
+    const risesStartToEnd = segment.end.z > segment.start.z
+    invert = slopePercentFromInvertElevations(risesStartToEnd ? 0 : fallM, risesStartToEnd ? fallM : 0, horizontalM)
+  }
+
+  const invertResolved = invert !== null && invert.source !== null
+  const slope = invertResolved ? invert! : endpointZ
+  const source: EngineerDrawnSlopeSource | null = invertResolved ? 'invert' : endpointZ.source === null ? null : 'endpoint-z'
+
+  const invertValue = invert === null ? null : slopeValueForComparison(invert)
+  const endpointValue = slopeValueForComparison(endpointZ)
+  const differencePercent = invertValue === null || endpointValue === null ? null : Math.abs(invertValue - endpointValue)
+  return {
+    slope,
+    source,
+    endpointZ,
+    invert,
+    differencePercent,
+    disagrees: differencePercent !== null && differencePercent > agreementTolerancePercent,
+    agreementTolerancePercent,
+  }
 }
 
 // ---------------------------------------------------------------------------

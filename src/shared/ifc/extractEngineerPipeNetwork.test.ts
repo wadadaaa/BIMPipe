@@ -67,6 +67,12 @@ interface PipeSpec {
   radiusCm: number
   /** Pset Length / InvertElevation in cm; omit for a pset-less pipe. */
   pset?: { lengthCm: number; invertElevationCm: number }
+  /**
+   * Revit "Constraints" group as exported with Revit property sets: per-end
+   * invert elevations in cm on the project's own datum. `lowerCm: null` writes
+   * only the upper value (an incomplete pair).
+   */
+  revitEndInvertsCm?: { upperCm: number; lowerCm: number | null }
   system: string
   storey: string
 }
@@ -230,6 +236,25 @@ function buildSyntheticPlumbingIfc(options: SyntheticModelOptions = {}): Synthet
       b.add(
         `IFCRELDEFINESBYPROPERTIES('${b.guid()}',#${ownerHistory},$,$,(#${pipe}),#${pset})`,
       )
+    }
+    if (spec.revitEndInvertsCm !== undefined) {
+      const properties = [
+        b.add(
+          `IFCPROPERTYSINGLEVALUE('Upper End Invert Elevation',$,IFCLENGTHMEASURE(${formatStepNumber(spec.revitEndInvertsCm.upperCm)}),$)`,
+        ),
+        b.add(`IFCPROPERTYSINGLEVALUE('Reference Level',$,IFCLABEL('${spec.storey}'),$)`),
+      ]
+      if (spec.revitEndInvertsCm.lowerCm !== null) {
+        properties.push(
+          b.add(
+            `IFCPROPERTYSINGLEVALUE('Lower End Invert Elevation',$,IFCLENGTHMEASURE(${formatStepNumber(spec.revitEndInvertsCm.lowerCm)}),$)`,
+          ),
+        )
+      }
+      const pset = b.add(
+        `IFCPROPERTYSET('${b.guid()}',#${ownerHistory},'Constraints',$,(${properties.map((id) => `#${id}`).join(',')}))`,
+      )
+      b.add(`IFCRELDEFINESBYPROPERTIES('${b.guid()}',#${ownerHistory},$,$,(#${pipe}),#${pset})`)
     }
 
     pipesByStorey.set(spec.storey, [...(pipesByStorey.get(spec.storey) ?? []), pipe])
@@ -409,6 +434,8 @@ function buildSyntheticPlumbingIfc(options: SyntheticModelOptions = {}): Synthet
     depthCm: 300,
     radiusCm: 5.5,
     pset: { lengthCm: 300, invertElevationCm: 15 },
+    // Incomplete Revit pair (upper end only): must not become an end-invert pair.
+    revitEndInvertsCm: { upperCm: 1315, lowerCm: null },
     system: 'XX-GRV 1',
     storey: 'Level A',
   })
@@ -448,6 +475,8 @@ function buildSyntheticPlumbingIfc(options: SyntheticModelOptions = {}): Synthet
     depthCm: 250,
     radiusCm: 2.5,
     pset: { lengthCm: 250, invertElevationCm: 10 },
+    // Revit per-end inverts on the project datum (10 m above the geometry's): 5 cm fall.
+    revitEndInvertsCm: { upperCm: 1005, lowerCm: 1000 },
     system: 'XX-GRV 1',
     storey: 'Level A',
   })
@@ -528,6 +557,8 @@ describe('extractEngineerPipeNetwork on a synthetic centimetre model (real web-i
       expect(riser1A.outerDiameterMm).toBeCloseTo(110, 9)
       expect(riser1A.lengthM).toBeCloseTo(3, 9)
       expect(riser1A.invertElevationM).toBeCloseTo(0.15, 9)
+      // Only the upper-end Revit invert is written: an incomplete pair is null, never half a slope.
+      expect(riser1A.endInvertElevationsM).toBeNull()
 
       const riser1B = byName.get('XX-GRV Riser 1 Level B')!
       expect(riser1B.storeyName).toBe('Level B')
@@ -544,11 +575,19 @@ describe('extractEngineerPipeNetwork on a synthetic centimetre model (real web-i
       expect(branch.end!.x).toBeCloseTo(100 + (1 / axisNorm) * 250, 6)
       expect(branch.end!.y).toBeCloseTo(200, 6)
       expect(branch.end!.z).toBeCloseTo(10 + (0.02 / axisNorm) * 250, 6)
+      // Revit's `Upper/Lower End Invert Elevation` (any pset, by property name) → metres, both ends.
+      expect(branch.endInvertElevationsM).not.toBeNull()
+      expect(branch.endInvertElevationsM!.upperEndM).toBeCloseTo(10.05, 9)
+      expect(branch.endInvertElevationsM!.lowerEndM).toBeCloseTo(10.0, 9)
+      // The standard pset values are unaffected by the extra pset.
+      expect(branch.lengthM).toBeCloseTo(2.5, 9)
+      expect(branch.invertElevationM).toBeCloseTo(0.1, 9)
 
       // Pset-less pipe surfaces nulls, never fabricated values.
       const psetless = byName.get('XX-GRV Small Vertical')!
       expect(psetless.lengthM).toBeNull()
       expect(psetless.invertElevationM).toBeNull()
+      expect(psetless.endInvertElevationsM).toBeNull()
       expect(psetless.outerDiameterMm).toBeCloseTo(50, 9)
 
       // Segments sorted by expressId ascending (determinism).

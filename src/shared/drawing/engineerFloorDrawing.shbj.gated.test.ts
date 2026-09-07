@@ -50,6 +50,17 @@ const PIN_SANITARY_TOTAL = 49
 // floor MISSES the 80 % target by one run; the measured value is pinned as-is
 // rather than tuned.
 const PIN_SLOPE_COVERAGE = 39 / 49
+// Slope source (S2): every pipe in this export carries Revit's per-end
+// `Upper/Lower End Invert Elevation` (87 of 87 model pipes; all 49 drawn runs).
+// The 44 resolved slopes (39 values + 5 outlier verdicts) are drawn from the
+// invert pair; the 5 below-resolution pieces stay null from either source. The
+// invert slope agrees with the centreline endpoint-Z slope within 0.1 pp on all
+// 44 (max |diff| 0.0000 pp), so no label changed and nothing disagrees at the
+// 0.5 pp tolerance.
+const PIN_SLOPE_WITH_END_INVERTS = 49
+const PIN_SLOPE_BY_SOURCE = { invert: 44, 'endpoint-z': 0 }
+const PIN_SLOPE_AGREEMENT_HISTOGRAM = { '<=0.1': 44, '<=0.5': 0, '<=1': 0, '>1': 0 }
+const PIN_SLOPE_DISAGREEMENTS = 0
 // No two horizontal runs meet within 50 mm on this model (every joint is a
 // fitting); R3's connectors keep the collector role on the pipes, and no pipe
 // gathers two feeders through one body at the strict rule here.
@@ -156,6 +167,12 @@ gated('engineer + our floor drawings on the second project MEP storey (gated: re
         expect(engineer.diagnostics.slope.flat).toBe(4)
         expect(engineer.diagnostics.slope.belowResolution).toBe(5)
         expect(engineer.diagnostics.slope.outliers).toHaveLength(5)
+        expect(engineer.diagnostics.slope.withEndInverts).toBe(PIN_SLOPE_WITH_END_INVERTS)
+        expect(engineer.diagnostics.slope.withoutEndInverts).toBe(0)
+        expect(engineer.diagnostics.slope.bySource).toEqual(PIN_SLOPE_BY_SOURCE)
+        expect(engineer.diagnostics.slope.agreementHistogram).toEqual(PIN_SLOPE_AGREEMENT_HISTOGRAM)
+        expect(engineer.diagnostics.slope.disagreements).toHaveLength(PIN_SLOPE_DISAGREEMENTS)
+        expect(new Set(Object.values(engineer.diagnostics.slope.sourceByPipeId))).toEqual(new Set(['invert']))
         for (const pipe of engineer.model.pipes) {
           if (pipe.slopePercent === null) continue
           expect(pipe.slopePercent).toBeGreaterThanOrEqual(0)

@@ -4,6 +4,7 @@ import {
   ENGINEER_FITTING_MAX_PORTS,
   ENGINEER_JUNCTION_TOLERANCE_M,
   fittingConnectorExpressId,
+  type EngineerEndInvertElevationsM,
   type EngineerEndpointSource,
   type EngineerPipeNetwork,
   type EngineerPipeSegment,
@@ -60,6 +61,18 @@ import { resolveModelLengthUnit } from './resolveModelLengthUnit'
  */
 
 const PSET_FLOW_SEGMENT_PIPE_SEGMENT = 'Pset_FlowSegmentPipeSegment'
+
+/**
+ * Revit's per-end invert parameters, exported (in the model's length unit,
+ * under the `Constraints` group) when "Export Revit property sets" is on.
+ * Matched by property NAME in any pset attached to the pipe, because the group
+ * name is a Revit UI label. Census (2026-09-07): present on 132/132 pipes of
+ * the second project's sanitary model; absent from the first project's
+ * plumbing model (Pset invert only) — neither file carries a
+ * `Start/End Invert Elevation` pair, so no other spelling is read.
+ */
+const REVIT_UPPER_END_INVERT_PROPERTY = 'Upper End Invert Elevation'
+const REVIT_LOWER_END_INVERT_PROPERTY = 'Lower End Invert Elevation'
 
 /** Mesh-bounds centrelines shorter than this (in metres) are treated as unresolved. */
 const MIN_MESH_BOUNDS_LENGTH_M = 0.001
@@ -374,9 +387,25 @@ async function buildElementSystemNamesMap(
 interface PipePsetValues {
   lengthSource: number | null
   invertElevationSource: number | null
+  /** Revit `Upper End Invert Elevation` (source units); null when absent. */
+  upperEndInvertSource: number | null
+  /** Revit `Lower End Invert Elevation` (source units); null when absent. */
+  lowerEndInvertSource: number | null
 }
 
-/** Reads Length / InvertElevation (in SOURCE units) for the candidate pipes. */
+const EMPTY_PSET_VALUES: PipePsetValues = {
+  lengthSource: null,
+  invertElevationSource: null,
+  upperEndInvertSource: null,
+  lowerEndInvertSource: null,
+}
+
+/**
+ * Reads, in SOURCE units, for the candidate pipes: `Length` / `InvertElevation`
+ * from `Pset_FlowSegmentPipeSegment`, and Revit's per-end invert properties
+ * from any pset attached to the pipe (see the constants above). Absent values
+ * stay null; the first value seen per property wins.
+ */
 async function buildPipePsetMap(
   api: IfcAPI,
   webIfcModelId: number,
@@ -397,25 +426,29 @@ async function buildPipePsetMap(
     if (typeof definitionId !== 'number') continue
     if (api.GetLineType(webIfcModelId, definitionId) !== IFCPROPERTYSET) continue
     const pset = api.GetLine(webIfcModelId, definitionId, false) as IfcLine
-    if (pset?.Name?.value !== PSET_FLOW_SEGMENT_PIPE_SEGMENT) continue
+    const isStandardPipePset = pset?.Name?.value === PSET_FLOW_SEGMENT_PIPE_SEGMENT
 
-    let lengthSource: number | null = null
-    let invertElevationSource: number | null = null
+    const found: PipePsetValues = { ...EMPTY_PSET_VALUES }
     for (const propertyId of readHandleIds(pset?.HasProperties)) {
       if (api.GetLineType(webIfcModelId, propertyId) !== IFCPROPERTYSINGLEVALUE) continue
       const property = api.GetLine(webIfcModelId, propertyId, false) as IfcLine
       const propertyName: string | undefined = property?.Name?.value
       const rawValue = property?.NominalValue?.value
       const numericValue = typeof rawValue === 'number' ? rawValue : null
-      if (propertyName === 'Length') lengthSource = numericValue
-      if (propertyName === 'InvertElevation') invertElevationSource = numericValue
+      if (isStandardPipePset && propertyName === 'Length') found.lengthSource = numericValue
+      if (isStandardPipePset && propertyName === 'InvertElevation') found.invertElevationSource = numericValue
+      if (propertyName === REVIT_UPPER_END_INVERT_PROPERTY) found.upperEndInvertSource = numericValue
+      if (propertyName === REVIT_LOWER_END_INVERT_PROPERTY) found.lowerEndInvertSource = numericValue
     }
+    if (Object.values(found).every((value) => value === null)) continue
 
     for (const elementId of relatedIds) {
-      const existing = psetMap.get(elementId) ?? { lengthSource: null, invertElevationSource: null }
+      const existing = psetMap.get(elementId) ?? EMPTY_PSET_VALUES
       psetMap.set(elementId, {
-        lengthSource: existing.lengthSource ?? lengthSource,
-        invertElevationSource: existing.invertElevationSource ?? invertElevationSource,
+        lengthSource: existing.lengthSource ?? found.lengthSource,
+        invertElevationSource: existing.invertElevationSource ?? found.invertElevationSource,
+        upperEndInvertSource: existing.upperEndInvertSource ?? found.upperEndInvertSource,
+        lowerEndInvertSource: existing.lowerEndInvertSource ?? found.lowerEndInvertSource,
       })
     }
   }
@@ -1051,8 +1084,16 @@ export async function extractEngineerPipeNetwork(
       endpointSourceCounts[geometry.endpointSource] += 1
     }
 
-    const psetValues = psetMap.get(expressId) ?? { lengthSource: null, invertElevationSource: null }
+    const psetValues = psetMap.get(expressId) ?? EMPTY_PSET_VALUES
     const storeyId = elementToStorey.get(expressId) ?? null
+    // Both ends or nothing: a single invert is not a slope (see `resolveEngineerSegmentSlope`).
+    const endInvertElevationsM: EngineerEndInvertElevationsM | null =
+      psetValues.upperEndInvertSource !== null && psetValues.lowerEndInvertSource !== null
+        ? {
+            upperEndM: psetValues.upperEndInvertSource * metersPerSourceUnit,
+            lowerEndM: psetValues.lowerEndInvertSource * metersPerSourceUnit,
+          }
+        : null
 
     return {
       expressId,
@@ -1070,6 +1111,7 @@ export async function extractEngineerPipeNetwork(
         psetValues.invertElevationSource !== null
           ? psetValues.invertElevationSource * metersPerSourceUnit
           : null,
+      endInvertElevationsM,
     }
   })
 
